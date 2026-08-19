@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Connexion | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+</head>
+<body class="login-page">
+
+<div class="login-orb login-orb--1"></div>
+<div class="login-orb login-orb--2"></div>
+
+<main class="login-card">
+    <div class="login-logo">
+        <img src="./assets/fluxym_logo_2018_sansdescriptif_noir.png" alt="Fluxym" onerror="this.style.display='none'">
+        <span class="login-logo-text">Cockpit <span>BDR</span></span>
+    </div>
+
+    <h1>Bonjour 👋</h1>
+    <p class="login-intro">Connectez-vous pour saisir votre journée et suivre vos performances.</p>
+
+    <div class="login-error" id="login-error" role="alert"></div>
+
+    <form class="login-form" id="login-form" autocomplete="on">
+        <div>
+            <label class="sr-only" for="email">Adresse e-mail</label>
+            <input type="email" id="email" name="email" placeholder="prenom.nom@fluxym.com"
+                   autocomplete="username" required>
+        </div>
+        <div>
+            <label class="sr-only" for="password">Mot de passe</label>
+            <input type="password" id="password" name="password" placeholder="Mot de passe"
+                   autocomplete="current-password" required>
+        </div>
+        <button class="btn btn--primary btn--block" type="submit" id="login-submit">Se connecter</button>
+    </form>
+
+    <p class="login-foot">
+        Accès nominatif, créé par l'administrateur.<br>
+        Mot de passe oublié ? Contactez Bruno, la réinitialisation est immédiate.
+    </p>
+</main>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/login.js"></script>
+</body>
+</html>

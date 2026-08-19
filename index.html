@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Saisie du jour | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<div class="loading-veil">Chargement…</div>
+
+<nav id="main-nav"></nav>
+
+<header class="page-hero">
+    <div class="page-container">
+        <span class="hero-badge">Prospection quotidienne</span>
+        <h1>Ma journée en <em>chiffres</em></h1>
+        <p>Chaque action comptée aujourd'hui alimente directement l'analyse de performance.
+           Tout est enregistré au fil de la saisie, il n'y a pas de bouton « valider » à oublier.</p>
+    </div>
+</header>
+
+<main class="page-main page-main--pulled">
+    <div class="page-container">
+
+        <!-- BARRE DE DATE -->
+        <section class="date-bar">
+            <div>
+                <div class="date-bar-label">Jour saisi</div>
+                <div class="date-nav" style="margin-top:6px">
+                    <button class="date-arrow" id="day-prev" type="button" title="Jour précédent" aria-label="Jour précédent">‹</button>
+                    <div class="date-current" id="day-label">…</div>
+                    <button class="date-arrow" id="day-next" type="button" title="Jour suivant" aria-label="Jour suivant">›</button>
+                </div>
+            </div>
+            <label class="sr-only" for="day-picker">Choisir une date</label>
+            <input type="date" id="day-picker">
+            <button class="chip" id="chip-today" type="button">Aujourd'hui</button>
+            <button class="chip" id="chip-yesterday" type="button">Hier</button>
+            <div class="date-status" id="save-status"></div>
+        </section>
+
+        <div id="past-warning"></div>
+
+        <!-- CARTES DE SAISIE -->
+        <div class="cards-grid">
+
+            <!-- CARTE 1 : ENRICHISSEMENT DU CRM -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-icon card-icon--purple">🗂️</div>
+                    <div>
+                        <div class="card-title">Enrichissement du CRM</div>
+                        <div class="card-subtitle">Ce que j'ai construit dans la base</div>
+                    </div>
+                    <div class="card-total"><span data-total="crm">0</span><small>fiches</small></div>
+                </div>
+                <div class="card-body" data-metrics="crm"></div>
+            </section>
+
+            <!-- CARTE 2 : PROSPECTION -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-icon card-icon--cyan">🎯</div>
+                    <div>
+                        <div class="card-title">Prospection</div>
+                        <div class="card-subtitle">Mes actions sortantes du jour</div>
+                    </div>
+                    <div class="card-total"><span data-total="prospection">0</span><small>actions</small></div>
+                </div>
+                <div class="card-body">
+                    <div class="subcard-title">📞 Appels téléphoniques</div>
+                    <div data-metrics="calls"></div>
+                    <div class="subcard-title">✉️ E-mails de prospection</div>
+                    <div data-metrics="emails"></div>
+                </div>
+            </section>
+
+            <!-- CARTE 3 : RÉSULTAT DU JOUR -->
+            <section class="card">
+                <div class="card-header">
+                    <div class="card-icon card-icon--success">⚡</div>
+                    <div>
+                        <div class="card-title">Résultat du jour</div>
+                        <div class="card-subtitle">Calculé automatiquement</div>
+                    </div>
+                    <div class="card-total"><span id="day-score">0</span><small>score</small></div>
+                </div>
+                <div class="card-body">
+                    <div class="metric">
+                        <div class="metric-top">
+                            <div class="metric-label">
+                                <b>Taux d'appels aboutis</b>
+                                <span>Appels aboutis / appels passés</span>
+                            </div>
+                            <div style="font-size:20px;font-weight:900;color:var(--navy)" id="kpi-connect">–</div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-top">
+                            <div class="metric-label">
+                                <b>Taux de conversion en RDV</b>
+                                <span>RDV / appels aboutis</span>
+                            </div>
+                            <div style="font-size:20px;font-weight:900;color:var(--navy)" id="kpi-meeting">–</div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-top">
+                            <div class="metric-label">
+                                <b>Effort par RDV</b>
+                                <span>Appels nécessaires pour 1 RDV</span>
+                            </div>
+                            <div style="font-size:20px;font-weight:900;color:var(--navy)" id="kpi-effort">–</div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-top">
+                            <div class="metric-label">
+                                <b>Comparé à la veille</b>
+                                <span id="kpi-prev-label">Score du jour précédent</span>
+                            </div>
+                            <div id="kpi-prev">–</div>
+                        </div>
+                    </div>
+                    <div class="subcard-title">📝 Note du jour</div>
+                    <textarea class="notes-area" id="day-notes"
+                        placeholder="Contexte utile pour relire ce chiffre plus tard : salon, demi-journée, campagne sur un secteur…"></textarea>
+                </div>
+            </section>
+        </div>
+
+        <!-- OBJECTIFS -->
+        <details class="panel" id="targets-panel">
+            <summary>🎚️ Mes objectifs journaliers</summary>
+            <div class="panel-body">
+                <p style="font-size:13.5px;color:var(--gray-500);margin-top:14px">
+                    Ces valeurs servent de référence aux jauges de progression. Elles s'appliquent à tous les jours,
+                    passés comme futurs.
+                </p>
+                <div class="targets-grid" id="targets-grid"></div>
+                <button class="btn btn--primary" id="targets-save" type="button" style="margin-top:20px">
+                    Enregistrer mes objectifs
+                </button>
+            </div>
+        </details>
+
+    </div>
+</main>
+
+<footer class="app-footer">
+    Cockpit BDR · Fluxym — données hébergées sur Supabase (UE), accès restreint par Row Level Security.
+</footer>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/saisie.js"></script>
+</body>
+</html>
