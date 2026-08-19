@@ -1667,3 +1667,170 @@ details.chart-note b { color: var(--gray-900); }
     .chart-card { padding: 18px 16px 14px; }
     .chart-legend { gap: 12px; }
 }
+
+/* ==========================================================================
+   INFO-BULLES (js/tooltip.js)
+
+   Un seul élément, réutilisé par tous les graphiques. `position: fixed` +
+   déplacement par `transform` : aucun recalcul de mise en page pendant que la
+   souris bouge, donc pas de latence. Aucun délai d'apparition, à l'inverse du
+   <title> natif du SVG qui attendait environ une seconde.
+   z-index au-dessus de la fenêtre d'agrandissement (3000) pour rester visible
+   sur un graphique agrandi.
+   ========================================================================== */
+
+.tip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 5000;
+    min-width: 232px;
+    max-width: 340px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 14px;
+    box-shadow: 0 20px 44px -14px rgba(11, 32, 70, 0.38), 0 4px 14px -6px rgba(11, 32, 70, 0.2);
+    overflow: hidden;
+    font-size: 12.5px;
+    line-height: 1.35;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.07s linear;
+    will-change: transform;
+    font-variant-numeric: tabular-nums;
+}
+
+.tip--on { opacity: 1; }
+
+.tip-head {
+    background: var(--navy);
+    color: var(--white);
+    padding: 9px 13px 8px;
+}
+
+.tip-title { font-size: 13.5px; font-weight: 800; letter-spacing: -0.01em; }
+.tip-meta { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.66); margin-top: 2px; }
+
+/* Chaque section porte un liseré de la couleur de sa période : la bulle répète
+   le code couleur du graphique, on n'a pas à se souvenir que bleu = analysée. */
+.tip-sec {
+    padding: 8px 13px 9px;
+    border-top: 1px solid var(--gray-100);
+    border-left: 3px solid transparent;
+}
+.tip-sec:first-of-type { border-top: none; }
+.tip-sec--a { border-left-color: var(--a2); background: rgba(0, 167, 225, 0.045); }
+.tip-sec--b { border-left-color: var(--b2); background: rgba(139, 92, 246, 0.045); }
+
+.tip-sec-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--gray-500);
+    margin-bottom: 6px;
+}
+
+.tip-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 5px;
+    color: var(--white);
+    font-size: 9.5px;
+    font-weight: 900;
+    flex-shrink: 0;
+}
+.tip-badge--a { background: var(--a2); }
+.tip-badge--b { background: var(--b2); }
+
+.tip-row {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 2px 0;
+}
+.tip-row--em .tip-val { font-size: 13.5px; font-weight: 900; color: var(--navy); }
+.tip-row--muted .tip-label, .tip-row--muted .tip-val { color: var(--gray-500); font-weight: 600; }
+
+.tip-label {
+    flex: 1;
+    min-width: 0;
+    color: var(--gray-600);
+    font-weight: 700;
+}
+.tip-label em {
+    display: block;
+    font-style: normal;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--gray-400);
+}
+.tip-val {
+    font-weight: 800;
+    color: var(--gray-900);
+    white-space: nowrap;
+}
+
+.tip-dot, .tip-line, .tip-dash, .tip-nodot {
+    flex-shrink: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 3px;
+    margin-top: 3px;
+}
+.tip-line { width: 12px; height: 3px; border-radius: 2px; margin-top: 6px; }
+.tip-dash {
+    width: 12px; height: 0; border-radius: 0; margin-top: 7px;
+    border-top: 3px dashed currentColor; background: none !important;
+}
+.tip-nodot { background: none; }
+
+.tip-deltas {
+    padding: 8px 13px;
+    border-top: 1px dashed var(--gray-200);
+    background: var(--gray-50);
+    display: grid;
+    gap: 4px;
+}
+.tip-delta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+.tip-delta > span:first-child {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gray-500);
+}
+.tip-delta .delta { font-size: 11px; padding: 2px 7px; }
+
+.tip-foot {
+    padding: 7px 13px 9px;
+    border-top: 1px solid var(--gray-100);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-500);
+}
+.tip-foot b { color: var(--navy); font-weight: 800; }
+
+/* Zones de survol : le curseur signale que la colonne entière est cliquable. */
+.hover-layer rect { cursor: crosshair; }
+.funnel-step--hoverable { cursor: crosshair; border-radius: 8px; }
+.funnel-step--hoverable:hover { background: var(--gray-50); }
+
+@media (max-width: 640px) {
+    .tip { max-width: min(320px, calc(100vw - 24px)); }
+}
+
+.chart-note-hover {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--gray-200);
+}

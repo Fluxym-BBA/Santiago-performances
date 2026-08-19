@@ -32,6 +32,7 @@ Santiago-performances/
 │   ├── config.js            ⚠️ LES 2 VALEURS À RENSEIGNER
 │   ├── api.js               client Supabase, auth, requêtes, dates, métriques
 │   ├── ui.js                helpers d'affichage, toasts, graphiques SVG
+│   ├── tooltip.js           moteur d'info-bulles (survol des graphiques)
 │   ├── nav.js               barre de navigation injectée
 │   ├── login.js             écran de connexion
 │   ├── saisie.js            logique de la page de saisie
@@ -144,6 +145,46 @@ Chaque carte porte **ses propres dates**, réglables directement dans la grille
 Dès qu'une carte quitte la période globale, elle est bordée de violet et sa
 référence devient la période précédente équivalente, ce qui est écrit dans sa
 légende. Un bouton ramène à la période globale.
+
+## Le survol des graphiques
+
+Règle appliquée partout : **on ne survole pas une série, on survole un moment.**
+
+Concrètement, une bande invisible couvre toute la hauteur du graphique au-dessus
+de chaque position en abscisse. Passer la souris n'importe où dans la colonne
+d'un jour, à n'importe quelle hauteur, suffit : pas besoin de viser un point de
+trois pixels. Une courbe de tendance ou une ligne de référence répond donc au
+même endroit que la courbe principale.
+
+Ce que contient chaque info-bulle, systématiquement :
+
+1. le **moment pointé**, écrit en clair (date longue pour un jour, plage de dates
+   pour une semaine ou un mois) ;
+2. les valeurs sur la **période analysée**, liseré bleu, badge A ;
+3. les **mêmes valeurs sur la période de référence**, liseré violet, badge B ;
+4. les **écarts**, en valeur absolue et en pourcentage, ou en points de
+   pourcentage quand il s'agit de taux ;
+5. une phrase d'interprétation quand elle apporte quelque chose (poste dominant
+   du score, avance ou retard sur la référence, volume trop faible pour que le
+   taux soit fiable).
+
+Le détail par graphique est rappelé dans la note dépliable de chaque carte,
+section « Au survol ».
+
+Deux conséquences utiles :
+
+- sur les paires de panneaux (activité téléphonique, e-mails et CRM), survoler
+  une barre du panneau du haut affiche **déjà** les valeurs du panneau du bas.
+  Il n'y a plus à descendre la souris pour comparer deux chiffres ;
+- sur le score, la bulle donne la **décomposition en points** action par action,
+  donc pourquoi la journée vaut ce qu'elle vaut, et pas seulement combien.
+
+Côté technique, `js/tooltip.js` crée **un seul** élément HTML pour toute la page
+et le réutilise : le contenu n'est réécrit que lorsque le moment pointé change,
+et le déplacement passe par `transform`, qui ne déclenche pas de recalcul de mise
+en page. L'affichage est immédiat, sans délai d'apparition. Les `<title>` natifs
+du SVG, que le navigateur affichait après environ une seconde dans son propre
+style et sur une seule ligne, ont tous été supprimés.
 
 ## Code couleur, valable dans toute l'application
 

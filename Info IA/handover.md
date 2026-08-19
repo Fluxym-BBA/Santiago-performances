@@ -22,7 +22,8 @@ périmètre et doit être validée explicitement par Bruno BARTOLI.
 Deux exceptions assumées, déjà en place :
 - `supabase-js` chargé en ESM depuis `cdn.jsdelivr.net` (indispensable pour
   parler à la base) ;
-- rien d'autre. Les graphiques sont du SVG écrit à la main dans `js/ui.js`.
+- rien d'autre. Les graphiques sont du SVG écrit à la main dans `js/ui.js`, et
+  leurs info-bulles du HTML piloté par `js/tooltip.js`.
 
 ## 3. Dépôt et hébergement
 
@@ -136,6 +137,67 @@ Une seule requête réseau par rafraîchissement : `refresh()` charge la plage q
 couvre A, B et 13 mois d'historique (nécessaire au record absolu, à la série en
 cours et à la recherche de la meilleure période). Tout le reste est calculé en
 mémoire. Ne pas ajouter de requête par graphique.
+
+## 6 bis. Les info-bulles (v4)
+
+Le `<title>` natif du SVG a été **entièrement retiré**. Ne pas le réintroduire :
+le navigateur l'affiche après environ une seconde, dans le style du système, sur
+une seule ligne, et il ne peut porter qu'une seule série. C'était le dernier point
+de friction signalé à l'usage.
+
+Le remplacement tient en deux morceaux.
+
+`js/tooltip.js` — le moteur, sans connaissance du métier :
+
+- un **seul** élément `.tip` pour toute la page, créé au premier affichage ;
+- `showTip(model, event, key)` : le HTML n'est réécrit que si `key` change, donc
+  déplacer la souris dans une même colonne ne coûte rien ;
+- position en `position: fixed` déplacée par `transform`, calculée dans un
+  `requestAnimationFrame`, avec bascule à gauche et recadrage aux bords ;
+- `tipHtml(model)` rend un modèle déclaratif :
+  `{ title, meta, sections: [{ head, accent: 'a'|'b', badge, rows: [{ color, shape, label, sub, value, em, muted }] }], deltas, foot }`.
+  Une section sans ligne est ignorée, tout le texte est échappé ;
+- fermetures de sécurité : défilement (en phase de **capture**, pour attraper le
+  défilement interne de la fenêtre d'agrandissement), perte de focus, `Échap`,
+  pression tactile hors graphique, nouveau rendu d'un graphique (`baseFrame`
+  appelle `hideTip`).
+
+`js/ui.js` — `installHover(f, { count, bandAt, build, onEnter, onLeave })` :
+
+- crée un `<rect>` transparent par index, **en dernier** dans le SVG pour être
+  au-dessus du tracé. Ce sont des éléments SVG, donc ils suivent la mise à
+  l'échelle du `viewBox` : aucune conversion de coordonnées à écrire ;
+- les bandes se chevauchent d'une demi-largeur et la dernière déclarée gagne,
+  ce qui donne exactement le point le plus proche du curseur ;
+- `onEnter(i)` déplace les décorations créées une fois pour toutes (trait de
+  repère vertical, une pastille par série, un losange par ligne de référence,
+  surbrillance du groupe de barres). Rien n'est créé ni détruit au survol.
+
+Découpage des zones selon le graphique :
+
+| Graphique | Zone de survol |
+|---|---|
+| `lineChart` | une colonne pleine hauteur par point |
+| `barChart` | le groupe de barres entier, pas la barre |
+| `compareChart` | la ligne entière, sur toute la largeur |
+| `funnel` | l'étape (HTML, pas SVG) |
+
+Les modèles sont construits **dans le registre `CHARTS` de `dashboard.js`**, seul
+endroit qui connaît les deux périodes à la fois. C'est ce qui permet à la bulle du
+panneau A de contenir les valeurs de B. Pour `renderPanelPair`, un unique `tip`
+est passé aux deux appels de `barChart`.
+
+Helpers d'écart, dans `dashboard.js` :
+
+- `dl(a, b, dec)` : flèche, valeur absolue, pourcentage. `dec = true` pour les
+  moyennes, sinon un écart de 0,2 s'afficherait « +0 » ;
+- `ppl(a, b)` : écart entre deux taux, en **points** de pourcentage. Ne jamais
+  faire un pourcentage d'un pourcentage ;
+- `bucketTitle(b, gran)` : date longue pour un jour, `label · plage` sinon.
+
+Si un graphique est ajouté au registre, lui donner un `tip` et un `hover` (la
+phrase « Au survol » de la note dépliable). Sans `tip`, aucune bande n'est créée :
+pas de surcoût, mais pas d'info-bulle non plus.
 
 ## 7. Pièges connus
 

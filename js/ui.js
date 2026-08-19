@@ -3,6 +3,8 @@
    Aucune librairie de charts : tout est du SVG généré ici.
    ========================================================================== */
 
+import { showTip, moveTip, hideTip } from './tooltip.js';
+
 /* --- Helpers courts ------------------------------------------------------- */
 
 export const $ = (sel, root = document) => root.querySelector(sel);
@@ -102,6 +104,7 @@ export function legendHtml(items) {
    ========================================================================== */
 
 const SVGNS = 'http://www.w3.org/2000/svg';
+let uidSeq = 0;
 
 function svgEl(name, attrs = {}) {
     const n = document.createElementNS(SVGNS, name);
@@ -118,17 +121,22 @@ function niceMax(v) {
 }
 
 function emptyState(container, message) {
+    hideTip();
     container.innerHTML = `<div class="chart-empty">${escapeHtml(message)}</div>`;
 }
 
 function baseFrame(container, { width = 760, height = 260, pad }) {
+    // Un nouveau rendu invalide la bulle en cours : sans cela, changer de période
+    // pendant que la souris est sur un graphique laisserait affichées les valeurs
+    // de l'ancienne période.
+    hideTip();
     container.innerHTML = '';
     const svg = svgEl('svg', {
         class: 'chart-svg', viewBox: `0 0 ${width} ${height}`,
         role: 'img', preserveAspectRatio: 'xMidYMid meet'
     });
     container.appendChild(svg);
-    return { svg, width, height, pad, plotW: width - pad.l - pad.r, plotH: height - pad.t - pad.b };
+    return { svg, width, height, pad, uid: `c${++uidSeq}`, plotW: width - pad.l - pad.r, plotH: height - pad.t - pad.b };
 }
 
 function drawGrid(f, max, ticks = 4) {
@@ -162,11 +170,64 @@ function drawXLabels(f, labels) {
     });
 }
 
+/* --------------------------------------------------------------------------
+   Couche de survol
+
+   Le principe qui rend la lecture immédiate : on ne survole pas un point, on
+   survole une COLONNE. Une bande invisible couvre toute la hauteur du graphique
+   au-dessus de chaque position en abscisse ; il suffit donc de passer la souris
+   quelque part au-dessus d'un jour, à n'importe quelle hauteur, pour obtenir
+   l'ensemble des valeurs de ce jour. Viser un point de 3 pixels n'est plus
+   nécessaire, et une courbe de tendance ou une ligne de référence répond au
+   même endroit que la courbe principale.
+
+   bandAt(i) → { x, y, width, height } dans le repère du SVG. Les bandes étant
+   des éléments SVG, elles suivent automatiquement la mise à l'échelle du
+   viewBox : aucune conversion de coordonnées à faire.
+   -------------------------------------------------------------------------- */
+
+function installHover(f, { count, bandAt, build, onEnter = null, onLeave = null, keyOf = null }) {
+    if (!build || !count) return;
+    const layer = svgEl('g', { class: 'hover-layer' });
+
+    let active = -1;
+    const enter = (i, ev) => {
+        if (i !== active) {
+            active = i;
+            if (onEnter) onEnter(i);
+        }
+        showTip(build(i), ev, keyOf ? keyOf(i) : `${f.uid}:${i}`);
+    };
+    const leave = () => {
+        active = -1;
+        hideTip();
+        if (onLeave) onLeave();
+    };
+
+    for (let i = 0; i < count; i++) {
+        const b = bandAt(i);
+        const band = svgEl('rect', {
+            x: b.x, y: b.y, width: Math.max(1, b.width), height: Math.max(1, b.height),
+            fill: 'transparent', 'pointer-events': 'all'
+        });
+        band.addEventListener('pointerenter', e => enter(i, e));
+        band.addEventListener('pointermove', e => { if (active !== i) enter(i, e); else moveTip(e); });
+        band.addEventListener('pointerdown', e => enter(i, e));   // tactile
+        layer.appendChild(band);
+    }
+
+    f.svg.addEventListener('pointerleave', leave);
+    f.svg.addEventListener('pointercancel', leave);
+    f.svg.appendChild(layer);
+    return layer;
+}
+
 /**
  * Courbes multi-séries.
  * series : [{ name, color, values:[n], dashed:bool, area:bool }]
+ * tip    : (i) => modèle d'info-bulle (voir tooltip.js). Facultatif.
  */
-export function lineChart(container, { labels, series, height = 260, yMax = null, refLines = [] }) {
+export function lineChart(container, { labels, series, height = 260, yMax = null, refLines = [], tip = null }) {
     if (!labels.length) return emptyState(container, 'Aucune donnée sur la période.');
     const pad = { l: 46, r: refLines.length ? 58 : 16, t: 16, b: 30 };
     const f = baseFrame(container, { height, pad });
@@ -192,9 +253,6 @@ export function lineChart(container, { labels, series, height = 260, yMax = null
             fill: r.color, 'font-size': 11, 'font-weight': 800
         });
         t.textContent = r.short ?? fmtInt(r.value);
-        const ti = svgEl('title');
-        ti.textContent = r.label;
-        t.appendChild(ti);
         f.svg.appendChild(t);
     });
 
@@ -231,27 +289,89 @@ export function lineChart(container, { labels, series, height = 260, yMax = null
 
         if (!s.dashed) {
             const r = labels.length > 40 ? 2 : labels.length > 20 ? 2.8 : 3.6;
-            pts.forEach((p, i) => {
+            pts.forEach(p => {
                 if (!p) return;
-                const c = svgEl('circle', {
+                f.svg.appendChild(svgEl('circle', {
                     cx: p[0], cy: p[1], r, fill: '#fff', stroke: s.color, 'stroke-width': 2
-                });
-                const title = svgEl('title');
-                title.textContent = `${labels[i]} · ${s.name} : ${s.fmt ? s.fmt(s.values[i]) : fmtInt(s.values[i])}`;
-                c.appendChild(title);
-                f.svg.appendChild(c);
+                }));
             });
         }
     });
 
     drawXLabels(f, labels);
+
+    /* --- Survol : trait de repère vertical + pastille sur chaque série ----- */
+    if (tip) {
+        const guide = svgEl('line', {
+            y1: f.pad.t, y2: f.pad.t + f.plotH, stroke: '#0B2046',
+            'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0
+        });
+        f.svg.appendChild(guide);
+
+        // Une pastille par série (courbes) et un losange par ligne de référence :
+        // l'oeil voit tout de suite quelles valeurs l'info-bulle est en train de lire.
+        const dots = series.map(s => {
+            const c = svgEl('circle', { r: 5, fill: s.color, stroke: '#fff', 'stroke-width': 2.5, opacity: 0 });
+            f.svg.appendChild(c);
+            return c;
+        });
+        const refDots = refLines.map(r => {
+            const c = svgEl('rect', {
+                width: 8, height: 8, fill: r.color, stroke: '#fff', 'stroke-width': 2,
+                opacity: 0, transform: 'rotate(45)'
+            });
+            f.svg.appendChild(c);
+            return c;
+        });
+
+        const slot = labels.length > 1 ? f.plotW / (labels.length - 1) : f.plotW;
+        installHover(f, {
+            count: labels.length,
+            // La bande est centrée sur le point et bornée à la zone de tracé.
+            // Les bandes voisines se chevauchent d'une demi-largeur ; la dernière
+            // déclarée gagne, ce qui donne exactement le point le plus proche.
+            bandAt: i => {
+                const x0 = Math.max(f.pad.l, xAt(i) - slot / 2);
+                const x1 = Math.min(f.pad.l + f.plotW, xAt(i) + slot / 2);
+                return { x: x0, y: f.pad.t, width: Math.max(1, x1 - x0), height: f.plotH };
+            },
+            build: tip,
+            onEnter: i => {
+                const x = xAt(i);
+                guide.setAttribute('x1', x);
+                guide.setAttribute('x2', x);
+                guide.setAttribute('opacity', 0.35);
+                series.forEach((s, k) => {
+                    const v = s.values[i];
+                    if (v === null || v === undefined) { dots[k].setAttribute('opacity', 0); return; }
+                    dots[k].setAttribute('cx', x);
+                    dots[k].setAttribute('cy', yAt(v));
+                    dots[k].setAttribute('opacity', 1);
+                });
+                refLines.forEach((r, k) => {
+                    // rotate(45) tourne autour de l'origine : on positionne donc
+                    // le losange via son propre repère plutôt qu'avec x / y.
+                    refDots[k].setAttribute('transform',
+                        `translate(${x} ${yAt(r.value)}) rotate(45) translate(-4 -4)`);
+                    refDots[k].setAttribute('opacity', 1);
+                });
+            },
+            onLeave: () => {
+                guide.setAttribute('opacity', 0);
+                dots.forEach(d => d.setAttribute('opacity', 0));
+                refDots.forEach(d => d.setAttribute('opacity', 0));
+            }
+        });
+    }
 }
 
 /**
  * Barres groupées.
  * series : [{ name, color, values:[n] }]
+ * tip    : (i) => modèle d'info-bulle. Le survol porte sur le GROUPE entier,
+ *          donc survoler n'importe quelle barre donne les trois séries.
  */
-export function barChart(container, { labels, series, height = 260, yMax = null }) {
+export function barChart(container, { labels, series, height = 260, yMax = null, tip = null }) {
     if (!labels.length) return emptyState(container, 'Aucune donnée sur la période.');
     const pad = { l: 46, r: 16, t: 16, b: 30 };
     const f = baseFrame(container, { height, pad });
@@ -264,31 +384,47 @@ export function barChart(container, { labels, series, height = 260, yMax = null 
     const gap = Math.min(10, slot * 0.22);
     const bw = Math.max(2, (slot - gap) / series.length);
 
+    // Surbrillance du groupe survolé, créée avant les barres pour rester derrière.
+    const hl = svgEl('rect', {
+        y: f.pad.t, height: f.plotH, width: slot, fill: '#0B2046', opacity: 0, rx: 4
+    });
+    if (tip) f.svg.appendChild(hl);
+
     labels.forEach((lab, i) => {
         series.forEach((s, j) => {
             const v = Number(s.values[i]) || 0;
             const h = (v / max) * f.plotH;
             const x = f.pad.l + slot * i + gap / 2 + bw * j;
-            const r = svgEl('rect', {
+            f.svg.appendChild(svgEl('rect', {
                 x, y: f.pad.t + f.plotH - h, width: Math.max(1, bw - 1.5),
                 height: Math.max(v > 0 ? 2 : 0, h), fill: s.color,
                 rx: Math.min(3, bw / 3), opacity: 0.92
-            });
-            const title = svgEl('title');
-            title.textContent = `${lab} · ${s.name} : ${fmtInt(v)}`;
-            r.appendChild(title);
-            f.svg.appendChild(r);
+            }));
         });
     });
 
     drawXLabels(f, labels);
+
+    if (tip) {
+        installHover(f, {
+            count: labels.length,
+            bandAt: i => ({ x: f.pad.l + slot * i, y: f.pad.t, width: slot, height: f.plotH }),
+            build: tip,
+            onEnter: i => {
+                hl.setAttribute('x', f.pad.l + slot * i);
+                hl.setAttribute('opacity', 0.05);
+            },
+            onLeave: () => hl.setAttribute('opacity', 0)
+        });
+    }
 }
 
 /**
- * Barres horizontales comparant deux jours métrique par métrique.
- * rows : [{ label, a, b, color }]
+ * Barres horizontales comparant deux périodes métrique par métrique.
+ * rows : [{ label, a, b, colorA, colorB }]
+ * tip  : (i) => modèle d'info-bulle. Le survol porte sur la LIGNE entière.
  */
-export function compareChart(container, { rows, labelA, labelB, height, fmt = fmtInt }) {
+export function compareChart(container, { rows, labelA, labelB, height, fmt = fmtInt, tip = null }) {
     if (!rows.length) return emptyState(container, 'Aucune donnée à comparer.');
     const rowH = 54;
     const pad = { l: 138, r: 96, t: 8, b: 10 };
@@ -296,6 +432,11 @@ export function compareChart(container, { rows, labelA, labelB, height, fmt = fm
     const f = baseFrame(container, { height: H, pad });
 
     const max = niceMax(Math.max(1, ...rows.flatMap(r => [Number(r.a) || 0, Number(r.b) || 0])));
+
+    const hl = svgEl('rect', {
+        x: 4, width: f.width - 8, height: rowH - 4, fill: '#0B2046', opacity: 0, rx: 8
+    });
+    if (tip) f.svg.appendChild(hl);
 
     rows.forEach((r, i) => {
         const top = f.pad.t + i * rowH;
@@ -307,7 +448,7 @@ export function compareChart(container, { rows, labelA, labelB, height, fmt = fm
         lab.textContent = r.label;
         f.svg.appendChild(lab);
 
-        [['a', 0, r.colorA, labelA], ['b', 1, r.colorB, labelB]].forEach(([key, k, col, per]) => {
+        [['a', 0, r.colorA], ['b', 1, r.colorB]].forEach(([key, k, col]) => {
             const v = Number(r[key]) || 0;
             const w = (v / max) * f.plotW;
             const y = top + 8 + k * 19;
@@ -315,13 +456,9 @@ export function compareChart(container, { rows, labelA, labelB, height, fmt = fm
             f.svg.appendChild(svgEl('rect', {
                 x: f.pad.l, y, width: f.plotW, height: 15, rx: 7.5, fill: '#f3f4f6'
             }));
-            const bar = svgEl('rect', {
+            f.svg.appendChild(svgEl('rect', {
                 x: f.pad.l, y, width: Math.max(v > 0 ? 4 : 0, w), height: 15, rx: 7.5, fill: col
-            });
-            const title = svgEl('title');
-            title.textContent = `${r.label} · ${per} : ${fmt(v)}`;
-            bar.appendChild(title);
-            f.svg.appendChild(bar);
+            }));
 
             // Valeur écrite en bout de barre, dans la couleur de sa période :
             // plus besoin de deviner quelle barre est laquelle.
@@ -333,13 +470,27 @@ export function compareChart(container, { rows, labelA, labelB, height, fmt = fm
             f.svg.appendChild(val);
         });
     });
+
+    if (tip) {
+        installHover(f, {
+            count: rows.length,
+            bandAt: i => ({ x: 0, y: f.pad.t + i * rowH, width: f.width, height: rowH }),
+            build: tip,
+            onEnter: i => {
+                hl.setAttribute('y', f.pad.t + i * rowH + 2);
+                hl.setAttribute('opacity', 0.045);
+            },
+            onLeave: () => hl.setAttribute('opacity', 0)
+        });
+    }
 }
 
 /**
  * Entonnoir HTML (pas SVG) : appels → aboutis → RDV.
  * steps : [{ label, value, color }]
+ * tip   : (i) => modèle d'info-bulle sur l'étape.
  */
-export function funnel(container, steps) {
+export function funnel(container, steps, tip = null) {
     const base = Math.max(1, Number(steps[0]?.value) || 0);
     container.innerHTML = steps.map((s, i) => {
         const v = Number(s.value) || 0;
@@ -348,7 +499,7 @@ export function funnel(container, steps) {
         const rate = i === 0 ? '100 %'
             : (prev > 0 ? `${fmtDec((v / prev) * 100)} %` : '–');
         return `
-        <div class="funnel-step">
+        <div class="funnel-step" data-i="${i}">
             <div class="funnel-label">${escapeHtml(s.label)}</div>
             <div class="funnel-bar-wrap">
                 <div class="funnel-bar" style="width:${Math.max(pctBase, v > 0 ? 8 : 0)}%;background:${s.color}">
@@ -358,6 +509,15 @@ export function funnel(container, steps) {
             <div class="funnel-rate">${rate}</div>
         </div>`;
     }).join('');
+
+    if (!tip) return;
+    container.querySelectorAll('.funnel-step').forEach(stepEl => {
+        const i = Number(stepEl.dataset.i);
+        stepEl.classList.add('funnel-step--hoverable');
+        stepEl.addEventListener('pointerenter', e => showTip(tip(i), e, `${container.dataset.f || 'f'}:${i}`));
+        stepEl.addEventListener('pointermove', moveTip);
+        stepEl.addEventListener('pointerleave', hideTip);
+    });
 }
 
 /* --- Voile de chargement -------------------------------------------------- */
