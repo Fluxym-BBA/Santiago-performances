@@ -7,8 +7,8 @@
    ========================================================================== */
 
 window.APP_CONFIG = {
-    SUPABASE_URL: 'https://VOTRE-REF-PROJET.supabase.co',
-    SUPABASE_ANON_KEY: 'COLLER_ICI_LA_CLE_ANON_PUBLIC',
+    SUPABASE_URL: 'https://koivxqbdpmhgrjkpaqph.supabase.co',
+    SUPABASE_ANON_KEY: 'sb_publishable_DoZhWxPzWuMuZ2K-NTgA5g_nXNu-dMN',
 
     // Titre affiché dans la barre de navigation
     APP_NAME: 'Cockpit BDR',
