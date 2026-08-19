@@ -20,142 +20,128 @@
 <header class="page-hero">
     <div class="page-container">
         <span class="hero-badge">Analyse de performance</span>
-        <h1>Où j'en suis, <em>vraiment</em></h1>
-        <p>Comparez n'importe quelle journée à la veille, à votre record ou à votre moyenne,
-           et suivez les tendances qui font les rendez-vous.</p>
+        <h1>Comparer, pour <em>décider</em></h1>
+        <p>Choisissez librement deux périodes, d'une seule journée à plusieurs mois, et mesurez
+           l'écart. Chaque graphique peut être agrandi et exploré sur ses propres dates.</p>
     </div>
 </header>
 
 <main class="page-main page-main--pulled">
     <div class="page-container">
 
-        <!-- BARRE DE CONTRÔLE -->
-        <section class="date-bar">
-            <div>
-                <div class="date-bar-label">Jour analysé</div>
-                <div class="date-nav" style="margin-top:6px">
-                    <button class="date-arrow" id="day-prev" type="button" aria-label="Jour précédent">‹</button>
-                    <input type="date" id="day-picker">
-                    <button class="date-arrow" id="day-next" type="button" aria-label="Jour suivant">›</button>
-                    <button class="chip" id="chip-today" type="button">Aujourd'hui</button>
+        <!-- ==============================================================
+             PILOTAGE
+             ============================================================== -->
+        <section class="control-panel">
+
+            <!-- Raccourcis -->
+            <div class="preset-row" id="preset-row">
+                <span class="date-bar-label">Comparaisons courantes</span>
+            </div>
+
+            <!-- Trois zones -->
+            <div class="control-zones">
+
+                <!-- ZONE A -->
+                <div class="control-zone control-zone--a">
+                    <div class="zone-head">
+                        <span class="zone-dot zone-dot--a"></span>
+                        <span class="zone-title">Période analysée</span>
+                        <span class="zone-hint" id="hint-a">…</span>
+                    </div>
+                    <div class="date-range">
+                        <label class="sr-only" for="a-from">Début de la période analysée</label>
+                        <input type="date" id="a-from">
+                        <span>→</span>
+                        <label class="sr-only" for="a-to">Fin de la période analysée</label>
+                        <input type="date" id="a-to">
+                    </div>
+                    <div class="zone-shortcuts">
+                        <button class="chip chip--sm" data-a="today" type="button">Aujourd'hui</button>
+                        <button class="chip chip--sm" data-a="7" type="button">7 j</button>
+                        <button class="chip chip--sm" data-a="30" type="button">30 j</button>
+                        <button class="chip chip--sm" data-a="week" type="button">Cette semaine</button>
+                        <button class="chip chip--sm" data-a="month" type="button">Ce mois</button>
+                        <button class="chip chip--sm" data-a="quarter" type="button">Ce trimestre</button>
+                    </div>
+                </div>
+
+                <!-- ZONE B -->
+                <div class="control-zone control-zone--b">
+                    <div class="zone-head">
+                        <span class="zone-dot zone-dot--b"></span>
+                        <span class="zone-title">Comparée à</span>
+                        <span class="zone-hint" id="hint-b">…</span>
+                    </div>
+                    <div class="date-range">
+                        <label class="sr-only" for="b-from">Début de la période de référence</label>
+                        <input type="date" id="b-from">
+                        <span>→</span>
+                        <label class="sr-only" for="b-to">Fin de la période de référence</label>
+                        <input type="date" id="b-to">
+                    </div>
+                    <div class="zone-shortcuts">
+                        <button class="chip chip--sm" data-b="prev" type="button">⟲ Période précédente</button>
+                        <button class="chip chip--sm" data-b="lastyear" type="button">📅 An dernier</button>
+                        <button class="chip chip--sm" data-b="best" type="button">🏆 Ma meilleure</button>
+                    </div>
+                </div>
+
+                <!-- ZONE C -->
+                <div class="control-zone control-zone--c">
+                    <div class="zone-head">
+                        <span class="zone-dot zone-dot--c"></span>
+                        <span class="zone-title">Lecture des données</span>
+                    </div>
+                    <div class="seg-label">Regrouper les graphiques par</div>
+                    <div class="seg" id="seg-gran">
+                        <button data-gran="auto" type="button">Auto</button>
+                        <button data-gran="day" type="button">Jour</button>
+                        <button data-gran="week" type="button">Semaine</button>
+                        <button data-gran="month" type="button">Mois</button>
+                    </div>
+                    <div class="seg-label">Comparer les périodes en</div>
+                    <div class="seg" id="seg-mode">
+                        <button data-mode="total" type="button">Cumul</button>
+                        <button data-mode="avg" type="button">Moyenne / jour actif</button>
+                    </div>
                 </div>
             </div>
-            <div>
-                <div class="date-bar-label">Comparé à</div>
-                <div class="date-nav" style="margin-top:6px">
-                    <button class="chip" data-ref="yesterday" type="button">La veille</button>
-                    <button class="chip" data-ref="best" type="button">🏆 Mon record</button>
-                    <button class="chip" data-ref="avg" type="button">Ma moyenne</button>
-                    <input type="date" id="ref-picker" title="Comparer à une date précise">
-                </div>
-            </div>
-            <div>
-                <div class="date-bar-label">Période des graphiques</div>
-                <div class="date-nav" style="margin-top:6px">
-                    <button class="chip" data-period="7" type="button">7 j</button>
-                    <button class="chip" data-period="30" type="button">30 j</button>
-                    <button class="chip" data-period="90" type="button">90 j</button>
-                </div>
-            </div>
-            <div class="date-status" id="load-status"></div>
+
+            <!-- Synthèse -->
+            <div class="control-summary" id="control-summary"></div>
         </section>
 
         <!-- KPI -->
         <div class="kpi-grid" id="kpi-grid"></div>
 
-        <!-- COMPARAISON -->
+        <!-- GRAPHIQUES -->
         <div class="section-head">
             <div>
-                <h2>Comparaison détaillée</h2>
-                <p id="compare-sub">…</p>
+                <h2>Graphiques</h2>
+                <p>Chaque carte peut être agrandie avec le bouton ⛶, et explorée sur ses propres dates
+                   sans toucher au reste de la page.</p>
             </div>
         </div>
-        <div class="charts-grid">
-            <div class="chart-card chart-card--wide">
-                <div class="chart-title">📊 Action par action</div>
-                <div class="chart-hint" id="compare-hint">…</div>
-                <div id="chart-compare"></div>
-            </div>
-
-            <div class="chart-card">
-                <div class="chart-title">🔻 Entonnoir du jour analysé</div>
-                <div class="chart-hint">De l'appel passé au rendez-vous obtenu. Le pourcentage indique la conversion depuis l'étape précédente.</div>
-                <div class="funnel" id="funnel-day"></div>
-                <div class="chart-title" style="margin-top:26px">🔻 Entonnoir de la période</div>
-                <div class="chart-hint" id="funnel-period-hint">Cumul sur la période, plus fiable statistiquement qu'une seule journée.</div>
-                <div class="funnel" id="funnel-period"></div>
-            </div>
-
-            <div class="chart-card">
-                <div class="chart-title">🏅 Records et régularité</div>
-                <div class="chart-hint">Sur l'ensemble de l'historique disponible pour la période choisie.</div>
-                <div id="records"></div>
-            </div>
-        </div>
-
-        <!-- TENDANCES -->
-        <div class="section-head">
-            <div>
-                <h2>Tendances</h2>
-                <p id="trend-sub">…</p>
-            </div>
-        </div>
-        <div class="charts-grid">
-            <div class="chart-card chart-card--wide">
-                <div class="chart-title">⚡ Score de productivité</div>
-                <div class="chart-hint">La courbe pleine est le score du jour, la courbe pointillée sa moyenne mobile sur 7 jours (la tendance de fond).</div>
-                <div class="chart-legend">
-                    <span class="legend-item"><span class="legend-dot" style="background:#00A7E1"></span>Score du jour</span>
-                    <span class="legend-item"><span class="legend-dot" style="background:#6366f1"></span>Moyenne 7 jours</span>
-                </div>
-                <div id="chart-score"></div>
-            </div>
-
-            <div class="chart-card">
-                <div class="chart-title">📞 Activité téléphonique</div>
-                <div class="chart-legend" id="legend-calls"></div>
-                <div id="chart-calls"></div>
-            </div>
-
-            <div class="chart-card">
-                <div class="chart-title">✉️ E-mails et enrichissement CRM</div>
-                <div class="chart-legend" id="legend-other"></div>
-                <div id="chart-other"></div>
-            </div>
-
-            <div class="chart-card chart-card--wide">
-                <div class="chart-title">🎯 Taux de conversion</div>
-                <div class="chart-hint">Un volume d'appels en hausse avec des taux en baisse signale un problème de ciblage ou de discours, pas d'effort.</div>
-                <div class="chart-legend">
-                    <span class="legend-item"><span class="legend-dot" style="background:#0ea5e9"></span>Taux d'appels aboutis (%)</span>
-                    <span class="legend-item"><span class="legend-dot" style="background:#10b981"></span>Taux de RDV sur appels aboutis (%)</span>
-                </div>
-                <div id="chart-rates"></div>
-            </div>
-        </div>
+        <div class="charts-grid" id="charts-grid"></div>
 
         <!-- HISTORIQUE -->
         <div class="section-head">
             <div>
                 <h2>Historique détaillé</h2>
-                <p>Cliquez sur « modifier » pour corriger une journée. Le jour le plus performant de la période est surligné en vert.</p>
+                <p>Les jours de la période analysée. Cliquez sur « modifier » pour corriger une journée ;
+                   le meilleur jour de la période est surligné en vert.</p>
+            </div>
+            <div class="section-head-actions">
+                <button class="btn btn--ghost" id="btn-export" type="button">⬇ Exporter en CSV</button>
             </div>
         </div>
         <div class="table-wrap">
-            <table id="history-table">
+            <table>
                 <thead>
                     <tr>
-                        <th>Jour</th>
-                        <th>Appels</th>
-                        <th>Aboutis</th>
-                        <th>RDV</th>
-                        <th>E-mails</th>
-                        <th>Entrep.</th>
-                        <th>Contacts</th>
-                        <th>Abouti %</th>
-                        <th>RDV %</th>
-                        <th>Score</th>
-                        <th></th>
+                        <th>Jour</th><th>Appels</th><th>Aboutis</th><th>RDV</th><th>E-mails</th>
+                        <th>Entrep.</th><th>Contacts</th><th>Abouti %</th><th>RDV %</th><th>Score</th><th></th>
                     </tr>
                 </thead>
                 <tbody id="history-body"></tbody>
@@ -164,6 +150,32 @@
 
     </div>
 </main>
+
+<!-- ==================================================================
+     FENÊTRE D'AGRANDISSEMENT
+     ================================================================== -->
+<div class="modal-backdrop" id="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-head">
+            <div>
+                <h3 id="modal-title">…</h3>
+                <p id="modal-sub">…</p>
+            </div>
+            <button class="modal-close" id="modal-close" type="button" aria-label="Fermer">×</button>
+        </div>
+        <div class="modal-local-bar">
+            <span class="date-bar-label">Dates de ce graphique</span>
+            <div class="date-range">
+                <input type="date" id="modal-from">
+                <span>→</span>
+                <input type="date" id="modal-to">
+            </div>
+            <button class="chip chip--sm" id="modal-reset" type="button">↺ Revenir à la période globale</button>
+            <span class="pill pill--info" id="modal-scope">période globale</span>
+        </div>
+        <div class="modal-body" id="modal-body"></div>
+    </div>
+</div>
 
 <footer class="app-footer">
     Cockpit BDR · Fluxym — les taux et le score sont calculés dans la base (vue <code>v_daily_kpi</code>).

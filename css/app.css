@@ -1047,3 +1047,296 @@ body.login-page {
     .kpi-value { font-size: 28px; }
     .nav-logo-text { font-size: 15px; }
 }
+
+/* ==========================================================================
+   PILOTAGE DU DASHBOARD (v2) — périodes libres et comparaison de périodes
+   ========================================================================== */
+
+.control-panel {
+    background: var(--white);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+}
+
+/* --- Rangée de raccourcis --- */
+
+.preset-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 16px 24px;
+    background: linear-gradient(135deg, rgba(11, 32, 70, 0.03), rgba(0, 167, 225, 0.05));
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.preset-row .date-bar-label { margin-right: 4px; }
+
+.chip--sm { font-size: 12.5px; padding: 7px 14px; }
+
+/* --- Trois zones séparées par des barres verticales --- */
+
+.control-zones {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+}
+
+.control-zone {
+    padding: 20px 26px;
+    flex: 1 1 300px;
+    min-width: 0;
+    position: relative;
+}
+
+.control-zone + .control-zone { border-left: 2px solid var(--gray-100); }
+
+.control-zone--a { background: linear-gradient(180deg, rgba(0, 167, 225, 0.05), transparent 60%); }
+.control-zone--b { background: linear-gradient(180deg, rgba(107, 114, 128, 0.06), transparent 60%); }
+
+.zone-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.zone-dot {
+    width: 11px; height: 11px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+
+.zone-dot--a { background: var(--navy); }
+.zone-dot--b { background: var(--gray-400); }
+.zone-dot--c { background: var(--cyan); }
+
+.zone-title {
+    font-size: 11.5px;
+    font-weight: 800;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    color: var(--gray-500);
+}
+
+.zone-hint {
+    font-size: 12px;
+    color: var(--gray-400);
+    font-weight: 500;
+    margin-left: auto;
+}
+
+.date-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.date-range span {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--gray-400);
+}
+
+.date-range input[type="date"] { flex: 1 1 132px; min-width: 132px; }
+
+.zone-shortcuts {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+/* --- Boutons segmentés (granularité, total / moyenne) --- */
+
+.seg {
+    display: inline-flex;
+    background: var(--gray-100);
+    border-radius: var(--radius-full);
+    padding: 3px;
+    gap: 2px;
+}
+
+.seg button {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--gray-500);
+    padding: 7px 15px;
+    border-radius: var(--radius-full);
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.seg button:hover { color: var(--navy); }
+
+.seg button.is-on {
+    background: var(--white);
+    color: var(--navy);
+    box-shadow: var(--shadow-sm);
+}
+
+.seg-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--gray-400);
+    margin: 14px 0 6px;
+}
+
+/* --- Ligne de synthèse --- */
+
+.control-summary {
+    padding: 14px 26px;
+    border-top: 1px solid var(--gray-200);
+    background: var(--gray-50);
+    font-size: 13.5px;
+    color: var(--gray-600);
+    line-height: 1.6;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.control-summary b { color: var(--navy); }
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+}
+
+.pill--a { background: rgba(11, 32, 70, 0.08); color: var(--navy); }
+.pill--b { background: var(--gray-200); color: var(--gray-600); }
+.pill--warn { background: rgba(245, 158, 11, 0.14); color: #b45309; }
+.pill--info { background: rgba(0, 167, 225, 0.12); color: #0369a1; }
+
+/* ==========================================================================
+   CARTES DE GRAPHIQUE : en-tête, agrandissement
+   ========================================================================== */
+
+.chart-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.chart-head .chart-title { flex: 1; min-width: 0; }
+
+.chart-tools { display: flex; gap: 6px; flex-shrink: 0; }
+
+.icon-btn {
+    width: 32px; height: 32px;
+    border-radius: var(--radius-sm);
+    background: var(--gray-100);
+    color: var(--gray-500);
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.icon-btn:hover { background: var(--navy); color: var(--white); }
+
+.chart-select {
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--navy);
+    background: var(--gray-100);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    cursor: pointer;
+}
+
+.chart-select:focus { outline: 2px solid var(--cyan); }
+
+/* ==========================================================================
+   FENÊTRE D'AGRANDISSEMENT
+   ========================================================================== */
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(11, 32, 70, 0.55);
+    backdrop-filter: blur(3px);
+    z-index: 4000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3vh 3vw;
+    animation: fadeIn 0.2s ease;
+}
+
+.modal-backdrop[hidden] { display: none; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-card {
+    background: var(--white);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--shadow-xl);
+    width: 100%;
+    max-width: 1180px;
+    max-height: 94vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: modalUp 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes modalUp {
+    from { opacity: 0; transform: translateY(18px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+}
+
+.modal-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 20px 26px;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.modal-head h3 { font-size: 17px; font-weight: 800; letter-spacing: -0.4px; }
+.modal-head p { font-size: 12.5px; color: var(--gray-500); margin-top: 3px; }
+
+.modal-close {
+    margin-left: auto;
+    width: 36px; height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--gray-100);
+    color: var(--gray-500);
+    font-size: 20px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+
+.modal-close:hover { background: var(--danger); color: var(--white); }
+
+.modal-local-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 14px 26px;
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.modal-body { padding: 24px 26px; overflow-y: auto; }
+
+@media (max-width: 900px) {
+    .control-zone + .control-zone { border-left: none; border-top: 2px solid var(--gray-100); }
+    .control-zone { padding: 16px 18px; }
+    .preset-row { padding: 14px 18px; }
+    .control-summary { padding: 14px 18px; }
+    .modal-backdrop { padding: 0; }
+    .modal-card { max-height: 100vh; border-radius: 0; }
+}

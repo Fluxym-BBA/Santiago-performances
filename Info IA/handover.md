@@ -1,7 +1,7 @@
 # Cockpit BDR — Document de reprise (handover)
 
-**Dernière mise à jour : 19/08/2026**
-**État de référence : branche `main`, première livraison applicative**
+**Dernière mise à jour : 19/08/2026 (v2 du dashboard)**
+**État de référence : branche `main`**
 
 ## 1. Ce qu'est le projet
 
@@ -70,7 +70,57 @@ Ajouter une nouvelle métrique se fait en 3 gestes :
 L'interface de saisie, les jauges, le dashboard, les graphiques et le tableau
 se mettent à jour tout seuls.
 
-## 6. Pièges connus
+## 6. Architecture du dashboard (v2)
+
+Le dashboard ne connaît qu'un seul concept : **la période**. `state.a` et
+`state.b` sont deux objets `{ from, to }`. Une journée est une période d'un jour.
+Il n'y a volontairement aucun mode « jour » séparé d'un mode « mois ».
+
+Les graphiques sont déclarés dans un **registre** (`const CHARTS = [...]`), une
+entrée par carte :
+
+```js
+{
+  key,            // identifiant technique
+  title,          // titre affiché
+  wide,           // occupe toute la largeur de la grille
+  hint(ctx),      // phrase d'explication, reçoit le contexte
+  legend(),       // [[couleur, libellé], ...] (optionnel)
+  select,         // sélecteur intégré à la carte (optionnel)
+  render(host, ctx)
+}
+```
+
+`ctx` est produit par `ctxFor(chart, { big, scope })` et contient les lignes des
+deux périodes, la granularité et le mode de lecture. Comme `render()` ne connaît
+que son conteneur et son contexte, **le même code dessine la carte dans la
+grille et dans la fenêtre d'agrandissement**. Ajouter un graphique = ajouter une
+entrée au registre, rien d'autre. Ne jamais écrire un graphique en dur dans le
+HTML.
+
+Fonctions à connaître avant toute modification :
+
+| Fonction | Rôle |
+|---|---|
+| `rowsFor(p)` | lignes d'une période, jours manquants complétés à zéro |
+| `agg(rows)` | cumuls, jours actifs, taux **recalculés** depuis les volumes |
+| `val(a, key, mode)` | valeur en cumul ou en moyenne par jour actif |
+| `bucketize(rows, gran)` | regroupement par jour, semaine ISO ou mois |
+| `effGran()` / `effMode()` | granularité et mode effectifs (gèrent le mode auto) |
+| `toDate(a, bFrom, bTo)` | comparaison « à date » des présets |
+| `bestEquivalentPeriod(len, avoid)` | meilleure fenêtre de même durée dans l'historique |
+
+Règle de calcul à ne pas casser : **les taux ne se moyennent jamais**. Ils sont
+recalculés à partir des volumes agrégés (`somme aboutis / somme appels`). Faire
+la moyenne des taux quotidiens donnerait le même poids à un jour à 2 appels et à
+un jour à 50.
+
+Une seule requête réseau par rafraîchissement : `refresh()` charge la plage qui
+couvre A, B et 13 mois d'historique (nécessaire au record absolu, à la série en
+cours et à la recherche de la meilleure période). Tout le reste est calculé en
+mémoire. Ne pas ajouter de requête par graphique.
+
+## 7. Pièges connus
 
 - **Dates** : toujours passer par `toISO()` / `fromISO()` de `api.js`. Un
   `new Date().toISOString()` décalerait la saisie du soir sur la veille.
@@ -87,11 +137,15 @@ se mettent à jour tout seuls.
   trouve gênante (rappels entrants comptés comme aboutis sans appel sortant),
   la supprimer explicitement plutôt que la contourner côté front.
 
-## 7. Reste à faire (idées, non engagées)
+## 8. Reste à faire (idées, non engagées)
 
-1. Export CSV de l'historique.
-2. Vue hebdomadaire et mensuelle agrégée (cumuls, objectifs de semaine).
-3. Comparaison entre plusieurs BDR (le schéma est déjà multi-utilisateur : il
+1. Objectifs hebdomadaires et mensuels, en plus des objectifs journaliers.
+2. Comparaison entre plusieurs BDR (le schéma est déjà multi-utilisateur : il
    suffirait d'ajouter un rôle manager et des politiques RLS de lecture).
-4. Rappel de saisie en fin de journée si aucune action n'a été enregistrée.
-5. Champ « secteur » ou « campagne » pour segmenter les performances.
+3. Rappel de saisie en fin de journée si aucune action n'a été enregistrée.
+4. Champ « secteur » ou « campagne » pour segmenter les performances.
+5. Annotation d'un jour depuis le dashboard, sans passer par la page de saisie.
+
+Fait en v2 : périodes libres, comparaison de périodes, granularité
+jour/semaine/mois, agrandissement des graphiques avec dates locales, course
+cumulée entre deux périodes, export CSV.

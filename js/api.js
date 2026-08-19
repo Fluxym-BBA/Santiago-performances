@@ -94,9 +94,11 @@ export function diffDays(isoA, isoB) {
 export const isWeekend = iso => [0, 6].includes(fromISO(iso).getDay());
 
 export function formatLong(iso) {
-    return fromISO(iso).toLocaleDateString('fr-FR', {
+    const d = fromISO(iso);
+    const txt = d.toLocaleDateString('fr-FR', {
         weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
     });
+    return d.getDate() === 1 ? txt.replace(/ 1 /, ' 1er ') : txt;
 }
 
 export function formatShort(iso) {
@@ -270,3 +272,107 @@ export function humanError(error) {
     if (msg.includes('Invalid login credentials')) return 'E-mail ou mot de passe incorrect.';
     return msg;
 }
+
+/* --------------------------------------------------------------------------
+   Périodes — semaines (ISO, lundi → dimanche), mois, trimestres.
+   Tout reste en heure locale, comme le reste du module.
+   -------------------------------------------------------------------------- */
+
+/** Lundi de la semaine contenant `iso`. */
+export function startOfWeek(iso) {
+    const d = fromISO(iso);
+    const shift = (d.getDay() + 6) % 7;   // 0 = lundi
+    d.setDate(d.getDate() - shift);
+    return toISO(d);
+}
+
+export const endOfWeek = iso => addDaysISO(startOfWeek(iso), 6);
+
+export function startOfMonth(iso) {
+    const d = fromISO(iso);
+    return toISO(new Date(d.getFullYear(), d.getMonth(), 1));
+}
+
+export function endOfMonth(iso) {
+    const d = fromISO(iso);
+    return toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+}
+
+/** Décale une date de n mois en restant dans le mois cible (31 janvier + 1 mois = 28/29 février). */
+export function addMonthsISO(iso, n) {
+    const d = fromISO(iso);
+    const day = d.getDate();
+    const target = new Date(d.getFullYear(), d.getMonth() + n, 1);
+    const last = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(day, last));
+    return toISO(target);
+}
+
+export function startOfQuarter(iso) {
+    const d = fromISO(iso);
+    return toISO(new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1));
+}
+
+export const endOfQuarter = iso => endOfMonth(addMonthsISO(startOfQuarter(iso), 2));
+
+/** Numéro de semaine ISO 8601. */
+export function isoWeek(iso) {
+    const d = fromISO(iso);
+    const target = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const dayNr = (target.getDay() + 6) % 7;
+    target.setDate(target.getDate() - dayNr + 3);          // jeudi de la semaine
+    const firstThursday = new Date(target.getFullYear(), 0, 4);
+    const fDayNr = (firstThursday.getDay() + 6) % 7;
+    firstThursday.setDate(firstThursday.getDate() - fDayNr + 3);
+    return 1 + Math.round((target - firstThursday) / (7 * 86400000));
+}
+
+export const weekLabel = iso => `S${isoWeek(iso)}`;
+
+export const monthLabel = iso =>
+    fromISO(iso).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+
+/** Nombre de jours calendaires d'une période bornes incluses. */
+export const periodLength = (from, to) => diffDays(to, from) + 1;
+
+/** Nombre de jours ouvrés (lundi → vendredi) d'une période. */
+export function countWorkdays(from, to) {
+    let n = 0;
+    for (let iso = from; diffDays(to, iso) >= 0; iso = addDaysISO(iso, 1)) {
+        if (!isWeekend(iso)) n++;
+    }
+    return n;
+}
+
+/** Période de même longueur, immédiatement avant celle fournie. */
+export function previousPeriod(from, to) {
+    const len = periodLength(from, to);
+    return { from: addDaysISO(from, -len), to: addDaysISO(from, -1) };
+}
+
+/** Même période, un an plus tôt. */
+export const samePeriodLastYear = (from, to) => ({
+    from: addMonthsISO(from, -12), to: addMonthsISO(to, -12)
+});
+
+/** Libellé lisible d'une période ("12 août 2026" ou "du 1er au 31 juillet 2026"). */
+export function periodLabel(from, to) {
+    if (from === to) return formatLong(from).replace(/^\w+\s/, '');
+    const a = fromISO(from), b = fromISO(to);
+    const sameYear = a.getFullYear() === b.getFullYear();
+    const sameMonth = sameYear && a.getMonth() === b.getMonth();
+    const optA = sameMonth
+        ? { day: 'numeric' }
+        : (sameYear ? { day: 'numeric', month: 'long' } : { day: 'numeric', month: 'long', year: 'numeric' });
+    // « 1 août » ne se dit pas : on force l'ordinal sur le premier du mois.
+    const ord = (d, txt) => d.getDate() === 1 ? txt.replace(/^1(?!\d)/, '1er') : txt;
+    return `du ${ord(a, a.toLocaleDateString('fr-FR', optA))} au ${ord(b, b.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }))}`;
+}
+
+/** Libellé court, pour les puces et les légendes de graphiques. */
+export function periodLabelShort(from, to) {
+    return from === to ? formatShort(from) : `${formatShort(from)} → ${formatShort(to)}`;
+}
+
+/** Renvoie la plus ancienne des deux dates. */
+export const minISO = (a, b) => (diffDays(b, a) >= 0 ? a : b);

@@ -2,8 +2,8 @@
 
 Outil de suivi quotidien de la productivité d'un BDR (Business Development
 Representative) : saisie des actions du jour, correction des jours passés,
-comparaison de n'importe quelle journée à la veille, au record ou à la moyenne,
-et graphiques de tendance.
+comparaison libre de deux périodes (d'une journée à plusieurs mois), et
+graphiques de tendance agrandissables.
 
 ## Nature technique
 
@@ -108,6 +108,42 @@ Pondération actuelle du score, à ajuster avec l'intéressé :
 (source de vérité) et dans `js/saisie.js` (constante `WEIGHTS`, pour
 l'affichage instantané pendant la saisie). **Les deux doivent rester
 synchronisées.**
+
+## Le dashboard : un seul modèle, la période
+
+Tout le dashboard repose sur une seule abstraction : **une période A (analysée)
+face à une période B (référence)**. Une journée n'est qu'une période d'un jour,
+donc « aujourd'hui vs hier » et « août vs juillet » empruntent le même chemin de
+code. Il n'existe pas de mode « jour » distinct d'un mode « mois ».
+
+Trois zones de pilotage, séparées visuellement :
+
+1. **Période analysée** : deux dates libres, plus des raccourcis (aujourd'hui,
+   7 j, 30 j, cette semaine, ce mois, ce trimestre).
+2. **Comparée à** : deux dates libres, plus trois raccourcis : période
+   précédente équivalente, même période un an avant, et **meilleure période
+   équivalente** (recherche de la fenêtre de même durée la plus performante de
+   l'historique, ce qui généralise le « record » à n'importe quelle durée).
+3. **Lecture des données** : granularité des graphiques (auto, jour, semaine,
+   mois) et mode de comparaison (cumul ou moyenne par jour actif).
+
+Trois règles de calcul importantes :
+
+- **Comparaison « à date »** : les présets sur une période en cours tronquent la
+  référence à la même durée. Comparer le 1-19 août à un mois de juillet complet
+  ferait croire à un effondrement de l'activité ; le préset compare donc le
+  1-19 août au 1-19 juillet.
+- **Bascule automatique en moyenne** : si les deux périodes n'ont pas la même
+  longueur, le mode passe de lui-même en « moyenne par jour actif » et un
+  bandeau l'annonce, jusqu'à ce que l'utilisateur choisisse explicitement.
+- **Moyennes par jour ACTIF**, jamais par jour calendaire : un week-end ou un
+  jour de formation ne doit pas diluer la performance.
+
+Chaque graphique porte un bouton ⛶ qui l'ouvre en grand, avec ses propres dates
+locales. Dans cette vue, la référence devient automatiquement la période
+précédente équivalente, et un bouton ramène à la période globale. La grille,
+elle, reste toujours sur une seule période : deux cartes côte à côte sont donc
+toujours comparables.
 
 ## Comportements à connaître
 

@@ -153,30 +153,45 @@ export function lineChart(container, { labels, series, height = 260 }) {
     const yAt = v => f.pad.t + f.plotH * (1 - (Number(v) || 0) / max);
 
     series.forEach(s => {
-        const pts = s.values.map((v, i) => [xAt(i), yAt(v)]);
+        // Les valeurs null créent une rupture de courbe (période plus courte,
+        // ou jour sans donnée) : on ne les remplace jamais par un zéro trompeur.
+        const pts = s.values.map((v, i) =>
+            (v === null || v === undefined) ? null : [xAt(i), yAt(v)]);
 
-        if (s.area) {
-            const d = `M ${pts[0][0]} ${f.pad.t + f.plotH} `
-                + pts.map(p => `L ${p[0]} ${p[1]}`).join(' ')
-                + ` L ${pts[pts.length - 1][0]} ${f.pad.t + f.plotH} Z`;
-            f.svg.appendChild(svgEl('path', { d, fill: s.color, opacity: 0.1 }));
-        }
+        const segments = [];
+        let run = [];
+        pts.forEach(p => {
+            if (p) { run.push(p); }
+            else if (run.length) { segments.push(run); run = []; }
+        });
+        if (run.length) segments.push(run);
 
-        f.svg.appendChild(svgEl('polyline', {
-            points: pts.map(p => p.join(',')).join(' '),
-            fill: 'none', stroke: s.color, 'stroke-width': s.dashed ? 2 : 2.6,
-            'stroke-linejoin': 'round', 'stroke-linecap': 'round',
-            ...(s.dashed ? { 'stroke-dasharray': '5 5', opacity: 0.75 } : {})
-        }));
+        segments.forEach(seg => {
+            if (s.area && seg.length > 1) {
+                const d = `M ${seg[0][0]} ${f.pad.t + f.plotH} `
+                    + seg.map(p => `L ${p[0]} ${p[1]}`).join(' ')
+                    + ` L ${seg[seg.length - 1][0]} ${f.pad.t + f.plotH} Z`;
+                f.svg.appendChild(svgEl('path', { d, fill: s.color, opacity: 0.1 }));
+            }
+            if (seg.length > 1) {
+                f.svg.appendChild(svgEl('polyline', {
+                    points: seg.map(p => p.join(',')).join(' '),
+                    fill: 'none', stroke: s.color, 'stroke-width': s.dashed ? 2 : 2.6,
+                    'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+                    ...(s.dashed ? { 'stroke-dasharray': '5 5', opacity: 0.8 } : {})
+                }));
+            }
+        });
 
         if (!s.dashed) {
+            const r = labels.length > 40 ? 2 : labels.length > 20 ? 2.8 : 3.6;
             pts.forEach((p, i) => {
+                if (!p) return;
                 const c = svgEl('circle', {
-                    cx: p[0], cy: p[1], r: labels.length > 40 ? 2 : 3.4,
-                    fill: '#fff', stroke: s.color, 'stroke-width': 2
+                    cx: p[0], cy: p[1], r, fill: '#fff', stroke: s.color, 'stroke-width': 2
                 });
                 const title = svgEl('title');
-                title.textContent = `${labels[i]} · ${s.name} : ${fmtInt(s.values[i])}`;
+                title.textContent = `${labels[i]} · ${s.name} : ${s.fmt ? s.fmt(s.values[i]) : fmtInt(s.values[i])}`;
                 c.appendChild(title);
                 f.svg.appendChild(c);
             });
