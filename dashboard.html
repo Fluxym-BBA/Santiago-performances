@@ -91,20 +91,22 @@
                 <div class="control-zone control-zone--c">
                     <div class="zone-head">
                         <span class="zone-dot zone-dot--c"></span>
-                        <span class="zone-title">Lecture des données</span>
+                        <span class="zone-title">Réglages de lecture</span>
                     </div>
-                    <div class="seg-label">Regrouper les graphiques par</div>
+                    <div class="seg-label">Un point de graphique = </div>
                     <div class="seg" id="seg-gran">
                         <button data-gran="auto" type="button">Auto</button>
-                        <button data-gran="day" type="button">Jour</button>
-                        <button data-gran="week" type="button">Semaine</button>
-                        <button data-gran="month" type="button">Mois</button>
+                        <button data-gran="day" type="button">Un jour</button>
+                        <button data-gran="week" type="button">Une semaine</button>
+                        <button data-gran="month" type="button">Un mois</button>
                     </div>
-                    <div class="seg-label">Comparer les périodes en</div>
+                    <div class="seg-explain" id="explain-gran"></div>
+                    <div class="seg-label">Chiffres comparés en</div>
                     <div class="seg" id="seg-mode">
                         <button data-mode="total" type="button">Cumul</button>
                         <button data-mode="avg" type="button">Moyenne / jour actif</button>
                     </div>
+                    <div class="seg-explain" id="explain-mode"></div>
                 </div>
             </div>
 
@@ -115,12 +117,16 @@
         <!-- KPI -->
         <div class="kpi-grid" id="kpi-grid"></div>
 
+        <!-- ENCADRÉ DU SCORE -->
+        <section class="score-panel" id="score-panel"></section>
+
         <!-- GRAPHIQUES -->
         <div class="section-head">
             <div>
                 <h2>Graphiques</h2>
-                <p>Chaque carte peut être agrandie avec le bouton ⛶, et explorée sur ses propres dates
-                   sans toucher au reste de la page.</p>
+                <p>Chaque carte porte ses propres dates avec le bouton 📅, et s'ouvre en grand avec ⛶.
+                   Partout, le <b style="color:var(--a2)">bleu</b> est la période analysée et le
+                   <b style="color:var(--b2)">violet</b> la période de référence.</p>
             </div>
         </div>
         <div class="charts-grid" id="charts-grid"></div>

@@ -63,6 +63,27 @@ export const METRIC_BY_KEY = Object.fromEntries(METRICS.map(m => [m.key, m]));
 export const EMPTY_DAY = Object.fromEntries(METRICS.map(m => [m.key, 0]));
 
 /* --------------------------------------------------------------------------
+   Pondérations du score de productivité.
+   SOURCE UNIQUE côté application : la page de saisie, le dashboard et les
+   explications affichées lisent toutes cette constante.
+   Elle doit rester identique à la définition de la vue SQL v_daily_kpi,
+   qui reste la source de vérité côté base.
+   -------------------------------------------------------------------------- */
+
+export const SCORE_WEIGHTS = [
+    { key: 'calls_made', w: 1, icon: '📞', label: 'Appel passé', plural: 'appels passés' },
+    { key: 'calls_connected', w: 3, icon: '✅', label: 'Appel abouti', plural: 'appels aboutis' },
+    { key: 'meetings_booked', w: 20, icon: '🤝', label: 'Rendez-vous', plural: 'rendez-vous' },
+    { key: 'emails_sent', w: 1, icon: '✉️', label: 'E-mail envoyé', plural: 'e-mails envoyés' },
+    { key: 'companies_created', w: 2, icon: '🏢', label: 'Entreprise créée', plural: 'entreprises créées' },
+    { key: 'contacts_created', w: 2, icon: '👤', label: 'Contact créé', plural: 'contacts créés' }
+];
+
+/** Score d'une ligne (ou d'un agrégat) à partir des pondérations ci-dessus. */
+export const scoreOf = row =>
+    SCORE_WEIGHTS.reduce((t, x) => t + (Number(row?.[x.key]) || 0) * x.w, 0);
+
+/* --------------------------------------------------------------------------
    Dates — tout est manipulé en heure locale, jamais en UTC, pour éviter
    le décalage classique qui fait basculer une saisie sur la veille.
    -------------------------------------------------------------------------- */

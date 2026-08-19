@@ -71,6 +71,32 @@ export function delta(current, reference, { suffix = '', higherIsBetter = true }
     };
 }
 
+/* --------------------------------------------------------------------------
+   Légendes
+   Une légende est un composant, pas une phrase : pastille + libellé, et le
+   libellé porte la vraie information (les dates de la période, l'unité).
+   items : [{ color, label, shape?: 'box'|'line'|'dash', pair?: [c1, c2] }]
+   Un item { head: 'texte' } insère un intitulé de section sur toute la largeur.
+   -------------------------------------------------------------------------- */
+
+export function legendHtml(items) {
+    return `<div class="chart-legend">${items.map(it => {
+        if (it.head) return `<span class="legend-head">${escapeHtml(it.head)}</span>`;
+        if (it.periodStyle) {
+            return `<span class="legend-period legend-period--${it.periodStyle}">
+                <span class="legend-dot" style="background:${it.color}"></span>${escapeHtml(it.label)}</span>`;
+        }
+        if (it.pair) {
+            return `<span class="legend-item"><span class="legend-pair">
+                <span class="legend-dot" style="background:${it.pair[0]}"></span>
+                <span class="legend-dot" style="background:${it.pair[1]}"></span></span>${escapeHtml(it.label)}</span>`;
+        }
+        const cls = it.shape === 'dash' ? 'legend-dash' : it.shape === 'line' ? 'legend-line' : 'legend-dot';
+        const style = it.shape === 'dash' ? `color:${it.color}` : `background:${it.color}`;
+        return `<span class="legend-item"><span class="${cls}" style="${style}"></span>${escapeHtml(it.label)}</span>`;
+    }).join('')}</div>`;
+}
+
 /* ==========================================================================
    GRAPHIQUES SVG
    ========================================================================== */
@@ -140,17 +166,37 @@ function drawXLabels(f, labels) {
  * Courbes multi-séries.
  * series : [{ name, color, values:[n], dashed:bool, area:bool }]
  */
-export function lineChart(container, { labels, series, height = 260 }) {
+export function lineChart(container, { labels, series, height = 260, yMax = null, refLines = [] }) {
     if (!labels.length) return emptyState(container, 'Aucune donnée sur la période.');
-    const pad = { l: 46, r: 16, t: 16, b: 30 };
+    const pad = { l: 46, r: refLines.length ? 58 : 16, t: 16, b: 30 };
     const f = baseFrame(container, { height, pad });
 
-    const allVals = series.flatMap(s => s.values.filter(v => v !== null && v !== undefined));
-    const max = niceMax(Math.max(1, ...allVals));
+    const allVals = series.flatMap(s => s.values.filter(v => v !== null && v !== undefined))
+        .concat(refLines.map(r => Number(r.value) || 0));
+    const max = yMax || niceMax(Math.max(1, ...allVals));
     drawGrid(f, max);
 
     const xAt = i => f.pad.l + (labels.length === 1 ? f.plotW / 2 : (f.plotW * i) / (labels.length - 1));
     const yAt = v => f.pad.t + f.plotH * (1 - (Number(v) || 0) / max);
+
+    // Niveau de référence : la valeur de la période de comparaison, tracée en
+    // travers du graphique. On lit immédiatement si la courbe passe au-dessus.
+    refLines.forEach(r => {
+        const y = yAt(r.value);
+        f.svg.appendChild(svgEl('line', {
+            x1: f.pad.l, x2: f.pad.l + f.plotW, y1: y, y2: y,
+            stroke: r.color, 'stroke-width': 2, 'stroke-dasharray': '7 5', opacity: 0.9
+        }));
+        const t = svgEl('text', {
+            x: f.pad.l + f.plotW + 6, y: y + 4,
+            fill: r.color, 'font-size': 11, 'font-weight': 800
+        });
+        t.textContent = r.short ?? fmtInt(r.value);
+        const ti = svgEl('title');
+        ti.textContent = r.label;
+        t.appendChild(ti);
+        f.svg.appendChild(t);
+    });
 
     series.forEach(s => {
         // Les valeurs null créent une rupture de courbe (période plus courte,
@@ -205,12 +251,13 @@ export function lineChart(container, { labels, series, height = 260 }) {
  * Barres groupées.
  * series : [{ name, color, values:[n] }]
  */
-export function barChart(container, { labels, series, height = 260 }) {
+export function barChart(container, { labels, series, height = 260, yMax = null }) {
     if (!labels.length) return emptyState(container, 'Aucune donnée sur la période.');
     const pad = { l: 46, r: 16, t: 16, b: 30 };
     const f = baseFrame(container, { height, pad });
 
-    const max = niceMax(Math.max(1, ...series.flatMap(s => s.values.map(v => Number(v) || 0))));
+    // yMax imposé : indispensable pour que deux panneaux empilés soient comparables.
+    const max = yMax || niceMax(Math.max(1, ...series.flatMap(s => s.values.map(v => Number(v) || 0))));
     drawGrid(f, max);
 
     const slot = f.plotW / labels.length;
@@ -241,57 +288,48 @@ export function barChart(container, { labels, series, height = 260 }) {
  * Barres horizontales comparant deux jours métrique par métrique.
  * rows : [{ label, a, b, color }]
  */
-export function compareChart(container, { rows, labelA, labelB, height }) {
+export function compareChart(container, { rows, labelA, labelB, height, fmt = fmtInt }) {
     if (!rows.length) return emptyState(container, 'Aucune donnée à comparer.');
-    const rowH = 46;
-    const pad = { l: 132, r: 46, t: 26, b: 12 };
+    const rowH = 54;
+    const pad = { l: 138, r: 96, t: 8, b: 10 };
     const H = height || pad.t + pad.b + rows.length * rowH;
     const f = baseFrame(container, { height: H, pad });
 
     const max = niceMax(Math.max(1, ...rows.flatMap(r => [Number(r.a) || 0, Number(r.b) || 0])));
 
-    // Légende intégrée
-    [[labelA, '#0B2046', 0], [labelB, '#9ca3af', 1]].forEach(([txt, col, k]) => {
-        f.svg.appendChild(svgEl('rect', { x: f.pad.l + k * 150, y: 6, width: 10, height: 10, rx: 2, fill: col }));
-        const t = svgEl('text', {
-            x: f.pad.l + k * 150 + 16, y: 15, fill: '#4b5563',
-            'font-size': 11.5, 'font-weight': 700
-        });
-        t.textContent = txt;
-        f.svg.appendChild(t);
-    });
-
     rows.forEach((r, i) => {
         const top = f.pad.t + i * rowH;
 
         const lab = svgEl('text', {
-            x: f.pad.l - 12, y: top + rowH / 2 + 4, 'text-anchor': 'end',
-            fill: '#111827', 'font-size': 12.5, 'font-weight': 700
+            x: f.pad.l - 14, y: top + rowH / 2 + 2, 'text-anchor': 'end',
+            fill: '#111827', 'font-size': 13.5, 'font-weight': 800
         });
         lab.textContent = r.label;
         f.svg.appendChild(lab);
 
-        [['a', 0, r.color || '#00A7E1'], ['b', 1, '#d1d5db']].forEach(([key, k, col]) => {
+        [['a', 0, r.colorA, labelA], ['b', 1, r.colorB, labelB]].forEach(([key, k, col, per]) => {
             const v = Number(r[key]) || 0;
             const w = (v / max) * f.plotW;
-            const y = top + 6 + k * 16;
+            const y = top + 8 + k * 19;
+
             f.svg.appendChild(svgEl('rect', {
-                x: f.pad.l, y, width: f.plotW, height: 12, rx: 6, fill: '#f9fafb'
+                x: f.pad.l, y, width: f.plotW, height: 15, rx: 7.5, fill: '#f3f4f6'
             }));
             const bar = svgEl('rect', {
-                x: f.pad.l, y, width: Math.max(v > 0 ? 3 : 0, w), height: 12, rx: 6, fill: col
+                x: f.pad.l, y, width: Math.max(v > 0 ? 4 : 0, w), height: 15, rx: 7.5, fill: col
             });
             const title = svgEl('title');
-            title.textContent = `${r.label} · ${k === 0 ? labelA : labelB} : ${fmtInt(v)}`;
+            title.textContent = `${r.label} · ${per} : ${fmt(v)}`;
             bar.appendChild(title);
             f.svg.appendChild(bar);
 
+            // Valeur écrite en bout de barre, dans la couleur de sa période :
+            // plus besoin de deviner quelle barre est laquelle.
             const val = svgEl('text', {
-                x: f.pad.l + f.plotW + 8, y: y + 10,
-                fill: k === 0 ? '#111827' : '#9ca3af',
-                'font-size': 11.5, 'font-weight': 800
+                x: f.pad.l + f.plotW + 10, y: y + 12,
+                fill: col, 'font-size': 12.5, 'font-weight': 900
             });
-            val.textContent = fmtInt(v);
+            val.textContent = fmt(v);
             f.svg.appendChild(val);
         });
     });

@@ -109,6 +109,23 @@ Fonctions à connaître avant toute modification :
 | `effGran()` / `effMode()` | granularité et mode effectifs (gèrent le mode auto) |
 | `toDate(a, bFrom, bTo)` | comparaison « à date » des présets |
 | `bestEquivalentPeriod(len, avoid)` | meilleure fenêtre de même durée dans l'historique |
+| `renderPanelPair(host, ctx, metrics)` | deux panneaux superposés à échelle partagée |
+| `renderScorePanel(aA)` | encadré du score avec décomposition chiffrée |
+
+Chaque entrée du registre expose `icon`, `title`, `sub(ctx)`, `legend(ctx)`,
+`note(ctx)` et `render(host, ctx)`. `legend()` renvoie des items structurés
+passés à `legendHtml()` (`{ color, label, shape }`, `{ pair: [cA, cB], label }`,
+`{ periodStyle: 'a' | 'b' }`, `{ head }`). Ne pas écrire de légende à la main
+dans le HTML ni en prose sous le titre : c'est le défaut corrigé en v3.
+
+Les dates propres à une carte vivent dans `scopes` (Map clé → période). La carte
+et sa vue agrandie partagent cet état, donc modifier les dates en grand se voit
+en petit. Quand une carte a ses propres dates, sa référence devient
+`previousPeriod(scope)`, ce que la légende affiche explicitement.
+
+Règle de couleur à respecter : bleu = période analysée (`A_SHADES`), violet =
+période de référence (`B_SHADES`). Le gris ne porte jamais de sens, il ne sert
+qu'aux fonds et aux libellés secondaires.
 
 Règle de calcul à ne pas casser : **les taux ne se moyennent jamais**. Ils sont
 recalculés à partir des volumes agrégés (`somme aboutis / somme appels`). Faire
@@ -124,8 +141,10 @@ mémoire. Ne pas ajouter de requête par graphique.
 
 - **Dates** : toujours passer par `toISO()` / `fromISO()` de `api.js`. Un
   `new Date().toISOString()` décalerait la saisie du soir sur la veille.
-- **Pondération du score** : définie dans la vue SQL *et* dans `WEIGHTS`
-  (`js/saisie.js`). Les deux doivent rester identiques.
+- **Pondération du score** : définie dans la vue SQL *et* dans `SCORE_WEIGHTS`
+  (`js/api.js`). Ces deux-là doivent rester identiques. Ne jamais recopier les
+  poids ailleurs : la saisie, le dashboard et les textes explicatifs lisent tous
+  `SCORE_WEIGHTS`.
 - **RLS** : ne jamais la désactiver. La clé `anon` est publique par nature, la
   RLS est la seule protection des données.
 - **Bornes de plage** : la plage chargée par `refresh()` doit être le **minimum**

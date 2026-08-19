@@ -8,7 +8,8 @@
 import {
     requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY,
     todayISO, addDaysISO, formatLong, relativeLabel, diffDays,
-    fetchDay, saveDay, bump, fetchTargets, saveTargets, humanError
+    fetchDay, saveDay, bump, fetchTargets, saveTargets, humanError,
+    SCORE_WEIGHTS, scoreOf
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -20,17 +21,9 @@ let prevRow = null;          // veille, pour la comparaison
 let targets = {};
 const timers = {};           // debounce par champ
 
-/* --------------------------------------------------------------------------
-   Score : même pondération que la vue SQL v_daily_kpi, recalculée côté client
-   pour un affichage instantané sans aller-retour réseau.
-   -------------------------------------------------------------------------- */
-const WEIGHTS = {
-    calls_made: 1, calls_connected: 3, meetings_booked: 20,
-    emails_sent: 1, companies_created: 2, contacts_created: 2
-};
-
-const scoreOf = r => Object.entries(WEIGHTS)
-    .reduce((s, [k, w]) => s + (Number(r?.[k]) || 0) * w, 0);
+/* Le score est calculé côté client pour un affichage instantané, à partir de
+   SCORE_WEIGHTS (source unique partagée avec le dashboard). La vue SQL
+   v_daily_kpi reste la référence côté base. */
 
 /* --------------------------------------------------------------------------
    Rendu des lignes de métriques
@@ -255,6 +248,36 @@ async function load(iso) {
 }
 
 /* --------------------------------------------------------------------------
+   Explication du score, directement sous le score du jour
+   -------------------------------------------------------------------------- */
+
+function buildScoreExplain() {
+    const host = $('#score-explain');
+    if (!host) return;
+    host.innerHTML = `
+        <details class="chart-note">
+            <summary>Comment est calculé ce score ?</summary>
+            <p>
+                Chaque action du jour est multipliée par un poids, puis tout est additionné.
+                Un rendez-vous vaut 20 points parce qu'un BDR est jugé sur ses rendez-vous,
+                pas sur son volume d'appels.
+            </p>
+            <div class="weights" style="margin:14px 0 0">
+                ${SCORE_WEIGHTS.map(w => `
+                    <div class="weight" style="background:var(--gray-100);border-color:var(--gray-200)">
+                        <span style="font-size:15px">${w.icon}</span>
+                        <span class="weight-label" style="color:var(--gray-600)">${w.label}</span>
+                        <span class="weight-x">× ${w.w}</span>
+                    </div>`).join('')}
+            </div>
+            <p style="margin-top:12px">
+                Le score n'a pas de valeur absolue : il sert à comparer deux journées ou deux périodes.
+                La page <b>Performances</b> en donne la décomposition chiffrée.
+            </p>
+        </details>`;
+}
+
+/* --------------------------------------------------------------------------
    Objectifs
    -------------------------------------------------------------------------- */
 
@@ -291,6 +314,7 @@ function buildTargets() {
     session = await requireAuth();
     renderNav(session);
     buildCards();
+    buildScoreExplain();
 
     try {
         targets = await fetchTargets();

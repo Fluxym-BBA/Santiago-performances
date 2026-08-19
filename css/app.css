@@ -1340,3 +1340,330 @@ body.login-page {
     .modal-backdrop { padding: 0; }
     .modal-card { max-height: 100vh; border-radius: 0; }
 }
+
+/* ==========================================================================
+   V3 — LISIBILITÉ DES GRAPHIQUES
+   Deux familles de couleurs : la période analysée en bleu Fluxym,
+   la période de référence en violet. Jamais de gris pour porter du sens.
+   ========================================================================== */
+
+:root {
+    /* Camaïeu A — période analysée */
+    --a1: #7dd3fc;
+    --a2: #00A7E1;
+    --a3: #0369a1;
+    --a4: #0B2046;
+    /* Camaïeu B — période de référence */
+    --b1: #c4b5fd;
+    --b2: #8b5cf6;
+    --b3: #6d28d9;
+    --b4: #4c1d95;
+}
+
+/* --- En-tête de carte de graphique --- */
+
+.chart-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--gray-100);
+    margin-bottom: 16px;
+}
+
+.chart-icon {
+    width: 42px; height: 42px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, rgba(0, 167, 225, 0.14), rgba(11, 32, 70, 0.08));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+}
+
+.chart-titles { flex: 1; min-width: 0; }
+
+.chart-title {
+    font-size: 19px;
+    font-weight: 800;
+    letter-spacing: -0.6px;
+    color: var(--gray-900);
+    line-height: 1.25;
+}
+
+.chart-sub {
+    font-size: 13.5px;
+    color: var(--gray-500);
+    margin-top: 5px;
+    line-height: 1.5;
+    font-weight: 500;
+}
+
+.chart-card { padding: 24px 26px 20px; }
+
+.chart-card--scoped {
+    border-color: rgba(139, 92, 246, 0.45);
+    box-shadow: 0 8px 30px rgba(139, 92, 246, 0.12);
+}
+
+/* --- Barre de dates propre à une carte --- */
+
+.chart-dates {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+}
+
+.chart-dates[hidden] { display: none; }
+
+.chart-dates .date-bar-label { flex-shrink: 0; }
+.chart-dates input[type="date"] { padding: 7px 10px; font-size: 13px; }
+
+/* --- Légendes --- */
+
+.chart-legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    background: var(--gray-50);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-600);
+}
+
+.legend-item { display: flex; align-items: center; gap: 8px; }
+
+.legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+.legend-line {
+    width: 20px; height: 4px; border-radius: 2px; flex-shrink: 0;
+}
+
+.legend-dash {
+    width: 20px; height: 0; flex-shrink: 0;
+    border-top: 3px dashed currentColor;
+    background: none !important;
+}
+
+.legend-pair { display: flex; gap: 3px; flex-shrink: 0; }
+
+.legend-head {
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: 0.7px;
+    text-transform: uppercase;
+    color: var(--gray-400);
+    width: 100%;
+}
+
+.legend-period {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    font-weight: 800;
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+}
+
+.legend-period--a { background: rgba(0, 167, 225, 0.14); color: #075985; }
+.legend-period--b { background: rgba(139, 92, 246, 0.14); color: #5b21b6; }
+
+/* --- Panneaux comparés (petits multiples) --- */
+
+.panel-pair { display: grid; gap: 20px; }
+
+.mini-panel { position: relative; }
+
+.mini-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 6px;
+    font-size: 12.5px;
+    font-weight: 800;
+}
+
+.mini-panel-head::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--gray-200);
+}
+
+.mini-panel--a .mini-panel-head { color: #075985; }
+.mini-panel--b .mini-panel-head { color: #5b21b6; }
+
+.mini-badge {
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    color: var(--white);
+    font-size: 11px;
+    font-weight: 900;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+}
+
+.mini-badge--a { background: var(--a2); }
+.mini-badge--b { background: var(--b2); }
+
+/* --- Note de méthode dépliable --- */
+
+details.chart-note {
+    margin-top: 16px;
+    border-top: 1px solid var(--gray-100);
+    padding-top: 12px;
+}
+
+details.chart-note > summary {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--cyan);
+    cursor: pointer;
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+details.chart-note > summary::-webkit-details-marker { display: none; }
+details.chart-note > summary::before { content: 'ⓘ'; font-size: 14px; }
+details.chart-note[open] > summary { margin-bottom: 8px; }
+
+details.chart-note p {
+    font-size: 13px;
+    line-height: 1.65;
+    color: var(--gray-600);
+}
+
+details.chart-note b { color: var(--gray-900); }
+
+/* ==========================================================================
+   PANNEAU DU SCORE DE PRODUCTIVITÉ
+   ========================================================================== */
+
+.score-panel {
+    background: linear-gradient(135deg, var(--navy), var(--navy-light));
+    color: var(--white);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-navy);
+    padding: 26px 28px;
+    margin-top: 24px;
+    position: relative;
+    overflow: hidden;
+}
+
+.score-panel::after {
+    content: '';
+    position: absolute;
+    width: 340px; height: 340px;
+    right: -110px; top: -190px;
+    background: radial-gradient(circle, var(--cyan-glow) 0%, transparent 70%);
+    pointer-events: none;
+}
+
+.score-panel h2 {
+    font-size: 19px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.score-panel > p {
+    font-size: 13.5px;
+    color: rgba(255, 255, 255, 0.72);
+    margin-top: 8px;
+    max-width: 780px;
+    line-height: 1.6;
+}
+
+.weights {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 20px 0 4px;
+    position: relative;
+}
+
+.weight {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.weight-x {
+    font-size: 17px;
+    font-weight: 900;
+    color: var(--cyan);
+    letter-spacing: -0.5px;
+}
+
+.weight-label { font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.9); }
+
+.formula {
+    margin-top: 20px;
+    padding: 16px 18px;
+    background: rgba(0, 0, 0, 0.22);
+    border-radius: var(--radius-md);
+    font-size: 13.5px;
+    line-height: 1.9;
+    color: rgba(255, 255, 255, 0.88);
+    overflow-x: auto;
+    position: relative;
+}
+
+.formula b { color: var(--white); font-weight: 800; }
+.formula .f-total { color: var(--cyan); font-size: 20px; font-weight: 900; }
+.formula .f-op { color: rgba(255, 255, 255, 0.45); padding: 0 4px; }
+
+.score-why {
+    margin-top: 16px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.75);
+    position: relative;
+}
+
+.score-why b { color: var(--white); }
+
+/* --- Réglages de lecture : explications sous les boutons --- */
+
+.seg-explain {
+    font-size: 12px;
+    color: var(--gray-500);
+    margin-top: 7px;
+    line-height: 1.5;
+}
+
+.seg-explain b { color: var(--navy); }
+
+.summary-sentence {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--gray-600);
+    width: 100%;
+    line-height: 1.6;
+}
+
+.summary-sentence b { color: var(--navy); font-weight: 800; }
+
+@media (max-width: 700px) {
+    .chart-title { font-size: 17px; }
+    .chart-card { padding: 18px 16px 14px; }
+    .chart-legend { gap: 12px; }
+}

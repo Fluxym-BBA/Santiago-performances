@@ -139,11 +139,42 @@ Trois règles de calcul importantes :
 - **Moyennes par jour ACTIF**, jamais par jour calendaire : un week-end ou un
   jour de formation ne doit pas diluer la performance.
 
-Chaque graphique porte un bouton ⛶ qui l'ouvre en grand, avec ses propres dates
-locales. Dans cette vue, la référence devient automatiquement la période
-précédente équivalente, et un bouton ramène à la période globale. La grille,
-elle, reste toujours sur une seule période : deux cartes côte à côte sont donc
-toujours comparables.
+Chaque carte porte **ses propres dates**, réglables directement dans la grille
+(bouton 📅) comme en vue agrandie (bouton ⛶) : les deux partagent le même état.
+Dès qu'une carte quitte la période globale, elle est bordée de violet et sa
+référence devient la période précédente équivalente, ce qui est écrit dans sa
+légende. Un bouton ramène à la période globale.
+
+## Code couleur, valable dans toute l'application
+
+Deux familles, jamais du gris pour porter du sens :
+
+- **Période analysée : camaïeu de bleu Fluxym** (`#00A7E1`, `#0369a1`, `#0B2046`)
+- **Période de référence : camaïeu de violet** (`#8b5cf6`, `#6d28d9`, `#4c1d95`)
+
+L'intensité distingue les métriques à l'intérieur d'une même famille. Les
+graphiques qui comparent plusieurs séries sur deux périodes utilisent des
+**panneaux superposés à échelle verticale partagée** plutôt qu'une grille unique
+surchargée : une barre deux fois plus haute vaut réellement deux fois plus.
+
+Chaque carte porte une légende structurée (pastille + libellé portant les vraies
+dates) et une note dépliable « Comment lire ce graphique » qui explique la
+méthode de calcul. Aucune information n'est laissée à une phrase en gris.
+
+## Le score de productivité
+
+La formule est affichée en clair sur la page Performances, dans un encadré bleu
+foncé placé juste sous les indicateurs, avec la **décomposition chiffrée de la
+période analysée** (« 312 appels × 1 + 98 aboutis × 3 + … = 1 234 points »).
+Elle est également rappelée sur la page de saisie, sous le score du jour.
+
+Poids actuels : appel ×1, appel abouti ×3, **rendez-vous ×20**, e-mail ×1,
+entreprise ×2, contact ×2.
+
+Ils sont définis à **deux endroits qui doivent rester synchronisés** : la vue SQL
+`v_daily_kpi` (source de vérité côté base) et la constante `SCORE_WEIGHTS` de
+`js/api.js` (source unique côté application, utilisée par la saisie, le
+dashboard et les explications affichées).
 
 ## Comportements à connaître
 
