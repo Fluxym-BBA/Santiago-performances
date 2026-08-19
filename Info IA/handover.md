@@ -128,6 +128,12 @@ mémoire. Ne pas ajouter de requête par graphique.
   (`js/saisie.js`). Les deux doivent rester identiques.
 - **RLS** : ne jamais la désactiver. La clé `anon` est publique par nature, la
   RLS est la seule protection des données.
+- **Bornes de plage** : la plage chargée par `refresh()` doit être le **minimum**
+  des débuts et le **maximum** des fins des deux périodes. Utiliser `minISO` et
+  `maxISO`, jamais un `reduce` écrit à la main : une inversion produit une plage
+  vide, donc un dashboard entièrement à zéro alors que la base est pleine et que
+  le record absolu, chargé par une requête séparée, s'affiche correctement.
+  C'est exactement le symptôme du bug corrigé le 19/08/2026.
 - **`maybeSingle()`** est utilisé partout où l'absence de ligne est normale
   (jour sans saisie, objectifs jamais définis). Ne pas le remplacer par
   `single()`, qui lèverait une erreur.

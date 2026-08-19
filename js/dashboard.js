@@ -12,7 +12,7 @@ import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonthsISO,
     startOfQuarter, endOfQuarter, weekLabel, monthLabel,
     periodLength, countWorkdays, previousPeriod, samePeriodLastYear,
-    periodLabel, periodLabelShort, minISO,
+    periodLabel, periodLabelShort, minISO, maxISO,
     fetchRange, fetchBestDay, humanError
 } from './api.js';
 import {
@@ -450,6 +450,14 @@ function renderSummary(aA, aB) {
     if (effGran() !== 'day') {
         pills.push(`<span class="pill pill--info">Graphiques regroupés par ${granWord()}</span>`);
     }
+    // Diagnostic : distingue « aucune saisie sur la période » de « rien reçu de la base ».
+    if (byDate.size === 0) {
+        pills.push('<span class="pill pill--warn">⚠ Aucune ligne reçue de la base sur la plage chargée '
+            + `(${periodLabelShort(loaded.from, loaded.to)})</span>`);
+    } else if (aA.activeDays === 0 && aB.activeDays === 0) {
+        pills.push(`<span class="pill pill--warn">⚠ Aucune saisie sur ces deux périodes, alors que ${
+            byDate.size} jour(s) existent dans l'historique</span>`);
+    }
 
     $('#control-summary').innerHTML = `
         ${pills.join(' ')}
@@ -698,10 +706,8 @@ async function refresh() {
 
     // Une seule requête couvre les deux périodes, plus 13 mois d'historique
     // pour le record absolu, la série en cours et la meilleure période équivalente.
-    const from = [state.a.from, state.b.from, addMonthsISO(T, -13)]
-        .reduce((m, d) => (diffDays(m, d) < 0 ? d : m));
-    const to = [state.a.to, state.b.to, T]
-        .reduce((m, d) => (diffDays(d, m) < 0 ? d : m));
+    const from = [state.a.from, state.b.from, addMonthsISO(T, -13)].reduce(minISO);
+    const to = [state.a.to, state.b.to, T].reduce(maxISO);
 
     try {
         const [rows, best] = await Promise.all([fetchRange(from, to), fetchBestDay()]);

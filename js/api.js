@@ -376,3 +376,6 @@ export function periodLabelShort(from, to) {
 
 /** Renvoie la plus ancienne des deux dates. */
 export const minISO = (a, b) => (diffDays(b, a) >= 0 ? a : b);
+
+/** Renvoie la plus récente des deux dates. */
+export const maxISO = (a, b) => (diffDays(b, a) >= 0 ? b : a);
