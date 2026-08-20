@@ -73,3 +73,10 @@ de tableau de bord à outil de pilotage. Pas encore engagé.
   l'écart à la moyenne d'équipe. Données déjà en base.
 - Reste à faire : effacer les 65 jours fictifs du compte administrateur, créer
   le compte de Santiago, et arbitrer si BBA Test 3 doit rester administrateur.
+
+  - 20/08 : 65 jours fictifs supprimés du compte propriétaire. Compte vierge.
+- 20/08 : levels-migration-v4.sql livré (échelle owner/admin/manager/member,
+  règle du niveau strictement inférieur, lecture et écriture séparées).
+  NON APPLIQUÉ à ce stade. Sans effet sur le site actuel une fois appliqué.
+- Sujet ouvert : lot 2 (écran Comptes, menus, accès lecture seule à team.html)
+  et présomption de boucle de redirection pour un profil ni admin ni BDR.
