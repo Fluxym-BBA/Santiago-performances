@@ -371,7 +371,11 @@ export async function loadProfile(session) {
 
     const wanted = new URLSearchParams(location.search).get('u');
     if (wanted && wanted !== _me.user_id) {
-        if (!_me.is_admin) {
+        // canReadAll et non is_admin : depuis la v4, la base laisse lire les
+        // données de toute l'équipe dès le niveau responsable. Garder l'ancienne
+        // condition ici renverrait un responsable chez lui alors que la base lui
+        // aurait répondu, c'est-à-dire un refus inventé par le navigateur.
+        if (!canReadAll(_me)) {
             // Un non-administrateur qui bricole l'URL est renvoyé chez lui.
             // La base refuserait de toute façon de livrer les données.
             const url = new URL(location.href);

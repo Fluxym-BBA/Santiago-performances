@@ -233,7 +233,8 @@ function renderRanking() {
             <td data-th="BDR" class="td-day">
                 <span class="bdr-chip">
                     <span class="bdr-dot" style="background:${p.color}"></span>
-                    ${escapeHtml(nameOf(p))}
+                    <a class="bdr-name" href="${linkFor('./dashboard.html', p.profile.user_id)}"
+                       title="Voir la fiche de ${escapeHtml(nameOf(p))}, telle qu'elle la voit">${escapeHtml(nameOf(p))}</a>
                     ${p.profile.is_demo ? '<b class="tag tag--demo">démo</b>' : ''}
                     ${p.profile.is_active ? '' : '<b class="tag">inactif</b>'}
                     ${p.profile.is_admin ? '<b class="tag tag--admin">admin</b>' : ''}
@@ -770,18 +771,26 @@ function renderPeoplePick() {
         // La pastille reprend la couleur du classement, pour que la liste et les
         // graphiques désignent la même personne sans effort de mémoire.
         const dot = on && person ? person.color : 'var(--gray-300)';
-        return `<label class="person-pick${on ? '' : ' is-off'}">
-            <input type="checkbox" data-person="${id}"${on ? ' checked' : ''}>
-            <span class="person-dot" style="background: ${dot}"></span>
-            <span class="person-name">${escapeHtml(nameOfProfile(pr))}${
-                marks ? ` <em>${marks}</em>` : ''}</span>
-        </label>`;
+        // La case et le lien sont deux gestes différents : le lien reste hors du
+        // label, sinon cliquer sur « fiche » cocherait ou décocherait la
+        // personne au passage.
+        return `<div class="person-pick${on ? '' : ' is-off'}">
+            <label class="person-tick">
+                <input type="checkbox" data-person="${id}"${on ? ' checked' : ''}>
+                <span class="person-dot" style="background: ${dot}"></span>
+                <span class="person-name">${escapeHtml(nameOfProfile(pr))}${
+                    marks ? ` <em>${marks}</em>` : ''}</span>
+            </label>
+            <a class="person-open" href="${linkFor('./dashboard.html', id)}"
+               title="Voir la fiche de ${escapeHtml(nameOfProfile(pr))}, telle qu'elle la voit">fiche</a>
+        </div>`;
     }).join('');
 
     const off = eligible.filter(pr => state.excluded.has(pr.user_id)).length;
     note.innerHTML = off === 0
         ? 'Tout le monde compte. Décocher quelqu\'un le retire des classements, '
-          + 'des totaux, des graphiques et de l\'export.'
+          + 'des totaux, des graphiques et de l\'export. « Fiche » ouvre sa page '
+          + 'de performances telle qu\'elle la voit, en lecture seule.'
         : `<b>${off} personne${off > 1 ? 's' : ''} retirée${off > 1 ? 's' : ''} `
           + `du calcul à la main.</b> Les totaux ci-dessous ne portent donc plus sur `
           + `toute l\'équipe. <button type="button" class="btn-link" id="btn-recheck">`

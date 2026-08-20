@@ -23,7 +23,7 @@ import {
     requireAuth, myProfile, listProfiles, adminSetLevel,
     adminWipeActivity, fetchTeamRange, humanError, todayISO, addDaysISO, formatLong,
     adminFnStatus, adminAuthInfo, adminCreateAccount, adminSetPassword,
-    adminDeleteAccount, adminDeletePreview,
+    adminDeleteAccount, adminDeletePreview, linkFor,
     LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank
 } from './api.js';
 import { renderNav } from './nav.js';
@@ -232,13 +232,15 @@ function render() {
 
             <td data-th="Actions">
                 <div class="act-row">
+                    ${p.is_bdr ? `<a class="chip chip--sm" href="${linkFor('./dashboard.html', p.user_id)}"
+                            title="Voir la fiche de ${who}, telle qu'elle la voit">Fiche</a>` : ''}
                     ${fn.ok ? `<button class="chip chip--sm" type="button"
                             data-pass="${p.user_id}"${lockAttr}>Mot de passe</button>` : ''}
                     ${s2.days ? `<button class="chip chip--sm chip--warn" type="button"
                             data-wipe="${p.user_id}"${lockAttr}>Effacer données</button>` : ''}
                     ${fn.ok && !isMe ? `<button class="chip chip--sm chip--danger" type="button"
                             data-del="${p.user_id}"${lockAttr}>Supprimer</button>` : ''}
-                    ${!fn.ok && !s2.days ? '<span class="td-muted">—</span>' : ''}
+                    ${!fn.ok && !s2.days && !p.is_bdr ? '<span class="td-muted">—</span>' : ''}
                 </div>
             </td>
         </tr>`;
