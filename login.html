@@ -41,9 +41,22 @@
         <button class="btn btn--primary btn--block" type="submit" id="login-submit">Se connecter</button>
     </form>
 
+    <!-- Mot de passe oublié.
+
+         L'application n'envoie aucun courriel : Supabase refuse d'écrire à une
+         adresse qui n'est pas membre du projet tant qu'aucun serveur d'envoi
+         externe n'est branché. Plutôt qu'un lien « oublié » qui ne mènerait
+         nulle part, la phrase ouvre un message déjà rédigé vers
+         l'administrateur, qui remplace le mot de passe en trente secondes. Le
+         jour où un serveur d'envoi existera, c'est ce lien-là qui deviendra un
+         vrai formulaire de réinitialisation. -->
     <p class="login-foot">
         Accès nominatif, créé par l'administrateur.<br>
-        Mot de passe oublié ? Contactez Bruno, la réinitialisation est immédiate.
+        Mot de passe oublié ?
+        <a href="mailto:bbartoli@fluxym.com?subject=Cockpit%20BDR%20%3A%20r%C3%A9initialiser%20mon%20mot%20de%20passe&amp;body=Bonjour%20Bruno%2C%0D%0A%0D%0AJe%20n%27arrive%20plus%20%C3%A0%20me%20connecter%20au%20Cockpit%20BDR.%0D%0AMon%20adresse%20de%20connexion%20%3A%20%0D%0A%0D%0APeux-tu%20me%20redonner%20un%20mot%20de%20passe%20provisoire%20%3F%0D%0A%0D%0AMerci."
+           style="color:var(--cyan);font-weight:800;text-decoration:none">Écrivez à Bruno</a>,
+        la réinitialisation est immédiate.<br>
+        Une fois connecté, choisissez le vôtre dans <b>Mon compte</b>.
     </p>
 </main>
 

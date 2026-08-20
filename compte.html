@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Mon compte | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<div class="loading-veil">Chargement de votre compte…</div>
+
+<nav id="main-nav"></nav>
+
+<header class="page-hero">
+    <div class="page-container">
+        <span class="hero-badge">Mon compte</span>
+        <h1>Mon accès, <em>et mon mot de passe</em></h1>
+        <p>Ce que je suis dans l'outil, et le seul réglage qui n'appartient qu'à moi :
+           mon mot de passe. Personne, pas même l'administrateur, ne peut le lire.</p>
+    </div>
+</header>
+
+<main class="page-main page-main--pulled">
+    <div class="page-container">
+
+        <!-- ============================================================
+             QUI JE SUIS
+
+             En lecture seule, volontairement. Le nom affiché, le niveau
+             d'accès et la prospection sont posés par l'administrateur :
+             les rendre modifiables ici laisserait croire qu'on peut
+             s'attribuer un droit soi-même, ce que la base refuse de
+             toute façon.
+             ============================================================ -->
+
+        <section class="new-block">
+            <div class="section-head">
+                <div>
+                    <h2>Ce que je suis dans l'outil</h2>
+                    <p>Posé par l'administrateur. Si une ligne est fausse, demandez-lui de la
+                       corriger : ces réglages décident de ce que vous voyez et de ce que vous saisissez.</p>
+                </div>
+            </div>
+            <dl class="def-list" id="me-list"></dl>
+        </section>
+
+        <!-- ============================================================
+             CHANGEMENT DE MOT DE PASSE
+
+             L'ancien mot de passe est exigé. Ce n'est pas une formalité :
+             c'est ce qui empêche un poste laissé déverrouillé de servir à
+             verrouiller quelqu'un dehors.
+             ============================================================ -->
+
+        <section class="new-block">
+            <div class="section-head">
+                <div>
+                    <h2>Changer mon mot de passe</h2>
+                    <p>Le nouveau mot de passe est actif immédiatement. L'ancien cesse aussitôt
+                       de fonctionner, sur tous vos appareils lors de leur prochaine connexion.</p>
+                </div>
+            </div>
+
+            <form class="new-form" id="pw-form" autocomplete="off">
+                <div class="form-grid">
+                    <div class="field field--wide">
+                        <label for="pw-current">Mot de passe actuel</label>
+                        <input type="password" id="pw-current" required
+                               autocomplete="current-password" spellcheck="false">
+                        <p class="field-note">Celui avec lequel vous venez de vous connecter.
+                           Il est vérifié avant tout changement.</p>
+                    </div>
+
+                    <div class="field">
+                        <label for="pw-new">Nouveau mot de passe</label>
+                        <input type="password" id="pw-new" required minlength="8"
+                               autocomplete="new-password" spellcheck="false">
+                        <p class="field-note" id="pw-hint">Huit caractères au minimum.</p>
+                    </div>
+
+                    <div class="field">
+                        <label for="pw-confirm">Confirmation</label>
+                        <input type="password" id="pw-confirm" required minlength="8"
+                               autocomplete="new-password" spellcheck="false">
+                        <p class="field-note">Retapé à l'identique. C'est le seul garde-fou contre
+                           une faute de frappe qui vous mettrait dehors.</p>
+                    </div>
+
+                    <div class="field--wide">
+                        <label class="field-note" style="display:flex;align-items:center;gap:9px;margin-top:0;cursor:pointer">
+                            <input type="checkbox" id="pw-show" style="width:auto;flex-shrink:0">
+                            Afficher ce que je tape, pour vérifier avant d'enregistrer
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn--primary" id="pw-submit" type="submit">
+                        Changer mon mot de passe
+                    </button>
+                    <span class="form-status" id="pw-status" role="status" aria-live="polite"></span>
+                </div>
+            </form>
+        </section>
+
+        <section class="info-panel info-panel--soft">
+            <div class="info-panel-head">
+                <span class="info-panel-icon" aria-hidden="true">🔑</span>
+                <h2>Bon à savoir</h2>
+            </div>
+            <div class="info-panel-body">
+                <dl class="def-list">
+                    <dt>Personne ne peut lire votre mot de passe</dt>
+                    <dd>La base n'en conserve qu'une empreinte chiffrée, y compris pour
+                        l'administrateur. C'est pour cela qu'un mot de passe perdu ne peut pas être
+                        retrouvé : il ne peut qu'être remplacé.</dd>
+                    <dt>Mot de passe oublié</dt>
+                    <dd>L'application n'envoie aucun courriel. Demandez à Bruno un mot de passe
+                        provisoire, la manoeuvre prend trente secondes, puis revenez ici pour
+                        choisir le vôtre.</dd>
+                    <dt>Longueur minimale</dt>
+                    <dd>Huit caractères. Une phrase courte que vous seul retenez vaut mieux qu'un
+                        mot compliqué que vous devrez écrire sur un papier.</dd>
+                    <dt>Vos autres appareils</dt>
+                    <dd>Une session déjà ouverte ailleurs le reste jusqu'à son expiration. Si vous
+                        pensez que quelqu'un a eu accès à votre compte, prévenez Bruno : lui seul
+                        peut fermer un accès immédiatement.</dd>
+                </dl>
+            </div>
+        </section>
+
+    </div>
+</main>
+
+<footer class="app-footer">
+    Cockpit BDR · Fluxym — votre compte, visible de vous seul.
+</footer>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/compte.js"></script>
+</body>
+</html>

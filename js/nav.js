@@ -51,6 +51,11 @@ const SECTIONS = [
 
 /** Entrées du menu de droite : le secondaire, jamais le principal. */
 const MENU = [
+    // La seule entrée que tout le monde possède, et la première : c'est ici que
+    // l'on change son propre mot de passe. Elle n'est pas dans la barre du haut
+    // parce qu'on ne s'y rend que deux fois par an, et que la règle des trois
+    // onglets vaut plus que la visibilité d'un réglage.
+    { href: './compte.html', label: 'Mon compte', icon: '🔑', when: () => true },
     { href: './admin.html', label: 'Gérer les comptes', icon: '⚙️', when: p => canManageAccounts(p) },
     { href: './team.html', label: 'Vue d\'équipe', icon: '👥', when: p => canReadAll(p), onlyCollapsed: true },
     { href: './dashboard.html', label: 'Mes performances', icon: '📊', when: p => p.is_bdr, onlyCollapsed: true },
