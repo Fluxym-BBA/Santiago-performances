@@ -14,7 +14,8 @@
 
 import {
     requireAuth, isAdmin, canReadAll, myProfile, linkFor, listProfiles,
-    fetchTeamRange, todayISO, addDaysISO, formatLong, formatShort, periodLength,
+    fetchTeamRange, todayISO, addDaysISO, diffDays, minISO, maxISO,
+    formatLong, formatShort, periodLength,
     startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter,
     periodLabel, periodLabelShort, humanError, METRICS, SCORE_WEIGHTS
 } from './api.js';
@@ -73,28 +74,117 @@ let people = [];      // [{ profile, byDate, rows, a }] trié par score décrois
 let allProfiles = [];
 let eligible = [];    // profils que les deux filtres laissent passer, avant décochage
 
-// Les lignes de la période, gardées telles quelles. Décocher une personne est un
-// calcul local : refaire la requête à chaque clic serait payer le réseau pour
-// une information qu'on a déjà sous la main.
-let cache = { key: '', rows: [] };
+// Les lignes déjà chargées, avec la fenêtre de dates qu'elles couvrent.
+// Décocher une personne, changer de granularité ou revenir sur une période déjà
+// vue sont des calculs locaux : refaire la requête à chaque clic serait payer le
+// réseau pour une information qu'on a déjà sous la main.
+//
+// La fenêtre ne fait que grandir tant que les deux filtres de comptes ne
+// changent pas, parce qu'une carte peut désormais porter ses propres dates et
+// sortir de la période globale. Elle repart de zéro dès qu'un filtre change,
+// sans quoi on garderait des lignes que le filtre vient d'exclure.
+let cache = { from: null, to: null, filters: '', rows: [] };
+
+// Chiffres et rang de chacun sur une période donnée, calculés à la demande et
+// gardés le temps d'un rendu. Six cartes qui regardent la même période ne
+// doivent pas refaire six fois le même agrégat.
+let statsCache = new Map();
 
 const effGran = () => (state.gran === 'auto' ? autoGran(state.from, state.to) : state.gran);
 const pLabel = () => periodLabelShort(state.from, state.to);
+
+/* Bornes inversées, date dans le futur : on répare au lieu de dessiner un
+   graphique vide. Même règle que sur la page Performances. */
+function normalizeRange(p) {
+    if (diffDays(p.to, p.from) < 0) { const s = p.from; p.from = p.to; p.to = s; }
+    if (diffDays(T, p.to) < 0) p.to = T;
+    if (diffDays(T, p.from) < 0) p.from = T;
+    return p;
+}
+
+/* --------------------------------------------------------------------------
+   Dates propres à une carte
+
+   Deux niveaux de dates cohabitent maintenant : la période globale du panneau
+   de pilotage, et les dates qu'une carte peut se donner à elle seule. C'est
+   l'ergonomie de la page Performances, reprise telle quelle : même bouton 📅,
+   même panneau sous l'en-tête, même retour à la période globale, et le même
+   état partagé entre la carte et sa vue agrandie.
+
+   Ce qu'une carte à dates propres ne change pas : le classement, les
+   indicateurs de tête et l'export restent sur la période globale. Les faire
+   suivre reviendrait à afficher un tableau dont plus personne ne saurait dire
+   sur quoi il porte.
+   -------------------------------------------------------------------------- */
+
+const scopes = new Map();     // clé de carte → { from, to }
+const datesOpen = new Set();  // cartes dont le panneau de dates est déplié
+
+/** La fenêtre de dates qu'il faut avoir chargée pour pouvoir tout dessiner. */
+function neededWindow() {
+    let from = state.from, to = state.to;
+    scopes.forEach(s => { from = minISO(from, s.from); to = maxISO(to, s.to); });
+    return { from, to };
+}
+
+/** Les deux boutons de l'en-tête, identiques sur les six cartes. */
+const toolsHtml = key => `
+    <div class="chart-tools">
+        <button class="icon-btn" type="button" data-dates="${key}"
+                title="Dates propres à ce graphique" aria-label="Dates de ce graphique">📅</button>
+        <button class="icon-btn" type="button" data-zoom="${key}"
+                title="Agrandir" aria-label="Agrandir ce graphique">⛶</button>
+    </div>`;
+
+/* Le panneau de dates d'une carte. Il reste déplié tant qu'on ne l'a pas
+   refermé, et il est toujours déplié quand la carte porte ses propres dates :
+   une carte qui ne suit plus la période globale doit le dire sans qu'on ait à
+   cliquer pour le découvrir. */
+const datesBarHtml = ctx => `
+    <div class="chart-dates" data-panel="${ctx.key}"${
+        datesOpen.has(ctx.key) || ctx.scoped ? '' : ' hidden'}>
+        <span class="date-bar-label">Dates de ce graphique</span>
+        <div class="date-range">
+            <input type="date" data-scope-from="${ctx.key}" value="${ctx.from}" max="${T}">
+            <span>→</span>
+            <input type="date" data-scope-to="${ctx.key}" value="${ctx.to}" max="${T}">
+        </div>
+        <button class="chip chip--sm" type="button" data-scope-reset="${ctx.key}">↺ Période globale</button>
+        <span class="pill ${ctx.scoped ? 'pill--warn' : 'pill--info'}">${scopePill(ctx)}</span>
+    </div>`;
+
+const scopePill = ctx => (ctx.scoped
+    ? `dates propres · ${periodLength(ctx.from, ctx.to)} jours · un point = un ${granWord(ctx.gran)}`
+    : 'suit la période globale');
 
 /* --------------------------------------------------------------------------
    Chargement
    -------------------------------------------------------------------------- */
 
 async function load() {
-    // Une même requête sert tous les réglages qui ne changent ni la période ni
-    // les deux filtres de comptes : granularité, mode de lecture, et surtout le
-    // décochage d'une personne, qui se calcule ici sans rien redemander.
-    const key = [state.from, state.to, state.demo, state.inactive].join('|');
-    if (cache.key !== key) {
-        cache.rows = await fetchTeamRange(state.from, state.to, {
-            includeDemo: state.demo, includeInactive: state.inactive
-        });
-        cache.key = key;
+    // Une même requête sert tous les réglages qui ne changent ni la fenêtre de
+    // dates ni les deux filtres de comptes : granularité, mode de lecture, et
+    // surtout le décochage d'une personne, qui se calcule ici sans rien
+    // redemander. Élargir une carte au-delà de ce qui est chargé, en revanche,
+    // demande bien un aller-retour : les jours manquants n'existent nulle part.
+    const filters = [state.demo, state.inactive].join('|');
+    const want = neededWindow();
+    const same = cache.filters === filters && !!cache.from;
+    const covered = same
+        && diffDays(want.from, cache.from) >= 0
+        && diffDays(cache.to, want.to) >= 0;
+
+    if (!covered) {
+        // On charge l'union de ce qui est déjà là et de ce qu'on demande :
+        // revenir sur une période déjà vue ne doit pas la recharger.
+        const from = same ? minISO(cache.from, want.from) : want.from;
+        const to = same ? maxISO(cache.to, want.to) : want.to;
+        cache = {
+            from, to, filters,
+            rows: await fetchTeamRange(from, to, {
+                includeDemo: state.demo, includeInactive: state.inactive
+            })
+        };
     }
     const rows = cache.rows;
 
@@ -110,18 +200,29 @@ async function load() {
             && (state.inactive || p.is_active))
         .forEach(p => map.set(p.user_id, { profile: p, byDate: new Map() }));
 
+    // Un compte que listProfiles ne renvoie pas n'entre dans la liste que s'il a
+    // saisi sur la période globale. Sans cette borne, élargir les dates d'une
+    // seule carte ferait apparaître des noms dans « Qui est compté » puis les
+    // ferait disparaître, alors que le périmètre n'a pas bougé.
     rows.forEach(r => {
-        if (!map.has(r.user_id)) {
-            map.set(r.user_id, {
-                profile: {
-                    user_id: r.user_id, display_name: r.display_name, email: r.email,
-                    is_admin: r.is_admin, is_bdr: r.is_bdr,
-                    is_demo: r.is_demo, is_active: r.is_active
-                },
-                byDate: new Map()
-            });
-        }
-        map.get(r.user_id).byDate.set(r.activity_date, r);
+        if (map.has(r.user_id)) return;
+        if (diffDays(r.activity_date, state.from) < 0) return;
+        if (diffDays(state.to, r.activity_date) < 0) return;
+        map.set(r.user_id, {
+            profile: {
+                user_id: r.user_id, display_name: r.display_name, email: r.email,
+                is_admin: r.is_admin, is_bdr: r.is_bdr,
+                is_demo: r.is_demo, is_active: r.is_active
+            },
+            byDate: new Map()
+        });
+    });
+
+    // Toutes les lignes de la fenêtre chargée, y compris hors période globale :
+    // c'est là que les dates propres d'une carte trouvent leurs chiffres.
+    rows.forEach(r => {
+        const v = map.get(r.user_id);
+        if (v) v.byDate.set(r.activity_date, r);
     });
 
     // Qui a le droit d'apparaître dans la liste à cocher : tout ce que les deux
@@ -151,11 +252,50 @@ async function load() {
 
     if (!state.duelA && people[0]) state.duelA = people[0].profile.user_id;
     if (!state.duelB && people[1]) state.duelB = people[1].profile.user_id;
+
+    // Les agrégats par période sont refaits à chaque chargement : garder ceux du
+    // rendu précédent afficherait les chiffres d'avant le changement.
+    statsCache = new Map();
 }
 
 const nameOfProfile = pr => pr.display_name || pr.email || 'Sans nom';
 const nameOf = p => nameOfProfile(p.profile);
 const personBy = id => people.find(p => p.profile.user_id === id) || null;
+
+/** Chiffres et rang de chacun sur une période, tout le monde compté ensemble.
+    Le rang est recalculé sur cette période : afficher le rang du classement
+    global à côté de chiffres qui portent sur trois mois de plus serait un
+    contresens, et c'est exactement ce que permettent les dates par carte. */
+function statsFor(from, to) {
+    const k = `${from}|${to}`;
+    if (!statsCache.has(k)) {
+        const list = people
+            .map(p => ({ id: p.profile.user_id, a: agg(rowsForRange(p.byDate, from, to)) }))
+            .sort((x, y) => y.a.productivity_score - x.a.productivity_score);
+        statsCache.set(k, new Map(list.map((x, i) => [x.id, { a: x.a, rank: i + 1 }])));
+    }
+    return statsCache.get(k);
+}
+
+/** Tout ce dont un dessin a besoin : ses dates, sa granularité, sa taille. */
+function ctxFor(key, { big = false } = {}) {
+    const s = scopes.get(key) || null;
+    const from = s ? s.from : state.from;
+    const to = s ? s.to : state.to;
+    return {
+        key, from, to, big, scoped: !!s,
+        // Une carte à dates propres choisit sa granularité d'après sa propre
+        // longueur. Garder « un jour » sur une carte passée à un an donnerait
+        // 365 points illisibles, et le réglage global a été choisi pour la
+        // période globale, pas pour celle-là.
+        gran: s ? autoGran(from, to) : effGran()
+    };
+}
+
+/* Le sous-titre dit la période dès qu'elle n'est plus celle du panneau de
+   pilotage. En vue agrandie, c'est le seul endroit qui la nomme en clair. */
+const subOf = (c, ctx) => c.sub(ctx)
+    + (ctx.scoped ? ` · ${periodLabelShort(ctx.from, ctx.to)}` : '');
 
 /* --------------------------------------------------------------------------
    Indicateurs de tête
@@ -266,9 +406,8 @@ function renderRanking() {
    l'autre pour reconstituer un classement de tête.
    -------------------------------------------------------------------------- */
 
-function teamTip(buckets, key, unit = '') {
+function teamTip(buckets, key, gran, unit = '') {
     return i => {
-        const gran = effGran();
         const bk = buckets[0].list[i];
         const label = bk
             ? (gran === 'day' ? formatLong(bk.key) : `${bk.label} · ${periodLabelShort(
@@ -279,7 +418,7 @@ function teamTip(buckets, key, unit = '') {
             const bucket = b.list[i];
             const a = bucket ? agg(bucket.rows) : null;
             return {
-                name: b.name, color: b.color, rank: b.rank,
+                name: b.name, color: b.color,
                 v: a ? valOf(a, key, 'total') : 0,
                 active: a ? a.activeDays : 0,
                 days: a ? a.days : 0
@@ -326,70 +465,78 @@ const METRIC_LABEL = {
 
 /* --------------------------------------------------------------------------
    Graphiques
+
+   Chaque carte reçoit un contexte : ses dates, sa granularité, et si elle est
+   dessinée en grand. Rien ici ne lit plus l'état global directement, sans quoi
+   une carte à dates propres afficherait la période globale sous un autre titre.
    -------------------------------------------------------------------------- */
 
 const CHARTS = [
     {
         key: 'score', icon: '⭐', wide: true,
         title: 'Score de productivité par BDR',
-        sub: () => `Une courbe par personne, ${granWord(effGran())} par ${granWord(effGran())}`,
+        sub: ctx => `Une courbe par personne, ${granWord(ctx.gran)} par ${granWord(ctx.gran)}`,
         metric: 'productivity_score',
         note: () => `Chaque courbe est une personne, sa couleur est la même dans tous les graphiques
             et dans le classement. Une courbe qui s'interrompt signale des jours sans aucune saisie,
             jamais un zéro inventé.`,
         hover: () => `le classement complet de l'équipe sur le moment pointé, la part de chacun dans
             le total, l'avance du premier sur le second, et la moyenne par BDR ayant saisi.`,
-        render: (host, shown, big) => drawLines(host, shown, 'productivity_score', big)
+        render: (host, shown, ctx) => drawLines(host, shown, 'productivity_score', ctx)
     },
     {
         key: 'calls', icon: '📞',
         title: 'Appels passés par BDR',
-        sub: () => `Barres groupées par ${granWord(effGran())}`,
+        sub: ctx => `Barres groupées par ${granWord(ctx.gran)}`,
         metric: 'calls_made',
-        note: () => `Le volume d'appels est le premier levier d'un BDR : c'est la seule métrique
+        note: ctx => `Le volume d'appels est le premier levier d'un BDR : c'est la seule métrique
             entièrement sous son contrôle. Les barres sont groupées par personne à l'intérieur de
-            chaque ${granWord(effGran())}.`,
+            chaque ${granWord(ctx.gran)}.`,
         hover: () => `tous les BDR sur le moment pointé, classés, avec la part de chacun.`,
-        render: (host, shown, big) => drawBars(host, shown, 'calls_made', big)
+        render: (host, shown, ctx) => drawBars(host, shown, 'calls_made', ctx)
     },
     {
         key: 'meetings', icon: '🤝',
         title: 'Rendez-vous obtenus par BDR',
-        sub: () => `Le résultat qui compte, par ${granWord(effGran())}`,
+        sub: ctx => `Le résultat qui compte, par ${granWord(ctx.gran)}`,
         metric: 'meetings_booked',
         note: () => `Le rendez-vous vaut vingt points au score, c'est de loin l'action la plus lourde.
             Un BDR qui en obtient peu malgré beaucoup d'appels doit être regardé sur le taux de
             conversion plutôt que sur le volume.`,
         hover: () => `tous les BDR sur le moment pointé, classés, avec la part de chacun.`,
-        render: (host, shown, big) => drawBars(host, shown, 'meetings_booked', big)
+        render: (host, shown, ctx) => drawBars(host, shown, 'meetings_booked', ctx)
     },
     {
         key: 'rate', icon: '🎯', wide: true,
         title: 'Taux de rendez-vous par BDR',
         sub: () => 'Rendez-vous obtenus pour cent appels aboutis',
         metric: 'meeting_rate',
-        note: () => `Le taux est recalculé depuis les volumes du ${granWord(effGran())}, jamais moyenné.
+        note: ctx => `Le taux est recalculé depuis les volumes du ${granWord(ctx.gran)}, jamais moyenné.
             Attention aux petits volumes : deux appels aboutis et un rendez-vous donnent 50 %, ce qui
             ne veut rien dire. L'info-bulle donne les volumes pour trancher.`,
         hover: () => `le taux de chaque BDR sur le moment pointé, avec les volumes d'appels aboutis et
             de rendez-vous qui ont servi à le calculer.`,
-        render: (host, shown, big) => drawRates(host, shown, big)
+        render: (host, shown, ctx) => drawRates(host, shown, ctx)
     }
 ];
 
-/** Les huit meilleurs : au-delà, les courbes deviennent illisibles. */
+/** Les huit meilleurs du classement de la période globale : au-delà, les
+    courbes deviennent illisibles. Ce sont les mêmes personnes sur les six
+    cartes, y compris celles qui portent leurs propres dates, pour qu'une
+    couleur désigne toujours la même personne d'un graphique à l'autre. */
 const shownPeople = () => people.slice(0, MAX_SERIES);
 
-function bucketsOf(list) {
-    const gran = effGran();
+const legendOf = shown => shown.map(p => ({ color: p.color, label: nameOf(p) }));
+
+function bucketsOf(list, ctx) {
     return list.map(p => ({
-        name: nameOf(p), color: p.color, rank: p.rank,
-        list: bucketize(p.rows, gran)
+        name: nameOf(p), color: p.color,
+        list: bucketize(rowsForRange(p.byDate, ctx.from, ctx.to), ctx.gran)
     }));
 }
 
-function drawLines(host, shown, key, big = false) {
-    const bk = bucketsOf(shown);
+function drawLines(host, shown, key, ctx) {
+    const bk = bucketsOf(shown, ctx);
     if (!bk.length || !bk[0].list.length) return host.innerHTML = emptyStateHtml();
     lineChart(host, {
         labels: bk[0].list.map(b => b.label),
@@ -397,13 +544,13 @@ function drawLines(host, shown, key, big = false) {
             name: b.name, color: b.color,
             values: b.list.map(x => agg(x.rows).productivity_score)
         })),
-        height: big ? 480 : 320,
-        tip: teamTip(bk, key)
+        height: ctx.big ? 480 : 320,
+        tip: teamTip(bk, key, ctx.gran)
     });
 }
 
-function drawBars(host, shown, key, big = false) {
-    const bk = bucketsOf(shown);
+function drawBars(host, shown, key, ctx) {
+    const bk = bucketsOf(shown, ctx);
     if (!bk.length || !bk[0].list.length) return host.innerHTML = emptyStateHtml();
     barChart(host, {
         labels: bk[0].list.map(b => b.label),
@@ -411,15 +558,15 @@ function drawBars(host, shown, key, big = false) {
             name: b.name, color: b.color,
             values: b.list.map(x => agg(x.rows)[key])
         })),
-        height: big ? 420 : 260,
-        tip: teamTip(bk, key)
+        height: ctx.big ? 420 : 260,
+        tip: teamTip(bk, key, ctx.gran)
     });
 }
 
-function drawRates(host, shown, big = false) {
-    const bk = bucketsOf(shown);
+function drawRates(host, shown, ctx) {
+    const bk = bucketsOf(shown, ctx);
     if (!bk.length || !bk[0].list.length) return host.innerHTML = emptyStateHtml();
-    const gran = effGran();
+    const gran = ctx.gran;
 
     lineChart(host, {
         labels: bk[0].list.map(b => b.label),
@@ -427,7 +574,7 @@ function drawRates(host, shown, big = false) {
             name: b.name, color: b.color,
             values: b.list.map(x => agg(x.rows).meeting_rate)
         })),
-        height: big ? 460 : 300,
+        height: ctx.big ? 460 : 300,
         tip: i => {
             const first = bk[0].list[i];
             const label = gran === 'day' ? formatLong(first.key) : first.label;
@@ -459,6 +606,49 @@ function drawRates(host, shown, big = false) {
     });
 }
 
+/* Les boutons d'une carte sont recréés à chaque rendu : on les recâble ici,
+   comme partout ailleurs dans ce fichier. La même fonction sert à la grille des
+   graphiques et à celle du duel, pour que les deux se comportent pareil. */
+function wireCards(grid) {
+    grid.querySelectorAll('[data-zoom]').forEach(b =>
+        b.addEventListener('click', () => openModal(b.dataset.zoom)));
+
+    // Déplier ou replier le panneau ne touche qu'à un attribut : inutile de
+    // refaire un rendu, et surtout inutile de redessiner un SVG pour cela.
+    grid.querySelectorAll('[data-dates]').forEach(b =>
+        b.addEventListener('click', () => {
+            const k = b.dataset.dates;
+            const panel = grid.querySelector(`[data-panel="${k}"]`);
+            const willOpen = panel.hidden;
+            panel.hidden = !willOpen;
+            if (willOpen) datesOpen.add(k); else datesOpen.delete(k);
+        }));
+
+    grid.querySelectorAll('[data-scope-from], [data-scope-to]').forEach(inp =>
+        inp.addEventListener('change', () => {
+            const k = inp.dataset.scopeFrom || inp.dataset.scopeTo;
+            const from = grid.querySelector(`[data-scope-from="${k}"]`).value;
+            const to = grid.querySelector(`[data-scope-to="${k}"]`).value;
+            if (!from || !to) return;
+            scopes.set(k, normalizeRange({ from, to }));
+            datesOpen.add(k);
+            // refresh et non un simple redessin : les jours demandés ne sont
+            // peut-être pas encore chargés.
+            refresh();
+        }));
+
+    // On garde le panneau déplié après un retour à la période globale : faire
+    // disparaître le bouton qu'on vient de cliquer est déroutant, et il faut
+    // pouvoir relire la pastille qui confirme que la carte suit à nouveau.
+    grid.querySelectorAll('[data-scope-reset]').forEach(b =>
+        b.addEventListener('click', () => {
+            const k = b.dataset.scopeReset;
+            scopes.delete(k);
+            datesOpen.add(k);
+            refresh();
+        }));
+}
+
 function renderCharts() {
     const grid = document.getElementById('charts-grid');
     const shown = shownPeople();
@@ -468,26 +658,30 @@ function renderCharts() {
         return;
     }
 
-    grid.innerHTML = CHARTS.map(c => `
-        <div class="chart-card${c.wide ? ' chart-card--wide' : ''}">
+    const ctxs = new Map(CHARTS.map(c => [c.key, ctxFor(c.key)]));
+    const legend = legendOf(shown);
+
+    grid.innerHTML = CHARTS.map(c => {
+        const ctx = ctxs.get(c.key);
+        return `
+        <div class="chart-card${c.wide ? ' chart-card--wide' : ''}${ctx.scoped ? ' chart-card--scoped' : ''}">
             <div class="chart-head">
                 <div class="chart-icon">${c.icon}</div>
                 <div class="chart-titles">
                     <h3 class="chart-title">${escapeHtml(c.title)}</h3>
-                    <p class="chart-sub">${escapeHtml(c.sub())}</p>
+                    <p class="chart-sub">${escapeHtml(subOf(c, ctx))}</p>
                 </div>
-                <div class="chart-tools">
-                    <button class="icon-btn" type="button" data-zoom="${c.key}"
-                            title="Agrandir" aria-label="Agrandir ce graphique">⛶</button>
-                </div>
+                ${toolsHtml(c.key)}
             </div>
-            ${legendHtml(shown.map(p => ({ color: p.color, label: nameOf(p) })))}
+            ${datesBarHtml(ctx)}
+            ${legendHtml(legend)}
             <div data-host="${c.key}"></div>
             <details class="chart-note"><summary>Comment lire ce graphique</summary>
-                <p>${c.note()}</p>
-                <p class="chart-note-hover"><b>Au survol :</b> ${c.hover()}</p>
+                <p>${c.note(ctx)}</p>
+                <p class="chart-note-hover"><b>Au survol :</b> ${c.hover(ctx)}</p>
             </details>
-        </div>`).join('')
+        </div>`;
+    }).join('')
         + (people.length > MAX_SERIES
             ? `<p class="chart-hint">Seuls les ${MAX_SERIES} premiers du classement sont tracés,
                au-delà les courbes deviennent illisibles. Le classement ci-dessus reste complet.</p>`
@@ -495,52 +689,64 @@ function renderCharts() {
 
     CHARTS.forEach(c => {
         const host = grid.querySelector(`[data-host="${c.key}"]`);
-        if (host) c.render(host, shown);
+        if (host) c.render(host, shown, ctxs.get(c.key));
     });
 
-    grid.querySelectorAll('[data-zoom]').forEach(b =>
-        b.addEventListener('click', () => openModal(b.dataset.zoom)));
+    wireCards(grid);
 }
 
 /* --------------------------------------------------------------------------
    Duel de deux BDR
    -------------------------------------------------------------------------- */
 
-/* Les deux dessins du duel, extraits de renderDuel pour pouvoir être refaits
-   dans la fenêtre d'agrandissement sans dupliquer une ligne de leur contenu.
-   Le corps est celui d'origine, seul l'hôte devient un paramètre. */
-function drawDuelCompare(host, A, B) {
+/** La légende du duel, identique dans la carte et dans la fenêtre agrandie. */
+const duelLegend = (A, B) => [
+    { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
+    { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
+];
+
+/* Les deux dessins du duel, sortis de renderDuel pour pouvoir être refaits dans
+   la fenêtre d'agrandissement sans dupliquer une ligne de leur contenu. Ils
+   reçoivent leur contexte comme les cartes de la grille : les chiffres et le
+   rang sont ceux de la période de la carte, pas ceux du classement global. */
+function drawDuelCompare(host, A, B, ctx) {
+    const st = statsFor(ctx.from, ctx.to);
+    const sA = st.get(A.profile.user_id), sB = st.get(B.profile.user_id);
+    if (!sA || !sB) return host.innerHTML = emptyStateHtml();
+
     const dec = state.mode === 'avg';
     const fV = v => (dec ? fmtDec(v) : fmtInt(v));
 
     compareChart(host, {
         rows: METRICS.map(m => ({
             label: m.short, colorA: A_MAIN, colorB: B_MAIN,
-            a: valOf(A.a, m.key, state.mode), b: valOf(B.a, m.key, state.mode)
+            a: valOf(sA.a, m.key, state.mode), b: valOf(sB.a, m.key, state.mode)
         })),
         labelA: nameOf(A), labelB: nameOf(B),
         fmt: fV,
         tip: i => {
             const m = METRICS[i];
             const w = SCORE_WEIGHTS.find(x => x.key === m.key);
-            const side = (p, color) => [
-                { color, label: m.short, value: fV(valOf(p.a, m.key, state.mode)), em: true },
-                { label: 'Cumul', value: fmtInt(p.a[m.key]), muted: true },
+            const side = (sp, color) => [
+                { color, label: m.short, value: fV(valOf(sp.a, m.key, state.mode)), em: true },
+                { label: 'Cumul', value: fmtInt(sp.a[m.key]), muted: true },
                 { label: 'Par jour actif',
-                  value: p.a.activeDays > 0 ? fmtDec(p.a[m.key] / p.a.activeDays) : '–', muted: true },
-                { label: 'Jours saisis', sub: `sur ${p.a.days} j`, value: fmtInt(p.a.activeDays), muted: true },
-                { label: 'Rang au score', value: `${p.rank}${p.rank === 1 ? 'er' : 'e'}`, muted: true }
+                  value: sp.a.activeDays > 0 ? fmtDec(sp.a[m.key] / sp.a.activeDays) : '–', muted: true },
+                { label: 'Jours saisis', sub: `sur ${sp.a.days} j`, value: fmtInt(sp.a.activeDays), muted: true },
+                { label: 'Rang au score', value: `${sp.rank}${sp.rank === 1 ? 'er' : 'e'}`, muted: true }
             ];
-            const va = valOf(A.a, m.key, state.mode), vb = valOf(B.a, m.key, state.mode);
+            const va = valOf(sA.a, m.key, state.mode), vb = valOf(sB.a, m.key, state.mode);
             const diff = va - vb;
             const pct = vb !== 0 ? (diff / Math.abs(vb)) * 100 : null;
             const dir = diff > 0.0001 ? 'up' : diff < -0.0001 ? 'down' : 'flat';
             return {
                 title: m.label,
-                meta: dec ? 'Moyenne par jour actif' : `Cumul sur ${pLabel()}`,
+                meta: dec
+                    ? `Moyenne par jour actif · ${periodLabelShort(ctx.from, ctx.to)}`
+                    : `Cumul sur ${periodLabelShort(ctx.from, ctx.to)}`,
                 sections: [
-                    { accent: 'a', badge: 'A', head: nameOf(A), rows: side(A, A_MAIN) },
-                    { accent: 'b', badge: 'B', head: nameOf(B), rows: side(B, B_MAIN) }
+                    { accent: 'a', badge: 'A', head: nameOf(A), rows: side(sA, A_MAIN) },
+                    { accent: 'b', badge: 'B', head: nameOf(B), rows: side(sB, B_MAIN) }
                 ],
                 deltas: [{
                     label: 'Écart', html: `<span class="delta delta--${dir}">${
@@ -557,20 +763,23 @@ function drawDuelCompare(host, A, B) {
 
 /* compareChart calcule sa hauteur d'après le nombre de lignes : elle n'a donc
    pas de variante agrandie, elle gagne seulement en largeur. */
-function drawDuelTime(host, A, B, big = false) {
-    const gran = effGran();
-    const bA = bucketize(A.rows, gran), bB = bucketize(B.rows, gran);
+function drawDuelTime(host, A, B, ctx) {
+    const gran = ctx.gran;
+    const bA = bucketize(rowsForRange(A.byDate, ctx.from, ctx.to), gran);
+    const bB = bucketize(rowsForRange(B.byDate, ctx.from, ctx.to), gran);
+    if (!bA.length) return host.innerHTML = emptyStateHtml();
+
     lineChart(host, {
         labels: bA.map(b => b.label),
         series: [
             { name: nameOf(A), color: A_MAIN, values: bA.map(b => agg(b.rows).productivity_score), area: true },
             { name: nameOf(B), color: B_MAIN, values: bB.map(b => agg(b.rows).productivity_score) }
         ],
-        height: big ? 460 : 300,
+        height: ctx.big ? 460 : 300,
         tip: i => {
             const ga = agg(bA[i] ? bA[i].rows : []);
             const gb = agg(bB[i] ? bB[i].rows : []);
-            const line = (g, color, p) => [
+            const line = (g, color) => [
                 { color, label: 'Score', value: `${fmtInt(g.productivity_score)} pts`, em: true },
                 { label: 'Appels', value: fmtInt(g.calls_made), muted: true },
                 { label: 'Aboutis', value: fmtInt(g.calls_connected), muted: true },
@@ -583,8 +792,8 @@ function drawDuelTime(host, A, B, big = false) {
                 title: gran === 'day' && bA[i] ? formatLong(bA[i].key) : (bA[i] ? bA[i].label : '—'),
                 meta: `Écart de score : ${diff > 0 ? '+' : ''}${fmtInt(diff)} points`,
                 sections: [
-                    { accent: 'a', badge: 'A', head: nameOf(A), rows: line(ga, A_MAIN, A) },
-                    { accent: 'b', badge: 'B', head: nameOf(B), rows: line(gb, B_MAIN, B) }
+                    { accent: 'a', badge: 'A', head: nameOf(A), rows: line(ga, A_MAIN) },
+                    { accent: 'b', badge: 'B', head: nameOf(B), rows: line(gb, B_MAIN) }
                 ],
                 deltas: [{
                     label: 'Score', html: `<span class="delta delta--${
@@ -621,64 +830,57 @@ function renderDuel() {
     }
 
     const dec = state.mode === 'avg';
-    const fV = v => (dec ? fmtDec(v) : fmtInt(v));
+    const ctxC = ctxFor('duel-compare');
+    const ctxT = ctxFor('duel-time');
 
     grid.innerHTML = `
-        <div class="chart-card chart-card--wide">
+        <div class="chart-card chart-card--wide${ctxC.scoped ? ' chart-card--scoped' : ''}">
             <div class="chart-head">
                 <div class="chart-icon">⚔️</div>
                 <div class="chart-titles">
                     <h3 class="chart-title">${escapeHtml(nameOf(A))} contre ${escapeHtml(nameOf(B))}</h3>
-                    <p class="chart-sub">Action par action, ${dec ? 'en moyenne par jour actif' : 'en cumul'}, sur ${pLabel()}</p>
+                    <p class="chart-sub">Action par action, ${dec ? 'en moyenne par jour actif' : 'en cumul'}, sur ${
+                        escapeHtml(periodLabelShort(ctxC.from, ctxC.to))}</p>
                 </div>
-                <div class="chart-tools">
-                    <button class="icon-btn" type="button" data-zoom="duel-compare"
-                            title="Agrandir" aria-label="Agrandir ce graphique">⛶</button>
-                </div>
+                ${toolsHtml('duel-compare')}
             </div>
-            ${legendHtml([
-                { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
-                { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
-            ])}
+            ${datesBarHtml(ctxC)}
+            ${legendHtml(duelLegend(A, B))}
             <div data-host="duel-compare"></div>
         </div>
-        <div class="chart-card chart-card--wide">
+        <div class="chart-card chart-card--wide${ctxT.scoped ? ' chart-card--scoped' : ''}">
             <div class="chart-head">
                 <div class="chart-icon">📈</div>
                 <div class="chart-titles">
                     <h3 class="chart-title">Score dans le temps</h3>
-                    <p class="chart-sub">Les deux trajectoires, ${granWord(effGran())} par ${granWord(effGran())}</p>
+                    <p class="chart-sub">Les deux trajectoires, ${granWord(ctxT.gran)} par ${granWord(ctxT.gran)}${
+                        ctxT.scoped ? ` · ${escapeHtml(periodLabelShort(ctxT.from, ctxT.to))}` : ''}</p>
                 </div>
-                <div class="chart-tools">
-                    <button class="icon-btn" type="button" data-zoom="duel-time"
-                            title="Agrandir" aria-label="Agrandir ce graphique">⛶</button>
-                </div>
+                ${toolsHtml('duel-time')}
             </div>
-            ${legendHtml([
-                { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
-                { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
-            ])}
+            ${datesBarHtml(ctxT)}
+            ${legendHtml(duelLegend(A, B))}
             <div data-host="duel-time"></div>
         </div>`;
 
-    drawDuelCompare(grid.querySelector('[data-host="duel-compare"]'), A, B);
-    drawDuelTime(grid.querySelector('[data-host="duel-time"]'), A, B);
+    drawDuelCompare(grid.querySelector('[data-host="duel-compare"]'), A, B, ctxC);
+    drawDuelTime(grid.querySelector('[data-host="duel-time"]'), A, B, ctxT);
 
-    grid.querySelectorAll('[data-zoom]').forEach(b =>
-        b.addEventListener('click', () => openModal(b.dataset.zoom)));
+    wireCards(grid);
 
     selA.onchange = () => { state.duelA = selA.value; renderDuel(); };
     selB.onchange = () => { state.duelB = selB.value; renderDuel(); };
 }
 
 /* --------------------------------------------------------------------------
-   Agrandissement d'une carte
+   Agrandissement d'une carte, et dates propres en grand
 
    Le squelette de la fenêtre existait déjà dans team.html depuis que la page a
-   été calquée sur le tableau de bord, mais rien ne le pilotait : c'est ce
-   moteur qui manquait. Même ergonomie que sur la page Performances, à un détail
-   près assumé dans ce lot : la fenêtre montre la période globale, les dates
-   propres à un graphique viendront ensuite.
+   été calquée sur le tableau de bord, mais rien ne le pilotait : c'est ce moteur
+   qui manquait. Même ergonomie que sur la page Performances, jusqu'à la barre de
+   dates de la fenêtre, qui écrit dans le même état que le panneau de la carte.
+   Changer les dates en grand, c'est les changer sur la carte : deux réglages
+   parallèles pour la même carte seraient une source de doute permanente.
 
    Aucun contenu n'est dupliqué. La fenêtre appelle la même fonction de dessin
    que la carte, avec un hôte plus large et une hauteur plus généreuse. Deux
@@ -691,47 +893,49 @@ let openKey = null;
 /** Ce qu'il faut savoir pour redessiner une carte, qu'elle vienne de la grille
     ou du duel. Renvoie null quand il n'y a rien à montrer. */
 function expandable(key) {
+    const ctx = ctxFor(key, { big: true });
     const c = CHARTS.find(x => x.key === key);
     if (c) {
         const shown = shownPeople();
         if (!shown.length) return null;
         return {
+            ctx,
             icon: c.icon,
             title: c.title,
-            sub: c.sub(),
-            legend: shown.map(p => ({ color: p.color, label: nameOf(p) })),
-            note: `<p>${c.note()}</p>
-                   <p class="chart-note-hover"><b>Au survol :</b> ${c.hover()}</p>`,
-            draw: host => c.render(host, shown, true)
+            sub: subOf(c, ctx),
+            legend: legendOf(shown),
+            note: `<p>${c.note(ctx)}</p>
+                   <p class="chart-note-hover"><b>Au survol :</b> ${c.hover(ctx)}</p>`,
+            draw: host => c.render(host, shown, ctx)
         };
     }
 
     const A = personBy(state.duelA), B = personBy(state.duelB);
     if (!A || !B || A === B) return null;
-    const legend = [
-        { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
-        { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
-    ];
 
     if (key === 'duel-compare') return {
+        ctx,
         icon: '⚔️',
         title: `${nameOf(A)} contre ${nameOf(B)}`,
-        sub: `Action par action, ${state.mode === 'avg' ? 'en moyenne par jour actif' : 'en cumul'}, sur ${pLabel()}`,
-        legend,
+        sub: `Action par action, ${state.mode === 'avg' ? 'en moyenne par jour actif' : 'en cumul'}, sur ${
+            periodLabelShort(ctx.from, ctx.to)}`,
+        legend: duelLegend(A, B),
         note: `<p>Chaque ligne est une action, les deux barres se lisent l'une contre l'autre.
                Le survol donne le cumul, la moyenne par jour actif, le nombre de jours saisis,
                et l'écart en valeur comme en pourcentage.</p>`,
-        draw: host => drawDuelCompare(host, A, B)
+        draw: host => drawDuelCompare(host, A, B, ctx)
     };
 
     if (key === 'duel-time') return {
+        ctx,
         icon: '📈',
         title: `Score dans le temps : ${nameOf(A)} et ${nameOf(B)}`,
-        sub: `Les deux trajectoires, ${granWord(effGran())} par ${granWord(effGran())}`,
-        legend,
+        sub: `Les deux trajectoires, ${granWord(ctx.gran)} par ${granWord(ctx.gran)}${
+            ctx.scoped ? ` · ${periodLabelShort(ctx.from, ctx.to)}` : ''}`,
+        legend: duelLegend(A, B),
         note: `<p>Deux trajectoires de score sur la même échelle. Une courbe qui s'interrompt
                signale des périodes sans aucune saisie, jamais un zéro inventé.</p>`,
-        draw: host => drawDuelTime(host, A, B, true)
+        draw: host => drawDuelTime(host, A, B, ctx)
     };
 
     return null;
@@ -762,6 +966,17 @@ function paintModal() {
 
     document.getElementById('modal-title').textContent = `${e.icon}  ${e.title}`;
     document.getElementById('modal-sub').textContent = e.sub;
+
+    // La barre de dates de la fenêtre montre l'état de la carte, pas un état à
+    // elle : les deux lisent et écrivent le même scopes.
+    const from = document.getElementById('modal-from');
+    const to = document.getElementById('modal-to');
+    from.value = e.ctx.from; from.max = T;
+    to.value = e.ctx.to; to.max = T;
+    const pill = document.getElementById('modal-scope');
+    pill.textContent = scopePill(e.ctx);
+    pill.className = 'pill ' + (e.ctx.scoped ? 'pill--warn' : 'pill--info');
+
     document.getElementById('modal-body').innerHTML = `
         ${legendHtml(e.legend)}
         <div id="modal-host"></div>
@@ -790,7 +1005,8 @@ function renderSummary() {
     el.innerHTML = `<p class="summary-sentence">
         Sur <b>${periodLabel(state.from, state.to)}</b>, ${people.length} compte${people.length > 1 ? 's' : ''}
         suivi${people.length > 1 ? 's' : ''}, dont <b>${withData}</b> avec au moins une saisie.
-        Un point de graphique représente <b>un ${granWord(gran)}</b>.
+        Un point de graphique représente <b>un ${granWord(gran)}</b>${
+            scopes.size > 0 ? ', sur les graphiques qui suivent cette période' : ''}.
         Total de l'équipe : <b>${fmtInt(team.productivity_score)} points</b>.
         ${byFilters > 0 ? `${byFilters} compte${byFilters > 1 ? 's' : ''} exclu${byFilters > 1 ? 's' : ''} par les filtres.` : ''}
     </p>
@@ -801,6 +1017,17 @@ function renderSummary() {
             moyennes et les classements ci-dessous ne portent pas sur toute l'équipe.
             <button type="button" class="btn btn--ghost" id="btn-recheck-all">
                 Tout recocher
+            </button>
+        </p>` : ''}
+    ${scopes.size > 0 ? `
+        <p class="summary-sentence">
+            <b>${scopes.size} graphique${scopes.size > 1
+                ? 's sur leurs propres dates' : ' sur ses propres dates'}.</b>
+            Le classement, les indicateurs de tête et l'export ci-dessous restent
+            sur la période ci-dessus : seuls les graphiques concernés en sortent,
+            et ils l'affichent dans leur en-tête.
+            <button type="button" class="btn btn--ghost" id="btn-reset-scopes">
+                Tout remettre sur la période globale
             </button>
         </p>` : ''}
     ${people.length === 0 && byFilters > 0 && byHand === 0 ? `
@@ -823,6 +1050,8 @@ function renderSummary() {
     });
     const all = document.getElementById('btn-recheck-all');
     if (all) all.addEventListener('click', () => { state.excluded.clear(); refresh(); });
+    const gl = document.getElementById('btn-reset-scopes');
+    if (gl) gl.addEventListener('click', () => { scopes.clear(); refresh(); });
 }
 
 function exportCsv() {
@@ -961,9 +1190,12 @@ function syncControls() {
     seg('seg-demo', 'demo', state.demo ? '1' : '0');
     seg('seg-inactive', 'inactive', state.inactive ? '1' : '0');
 
-    document.getElementById('explain-gran').textContent = state.gran === 'auto'
+    // Ce réglage ne vaut que pour les graphiques restés sur la période globale :
+    // une carte à dates propres déduit sa granularité de sa propre longueur.
+    document.getElementById('explain-gran').textContent = (state.gran === 'auto'
         ? `Choisi automatiquement : un ${granWord(effGran())} par point.`
-        : `Chaque point du graphique regroupe un ${granWord(effGran())}.`;
+        : `Chaque point du graphique regroupe un ${granWord(effGran())}.`)
+        + (scopes.size > 0 ? ' Les graphiques à dates propres choisissent la leur.' : '');
     document.getElementById('explain-mode').textContent = state.mode === 'total'
         ? 'Le classement additionne tout sur la période.'
         : 'Le classement divise par le nombre de jours réellement saisis, ce qui ne pénalise pas une absence.';
@@ -1023,6 +1255,24 @@ function wire() {
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && openKey) closeModal();
     });
+
+    // Les dates de la fenêtre agrandie passent par refresh et non par un simple
+    // repeint : élargir une carte peut demander des jours qui ne sont pas encore
+    // chargés, et il faut alors un aller-retour avant de pouvoir dessiner.
+    document.getElementById('modal-reset').addEventListener('click', () => {
+        if (!openKey) return;
+        scopes.delete(openKey);
+        datesOpen.add(openKey);
+        refresh();
+    });
+    const bindModalDate = id => document.getElementById(id).addEventListener('change', () => {
+        const from = document.getElementById('modal-from').value;
+        const to = document.getElementById('modal-to').value;
+        if (!from || !to || !openKey) return;
+        scopes.set(openKey, normalizeRange({ from, to }));
+        refresh();
+    });
+    bindModalDate('modal-from'); bindModalDate('modal-to');
 
     // Raccourcis de la zone A
     document.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => {

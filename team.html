@@ -175,6 +175,18 @@
             </div>
             <button class="modal-close" id="modal-close" type="button" aria-label="Fermer">×</button>
         </div>
+        <div class="modal-local-bar">
+            <span class="date-bar-label">Dates de ce graphique</span>
+            <div class="date-range">
+                <label class="sr-only" for="modal-from">Début de la période de ce graphique</label>
+                <input type="date" id="modal-from">
+                <span>→</span>
+                <label class="sr-only" for="modal-to">Fin de la période de ce graphique</label>
+                <input type="date" id="modal-to">
+            </div>
+            <button class="chip chip--sm" id="modal-reset" type="button">↺ Revenir à la période globale</button>
+            <span class="pill pill--info" id="modal-scope">suit la période globale</span>
+        </div>
         <div class="modal-body" id="modal-body"></div>
     </div>
 </div>
