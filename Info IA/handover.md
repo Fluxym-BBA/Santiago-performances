@@ -1,6 +1,6 @@
 # Cockpit BDR — Document de reprise (handover)
 
-**Dernière mise à jour : 19/08/2026 (v2 du dashboard)**
+**Dernière mise à jour : 20/08/2026 (v6 lot 2 — gestion des comptes)**
 **État de référence : branche `main`**
 
 ## 1. Ce qu'est le projet
@@ -366,6 +366,122 @@ Les tableaux deviennent des cartes sous 760 pixels grâce à l'attribut `data-th
 porté par chaque cellule. **Toute nouvelle colonne doit porter son `data-th`**,
 sinon elle apparaîtra sans étiquette sur téléphone.
 
+## 6 quinquies. La gestion des comptes (v6, lot 2)
+
+### Le problème de fond
+
+Créer un compte, changer un mot de passe et supprimer un compte exigent la clé
+`service_role`. Elle donne **tous** les droits sur la base et contourne toute la
+RLS. Elle ne peut pas être dans le dépôt (public), ni dans `config.js` (servi au
+navigateur), ni demandée à l'utilisateur (un administrateur du cockpit n'est pas
+administrateur de Supabase). Ces trois gestes étaient donc, jusqu'ici,
+impossibles depuis l'application.
+
+Une Edge Function les rend possibles : c'est le seul endroit du projet qui
+tourne ailleurs que dans le navigateur, donc le seul qui peut détenir un secret.
+
+### `supabase/functions/admin-users/index.ts`
+
+Cinq actions : `ping`, `list`, `create`, `password`, `delete`. Déployée depuis
+le tableau de bord Supabase (Edge Functions → Deploy a new function), sans CLI
+ni Docker. Les trois variables `SUPABASE_URL`, `SUPABASE_ANON_KEY` et
+`SUPABASE_SERVICE_ROLE_KEY` sont injectées automatiquement.
+
+**L'ordre de vérification est la seule partie du projet sans marge d'erreur :**
+
+```
+1. lire le jeton de l'appelant                        → absent : 401
+2. le faire valider par Supabase (auth.getUser)       → invalide : 401
+3. lire son profil AVEC SES PROPRES DROITS,
+   vérifier is_admin ET is_active                     → sinon : 403
+4. seulement alors : elevated()  ← service_role
+```
+
+Règles à ne jamais défaire :
+
+- `SUPABASE_SERVICE_ROLE_KEY` n'est lu qu'**à un seul endroit**, la fonction
+  `elevated()`. Le test `t7` vérifie qu'il n'y a qu'une occurrence dans tout le
+  fichier. Si un jour il en faut deux, c'est le signe que la fonction a grossi
+  et qu'il faut la scinder, pas dupliquer la lecture.
+- `elevated()` n'est jamais appelé avant `authorize()`. Le test vérifie la
+  position des deux appels dans le fichier, pas seulement leur existence.
+- L'étape 3 est faite **avec les droits de l'appelant** et non avec la clé.
+  C'est délibéré : même une règle RLS mal écrite ne pourrait pas ici élargir ce
+  qu'il a le droit de voir. Utiliser la clé serait plus court et strictement
+  moins sûr.
+- Le rôle est lu dans `public.profiles`, jamais dans `user_metadata` du jeton,
+  qui est modifiable par l'utilisateur lui-même via `auth.updateUser()`.
+- `email_confirm: true` à la création **et** à la réinitialisation. Sans lui, le
+  compte existe mais ne peut pas se connecter, et l'erreur ressemble à un mot de
+  passe erroné. C'est le genre de symptôme qui fait perdre une heure.
+- `listUsers` est paginé explicitement. Sans pagination, seuls les 50 premiers
+  comptes remonteraient et le bogue n'apparaîtrait qu'au 51e utilisateur.
+
+### Le mot de passe : un seul générateur, côté serveur
+
+`makePassword()` dans la fonction, et nulle part ailleurs. Le navigateur envoie
+`password: null` et reçoit la valeur tirée. Le test `t7` vérifie qu'il n'y a
+**aucun** `getRandomValues` ni `Math.random` dans `js/admin.js` : deux
+générateurs, c'est deux qualités d'aléa à garantir.
+
+Forme `xxxx-xxxx-xxxx`, alphabet de 30 signes sans `0 O 1 l I`, environ 59 bits.
+Dictable au téléphone. Affiché une seule fois, stocké nulle part en clair.
+Le bouton « Copier le message » produit le texte complet à envoyer : c'est le
+geste réel qui suit la création, et sans lui l'administrateur recopie à la main.
+
+### `accounts-migration-v3.sql` — deux pièges de suppression
+
+- `daily_activity.created_by` et `updated_by` référençaient `auth.users` **sans
+  cascade**. Dès qu'un administrateur avait corrigé la saisie de quelqu'un, le
+  supprimer échouait sur une violation de clé étrangère au message
+  incompréhensible. Passés en `on delete set null`. **Surtout pas en cascade** :
+  cela détruirait la saisie d'un BDR parce qu'un administrateur parti a corrigé
+  une virgule. La migration retrouve le nom réel des contraintes plutôt que de
+  le supposer, car PostgreSQL le génère et il varie selon l'ordre historique des
+  migrations.
+- Déclencheur `trg_guard_last_admin`, `before delete on public.profiles`, qui
+  refuse la suppression du dernier administrateur actif. Posé sur `profiles` et
+  non sur `auth.users` : la suppression d'un utilisateur cascade vers
+  `profiles`, donc le contrôle attrape aussi une suppression lancée depuis le
+  tableau de bord Supabase, qui ne passe pas par l'Edge Function.
+- `admin_delete_preview(uuid)` : ce que la suppression détruirait, compté par la
+  base. Sur une action irréversible, le chiffre affiché ne doit pas dépendre de
+  ce qui se trouvait en mémoire du navigateur.
+
+### `callAdminFn()` dans `api.js` — le piège de supabase-js
+
+`functions.invoke` enveloppe toute réponse non-2xx dans un `FunctionsHttpError`
+dont le message est l'inutile *« Edge Function returned a non-2xx status code »*.
+Le message écrit côté serveur se trouve dans le corps, accessible via
+`error.context`, qui est une vraie `Response` : il faut la cloner avant de la
+lire. Sans cette lecture, « un compte existe déjà pour cette adresse »
+deviendrait « erreur 409 ». Ne pas simplifier cette fonction.
+
+`adminFnStatus()` distingue trois états, et c'est utile : opérationnelle,
+absente (404 ou *Failed to send a request*), refus (403). Ce ne sont pas les
+mêmes conseils à donner. L'état est mémorisé, `{ force: true }` pour le relire.
+
+### L'écran Comptes
+
+Six colonnes, pas onze : les réglages qui répondent à la même question sont
+regroupés (Rôle = administrateur + prospecte, Statut = actif + démo, Saisie =
+nombre de jours + dernière date). Un tableau qu'on lit sans faire défiler vaut
+mieux qu'un tableau exhaustif.
+
+Si la fonction ne répond pas, l'écran n'affiche **pas** un formulaire inopérant :
+il affiche la marche à suivre manuelle dans Supabase et masque les boutons qui
+en dépendent. `fn.ok` est connu **avant** le premier rendu, c'est pour cela que
+`adminFnStatus()` est attendu avant `load()`.
+
+La colonne « Connexion » n'existe que si la fonction répond : `last_sign_in_at`
+vit dans `auth.users`, hors d'atteinte de la clé publique. Savoir qu'un compte
+créé il y a trois semaines ne s'est jamais connecté est pourtant le premier
+renseignement qu'un administrateur cherche.
+
+Suppression : aperçu lu en base, confirmation par **saisie de l'adresse**, et la
+désactivation proposée à la place au moment exact où la mauvaise décision est
+sur le point d'être prise.
+
 ## 7. Pièges connus
 
 - **Dates** : toujours passer par `toISO()` / `fromISO()` de `api.js`. Un
@@ -387,13 +503,32 @@ sinon elle apparaîtra sans étiquette sur téléphone.
   `single()`, qui lèverait une erreur.
 - **Plan Free Supabase** : un projet sans aucune requête pendant 7 jours est
   mis en pause. L'usage quotidien suffit à l'éviter.
+- **`error.context` de supabase-js** est une `Response` à usage unique. La
+  cloner avant de la lire, sinon la deuxième lecture échoue silencieusement et
+  le message d'erreur redevient « non-2xx status code ».
+- **`Response.status` est en lecture seule.** Un faux objet de test qui essaie
+  de l'affecter lève une `TypeError` en mode strict, et le test échoue pour une
+  raison qui n'a rien à voir avec le code testé. Construire une vraie
+  `Response` avec `{ status }`.
+- **Ne jamais dupliquer le générateur de mot de passe** côté navigateur, même
+  « pour l'afficher avant validation ». Le champ vide et le serveur qui tire :
+  c'est la seule version qui n'a qu'une qualité d'aléa à garantir.
+- **Suppression d'un compte** : exécuter `accounts-migration-v3.sql` avant
+  d'essayer, sinon la suppression d'un administrateur ayant corrigé une saisie
+  échoue sur une violation de clé étrangère.
+- **Test `t4` retiré** : il testait le périmètre stocké en `sessionStorage`,
+  mécanisme remplacé en v6 par le contexte dans l'URL. Il est intégralement
+  couvert par `t6`. Conservé sous `t4-obsolete-v5.mjs` à titre d'historique.
 - **Contrainte `calls_connected <= calls_made`** : voulue. Si Santiago la
   trouve gênante (rappels entrants comptés comme aboutis sans appel sortant),
   la supprimer explicitement plutôt que la contourner côté front.
 
 ## 8. Reste à faire (idées, non engagées)
 
-1. Objectifs hebdomadaires et mensuels, en plus des objectifs journaliers.
+1. **Le rythme nécessaire** : « pour 8 RDV ce mois-ci il faut 2,3 par semaine,
+   tu es à 1,8 ». C'est ce qui transforme un tableau de bord en outil de
+   pilotage, et le sujet le plus intéressant qui reste.
+2. Objectifs hebdomadaires et mensuels, en plus des objectifs journaliers.
 2. Comparaison entre plusieurs BDR (le schéma est déjà multi-utilisateur : il
    suffirait d'ajouter un rôle manager et des politiques RLS de lecture).
 3. Rappel de saisie en fin de journée si aucune action n'a été enregistrée.

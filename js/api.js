@@ -362,6 +362,140 @@ export async function adminWipeActivity(userId, fromIso = null, toIso = null) {
     return Number(data) || 0;
 }
 
+/* --------------------------------------------------------------------------
+   Création, mot de passe, suppression : l'Edge Function `admin-users`
+
+   Ces trois gestes exigent la clé `service_role`. Elle donne tous les droits
+   sur la base et contourne toute la RLS : elle n'a donc rien à faire dans un
+   dépôt public, et ne doit jamais arriver dans un navigateur. Les fonctions
+   ci-dessous n'envoient qu'une intention et le jeton de l'utilisateur courant ;
+   c'est la fonction, hébergée chez Supabase, qui vérifie que l'appelant est
+   bien administrateur avant d'utiliser la clé.
+
+   Rien ici n'est une mesure de sécurité : ce module tourne dans le navigateur
+   de l'utilisateur, donc tout ce qu'il contient est réputé modifiable par lui.
+   La seule barrière est celle de la fonction distante.
+   -------------------------------------------------------------------------- */
+
+const ADMIN_FN = 'admin-users';
+
+/**
+ * Appel de la fonction, avec extraction du message d'erreur réel.
+ *
+ * supabase-js enveloppe toute réponse non-2xx dans un FunctionsHttpError dont
+ * le message est l'inutile « Edge Function returned a non-2xx status code ».
+ * Le message que nous avons pris soin d'écrire côté serveur se trouve dans le
+ * corps de la réponse, accessible via error.context. Sans cette lecture,
+ * « un compte existe déjà pour cette adresse » deviendrait « erreur 409 ».
+ */
+async function callAdminFn(action, payload = {}) {
+    const { data, error } = await supabase.functions.invoke(ADMIN_FN, {
+        body: { action, ...payload }
+    });
+
+    if (error) {
+        let detail = '';
+        let status = error?.context?.status ?? null;
+        try {
+            const body = await error.context.clone().json();
+            detail = body?.error || body?.message || '';
+        } catch {
+            try { detail = (await error.context.clone().text()).slice(0, 300); } catch { /* rien */ }
+        }
+        const e = new Error(detail || error.message || 'Appel de la fonction impossible');
+        e.status = status;
+        e.fnError = true;
+        throw e;
+    }
+    if (data && data.error) {
+        const e = new Error(data.error);
+        e.fnError = true;
+        throw e;
+    }
+    return data;
+}
+
+/**
+ * La fonction est-elle déployée, et suis-je bien reconnu administrateur par
+ * elle ? Le résultat est mémorisé : l'écran l'interroge une fois au chargement
+ * pour décider s'il affiche le formulaire de création ou la marche à suivre
+ * manuelle dans Supabase. Une application qui promet un bouton inopérant est
+ * pire qu'une application qui explique ce qu'il faut faire à la main.
+ */
+let _fnStatus = null;
+
+export async function adminFnStatus({ force = false } = {}) {
+    if (_fnStatus && !force) return _fnStatus;
+    try {
+        const r = await callAdminFn('ping');
+        _fnStatus = { ok: true, version: r?.version || '', reason: '' };
+    } catch (e) {
+        const msg = String(e.message || '');
+        // Un 404 signifie « pas déployée », un 403 « déployée mais je ne suis
+        // pas administrateur ». Ce ne sont pas du tout les mêmes conseils à
+        // donner, l'écran doit pouvoir les distinguer.
+        const notDeployed = e.status === 404
+            || /not found|does not exist|introuvable|Failed to send a request/i.test(msg);
+        _fnStatus = {
+            ok: false,
+            version: '',
+            reason: notDeployed ? 'absente' : 'refus',
+            message: msg
+        };
+    }
+    return _fnStatus;
+}
+
+/**
+ * Informations de connexion, qui ne sont PAS dans la table profiles :
+ * auth.users n'est pas interrogeable avec la clé publique, et c'est très bien
+ * ainsi. Savoir qu'un compte créé il y a trois semaines ne s'est jamais
+ * connecté est pourtant le premier renseignement qu'un administrateur cherche.
+ * Renvoie une Map indexée par user_id.
+ */
+export async function adminAuthInfo() {
+    const r = await callAdminFn('list');
+    const m = new Map();
+    (r?.users || []).forEach(u => m.set(u.user_id, u));
+    return m;
+}
+
+/**
+ * Création d'un compte.
+ * Le mot de passe renvoyé est le seul moment où il est lisible : il n'est
+ * stocké nulle part en clair, ni ici ni dans la base. Si l'écran le perd,
+ * il faut en générer un autre.
+ */
+export async function adminCreateAccount({
+    email, display_name = '', is_admin = false, is_bdr = true, is_demo = false, password = null
+} = {}) {
+    return callAdminFn('create', {
+        email, display_name, is_admin, is_bdr, is_demo, password
+    });
+}
+
+/** Nouveau mot de passe pour un compte. Vide = généré par la fonction. */
+export async function adminSetPassword(userId, password = null) {
+    return callAdminFn('password', { user_id: userId, password });
+}
+
+/** Suppression définitive du compte et, en cascade, de son activité. */
+export async function adminDeleteAccount(userId) {
+    return callAdminFn('delete', { user_id: userId });
+}
+
+/**
+ * Ce que la suppression détruirait, compté par la base et non par l'écran.
+ * Le décompte affiché dans une confirmation irréversible ne doit pas dépendre
+ * de ce qui se trouvait en mémoire du navigateur.
+ */
+export async function adminDeletePreview(userId) {
+    const { data, error } = await supabase.rpc('admin_delete_preview', { p_user_id: userId });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return row || null;
+}
+
 
 /* --------------------------------------------------------------------------
    Données — activité quotidienne
@@ -527,6 +661,22 @@ export function humanError(error) {
         return 'Impossible : ce compte est le dernier administrateur actif. Nommez un autre administrateur d\'abord.';
     }
     if (msg.includes('Utilisateur introuvable')) return 'Utilisateur introuvable.';
+    if (msg.includes('existe déjà')) return msg;
+    if (msg.includes('Domaine non autorisé')) return msg;
+    if (msg.includes('dernier administrateur actif')) {
+        return 'Impossible : ce compte est le dernier administrateur actif. Nommez un autre administrateur d\'abord.';
+    }
+    if (msg.includes('Failed to send a request to the Edge Function')
+        || (error.fnError && error.status === 404)) {
+        return "La fonction admin-users n'est pas déployée. Créez-la dans Supabase → Edge Functions, "
+             + 'ou créez le compte à la main dans Authentication → Users.';
+    }
+    if (error.fnError && error.status === 401) {
+        return 'Session expirée. Rechargez la page et reconnectez-vous.';
+    }
+    if (error.code === '42883' && msg.includes('admin_delete_preview')) {
+        return "La base n'a pas encore la fonction admin_delete_preview : exécutez accounts-migration-v3.sql.";
+    }
     if (error.code === '42P17') {
         return 'Erreur de configuration des droits dans la base (récursion RLS). Rejouez multi-user-migration.sql.';
     }

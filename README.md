@@ -25,7 +25,18 @@ Santiago-performances/
 ├── dashboard.html           analyse de performance
 ├── login.html               connexion e-mail / mot de passe
 ├── robots.txt               interdiction d'indexation
-├── bdr-cockpit-schema.sql   schéma de la base (à exécuter dans Supabase)
+├── admin.html               gestion des comptes (administrateurs)
+├── team.html                vue d'équipe (administrateurs)
+├── bdr-cockpit-schema.sql       schéma initial de la base
+├── multi-user-migration.sql     migration 1 : plusieurs utilisateurs, RLS
+├── roles-migration-v2.sql       migration 2 : rôles à deux axes
+├── accounts-migration-v3.sql    migration 3 : suppression de compte sans dégât
+├── seed-demo.sql                90 jours de données de démonstration
+├── reset-demo.sql               remise à zéro du compte de démonstration
+├── supabase/
+│   └── functions/
+│       └── admin-users/
+│           └── index.ts     Edge Function : créer, réinitialiser, supprimer
 ├── css/
 │   └── app.css              feuille unique, variables CSS dans :root
 ├── js/
@@ -186,20 +197,118 @@ administrateur.
 
 ### Mise en service
 
-1. Exécuter `multi-user-migration.sql` dans le SQL Editor de Supabase. Le script
-   est rejouable sans risque et n'efface aucune donnée. Il se termine par la
-   promotion de `bbartoli@fluxym.com` en administrateur : adapter l'adresse si
-   besoin, c'est la seule ligne à personnaliser.
+1. Exécuter dans le SQL Editor de Supabase, dans cet ordre :
+   `multi-user-migration.sql`, `roles-migration-v2.sql`,
+   `accounts-migration-v3.sql`. Les trois sont rejouables sans risque et
+   n'effacent aucune donnée. La seule ligne à personnaliser est la promotion de
+   `bbartoli@fluxym.com` en administrateur, à la fin de la migration 2.
 2. Créer les comptes dans Supabase → Authentication → Users → Add user →
    Create new user, avec **Auto Confirm User** coché. Le profil apparaît
    automatiquement dans la page Comptes.
 3. Ajuster les noms affichés, les rôles et les comptes de démonstration depuis
    la page **Comptes** de l'application.
 
-La création d'un compte ne peut pas se faire depuis l'application : elle exige
-la clé `service_role`, qui donne tous les droits et contourne toute la sécurité.
-Elle n'a rien à faire dans un dépôt public. Tout le reste se gère dans l'écran
-Comptes.
+Depuis le lot 2, l'étape 2 se fait directement dans l'écran **Comptes** de
+l'application, à condition d'avoir déployé l'Edge Function (voir ci-dessous).
+La création manuelle dans Supabase reste possible et donne exactement le même
+résultat : le profil naît dans les deux cas par le déclencheur
+`handle_new_user`.
+
+### Créer un compte depuis l'application : l'Edge Function `admin-users`
+
+Créer un compte, changer un mot de passe ou supprimer un compte exige la clé
+`service_role`. Cette clé donne **tous** les droits sur la base et contourne
+toute la Row Level Security : elle ne doit jamais se trouver dans un dépôt
+public, donc jamais dans ce code. Elle ne peut pas non plus être demandée à
+l'utilisateur, puisqu'un administrateur du cockpit n'est pas administrateur de
+Supabase.
+
+La réponse est une fonction hébergée chez Supabase : le navigateur envoie une
+intention et son propre jeton, la fonction vérifie que l'appelant est bien
+administrateur, et **elle seule** utilise la clé. La clé ne quitte jamais
+Supabase.
+
+Déploiement, sans installer quoi que ce soit :
+
+1. Supabase → **Edge Functions** → **Deploy a new function**
+2. Nommer la fonction exactement `admin-users`
+3. Coller le contenu de `supabase/functions/admin-users/index.ts`
+4. **Deploy**
+
+Aucun secret à renseigner : `SUPABASE_URL`, `SUPABASE_ANON_KEY` et
+`SUPABASE_SERVICE_ROLE_KEY` sont injectés automatiquement dans toute Edge
+Function. L'option *Verify JWT* peut rester activée, la fonction refait de
+toute façon la vérification elle-même.
+
+Secret facultatif, contre la faute de frappe : `ALLOWED_EMAIL_DOMAINS`, par
+exemple `fluxym.com`. Renseigné, il interdit la création d'un compte sur un
+autre domaine. Absent, aucune restriction.
+
+Exécuter aussi `accounts-migration-v3.sql`, qui rend la **suppression** de
+compte possible sans casse (voir plus bas).
+
+#### L'ordre de vérification est tout l'enjeu du fichier
+
+```
+1. lire le jeton de l'appelant           → absent : 401
+2. le faire valider par Supabase         → invalide : 401
+3. lire son profil AVEC SES PROPRES DROITS
+   et vérifier is_admin et is_active     → non admin : 403
+4. seulement alors, instancier le client service_role
+```
+
+Le client privilégié est créé après la vérification, jamais avant. Il n'est
+lu qu'à un seul endroit du fichier, la fonction `elevated()`, et l'étape 3 est
+délibérément faite avec les droits de l'appelant plutôt qu'avec la clé : même
+une règle RLS mal écrite ne pourrait pas ici élargir ce qu'il a le droit de
+voir. Une inversion de deux lignes suffirait à transformer cette fonction en
+porte ouverte sur la base : c'est la seule partie du projet où il n'y a aucune
+marge d'erreur, et c'est pour cela qu'elle est vérifiée par le test `t7`.
+
+#### Si la fonction n'est pas déployée
+
+L'écran Comptes l'interroge au chargement. Sans réponse, il n'affiche pas un
+formulaire inopérant : il affiche la marche à suivre manuelle dans Supabase, et
+masque les boutons « Mot de passe » et « Supprimer » qui en dépendent. Un
+bouton qui ne marche pas est pire qu'une explication.
+
+### Le mot de passe provisoire
+
+Il est tiré au sort **par le serveur**, jamais par le navigateur : un seul
+générateur dans tout le projet, donc une seule qualité d'aléa à garantir. La
+forme est `xxxx-xxxx-xxxx` sur un alphabet de 30 signes d'où sont retirés les
+caractères que l'on confond (`0`/`O`, `1`/`l`/`I`), soit environ 59 bits
+d'entropie et un mot de passe dictable au téléphone.
+
+Il n'est **affiché qu'une fois**, juste après la création, et n'est stocké
+nulle part en clair, ni dans l'application ni dans la base. Perdu, il faut en
+générer un autre. Le bouton « Copier le message » prépare le texte complet à
+envoyer, adresse de connexion incluse, parce que c'est le geste réel qui suit :
+sans lui, l'administrateur recopie à la main et se trompe.
+
+### Supprimer un compte, et pourquoi il faut rarement le faire
+
+Deux pièges, tous deux invisibles jusqu'au jour où l'on supprime vraiment
+quelqu'un, corrigés par `accounts-migration-v3.sql` :
+
+- `daily_activity.created_by` et `updated_by` pointaient vers `auth.users`
+  **sans** règle de cascade. Dès qu'un administrateur a corrigé la saisie de
+  quelqu'un, son identifiant y est inscrit, et le supprimer échouait sur une
+  violation de clé étrangère au message incompréhensible. Ces colonnes disent
+  *qui* a saisi : `on delete set null` est le bon comportement, et surtout pas
+  la cascade, qui détruirait la saisie d'un BDR parce qu'un administrateur
+  parti a corrigé une virgule.
+- Rien n'empêchait de supprimer le dernier administrateur. Un déclencheur
+  `before delete` sur `profiles` le refuse désormais. Il est posé sur
+  `profiles` et non sur `auth.users` pour attraper aussi une suppression
+  lancée depuis le tableau de bord Supabase, qui ne passe pas par la fonction.
+
+Côté écran, la suppression demande de **saisir l'adresse du compte**, affiche
+le nombre de journées qui seront détruites (compté par la base, pas par le
+navigateur) et propose « Désactivé » à la place. Pour un départ, la
+désactivation est presque toujours la bonne réponse : l'accès est coupé et les
+chiffres passés restent comparables. La suppression n'a de sens que pour un
+compte créé par erreur.
 
 ### Le compte de démonstration
 

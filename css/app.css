@@ -2411,3 +2411,354 @@ tr.row-me td:first-child { box-shadow: inset 3px 0 0 var(--cyan); }
    modifier la sienne : le lien le dit aussi par sa couleur. */
 .link-edit--fix { color: var(--b2); font-weight: 800; }
 .link-edit--fix:hover { color: #4c1d95; }
+
+/* ==========================================================================
+   ADMINISTRATION — création de compte, identifiants, actions de ligne (lot 2)
+
+   Trois principes tenus dans tout ce bloc, parce que c'est ce qui rendait la
+   version précédente pénible : rien n'est jamais tronqué, un intitulé complet
+   passe à la ligne plutôt que de finir en points de suspension ; les cibles
+   tactiles ne descendent pas sous 44 pixels ; et les trois points de rupture
+   (bureau, téléphone couché, téléphone debout) ont chacun une mise en page
+   pensée pour eux, pas une seule qui rétrécit.
+   ========================================================================== */
+
+/* --- Bloc de création ----------------------------------------------------- */
+
+.new-block { margin-bottom: 34px; }
+
+.new-form {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
+    padding: 26px 26px 22px;
+    margin-top: 4px;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 22px 26px;
+}
+
+.field { min-width: 0; }
+
+/* Un champ large occupe toute la ligne : le mot de passe et le bloc de rôles
+   ont besoin de place pour leurs explications, l'e-mail et le nom non. */
+.field--wide { grid-column: 1 / -1; }
+
+.new-form fieldset {
+    border: none;
+    margin: 0;
+    padding: 0;
+    grid-column: 1 / -1;
+}
+
+.new-form legend {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--gray-500);
+    margin-bottom: 10px;
+    padding: 0;
+}
+
+.field-opt {
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--gray-400);
+}
+
+.field-note {
+    margin-top: 7px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--gray-500);
+}
+
+.field-note code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    background: var(--gray-100);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--navy);
+}
+
+/* --- Les trois cases de rôle ---------------------------------------------
+   Des cartes cliquables et non des cases à cocher nues : la zone de clic
+   couvre le libellé et son explication, ce qui la rend utilisable au doigt,
+   et l'explication est toujours visible au lieu d'être un survol.
+   ------------------------------------------------------------------------- */
+
+.pick-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+    gap: 12px;
+}
+
+.pick {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding: 14px 15px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: var(--gray-50);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    min-height: 48px;
+}
+
+.pick:hover { border-color: var(--cyan); background: var(--white); }
+
+.pick input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin: 1px 0 0;
+    accent-color: var(--cyan);
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.pick:has(input:checked) {
+    border-color: var(--cyan);
+    background: rgba(0, 167, 225, 0.07);
+}
+
+.pick-body { display: block; min-width: 0; }
+
+.pick-body b {
+    display: block;
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--navy);
+}
+
+.pick-body em {
+    display: block;
+    margin-top: 3px;
+    font-style: normal;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--gray-500);
+}
+
+.form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--gray-100);
+}
+
+.form-status {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--danger);
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+/* --- Identifiants à transmettre ------------------------------------------
+   Volontairement voyant : c'est le seul instant où le mot de passe est
+   lisible, l'écran doit le dire au lieu de le glisser discrètement.
+   ------------------------------------------------------------------------- */
+
+.cred-card {
+    margin-top: 18px;
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-navy);
+    padding: 24px 26px;
+    color: var(--white);
+}
+
+.cred-head { display: flex; align-items: flex-start; gap: 14px; }
+.cred-icon { font-size: 26px; line-height: 1; flex-shrink: 0; }
+
+.cred-head h3 { font-size: 17px; font-weight: 800; margin: 0; overflow-wrap: anywhere; }
+
+.cred-head p {
+    margin-top: 6px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.cred-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 14px;
+    margin: 20px 0 4px;
+}
+
+.cred-list > div {
+    background: rgba(255, 255, 255, 0.09);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    min-width: 0;
+}
+
+.cred-list dt {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--cyan);
+}
+
+.cred-val {
+    margin-top: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.45;
+    /* Une adresse ou une URL longue passe à la ligne : elle ne sera jamais
+       raccourcie, puisqu'elle doit être recopiée exactement. */
+    overflow-wrap: anywhere;
+    -webkit-user-select: all;
+    user-select: all;
+}
+
+.cred-val--pass {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: #7dd3fc;
+}
+
+.cred-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.cred-actions .btn--ghost {
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--white);
+}
+.cred-actions .btn--ghost:hover { background: rgba(255, 255, 255, 0.24); }
+
+/* --- Cellules du tableau des comptes -------------------------------------- */
+
+.acct { display: block; min-width: 0; }
+
+.acct-mail {
+    display: block;
+    margin-top: 5px;
+    font-size: 12px;
+    color: var(--gray-500);
+    overflow-wrap: anywhere;
+}
+
+/* Deux réglages qui répondent à la même question restent dans la même
+   cellule, empilés : côte à côte, ils forceraient une colonne trop large. */
+.tog-stack { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.tog-stack .toggle { width: 100%; text-align: center; white-space: nowrap; }
+
+.stack-2 { display: block; line-height: 1.4; }
+.stack-2 > span { display: block; margin-top: 3px; font-size: 12px; }
+.stack-2 .is-stale { color: var(--warning); font-weight: 700; }
+
+.act-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.act-row .chip { white-space: nowrap; }
+
+.tag--never { background: #fee2e2; color: #991b1b; }
+.chip--warn { border-color: #fde68a; color: #92400e; }
+.chip--warn:hover { background: var(--warning); border-color: var(--warning); color: var(--navy); }
+
+/* --------------------------------------------------------------------------
+   TÉLÉPHONE COUCHÉ ET TABLETTE (640 à 1023 px)
+   La largeur suffit pour garder le tableau, mais pas pour deux colonnes de
+   formulaire : le formulaire passe sur une colonne, le tableau reste un
+   tableau. C'est la rupture la plus facile à oublier, et celle où l'on
+   consulte réellement l'outil entre deux rendez-vous.
+   -------------------------------------------------------------------------- */
+
+@media (min-width: 640px) and (max-width: 1023px) {
+    .form-grid { grid-template-columns: 1fr; gap: 20px; }
+    .new-form { padding: 22px 20px 18px; }
+    .cred-val--pass { font-size: 18px; }
+}
+
+/* Téléphone couché : la hauteur est le vrai budget, pas la largeur. */
+@media (max-height: 460px) and (orientation: landscape) {
+    .new-form { padding: 16px 18px 14px; }
+    .form-grid { gap: 14px 20px; }
+    .field-note { display: none; }          /* l'essentiel d'abord */
+    .pick-body em { display: none; }
+    .pick { padding: 11px 13px; min-height: 44px; }
+    .cred-card { padding: 16px 18px; }
+    .cred-head p { display: none; }
+    .cred-list { margin: 14px 0 0; gap: 10px; }
+    .form-actions { margin-top: 16px; padding-top: 14px; }
+}
+
+/* --------------------------------------------------------------------------
+   TÉLÉPHONE DEBOUT (moins de 640 px)
+   Le tableau est déjà transformé en cartes à 760 px. Restent les cellules
+   composées, qui doivent cesser d'être des lignes « intitulé à gauche,
+   valeur à droite » dès que la valeur est un bloc de deux boutons.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 760px) {
+    /* La cellule Compte fait office de titre de carte : nom en grand,
+       adresse dessous, et pas d'intitulé « COMPTE » redondant. */
+    .table-wrap td[data-th="Compte"] {
+        display: block;
+        padding: 4px 0 10px;
+        border-bottom: 1px solid var(--gray-200);
+    }
+    .table-wrap td[data-th="Compte"]::before { content: none; }
+    .table-wrap td[data-th="Compte"] .cell-input { font-size: 15px; font-weight: 800; }
+
+    /* Rôle et Statut : intitulé au-dessus, les deux boutons côte à côte en
+       dessous. Ils occupent chacun la moitié de la largeur, donc une cible
+       large, et aucun libellé n'est coupé. */
+    .table-wrap td[data-th="Rôle"],
+    .table-wrap td[data-th="Statut"] {
+        display: block;
+        padding: 10px 0;
+    }
+    .table-wrap td[data-th="Rôle"]::before,
+    .table-wrap td[data-th="Statut"]::before { display: block; margin-bottom: 7px; }
+
+    .table-wrap .tog-stack { flex-direction: row; gap: 8px; }
+    .table-wrap .tog-stack .toggle {
+        flex: 1 1 0;
+        min-height: 44px;
+        white-space: normal;
+        line-height: 1.25;
+    }
+
+    .table-wrap td[data-th="Actions"] {
+        display: block;
+        padding: 12px 0 4px;
+        border-top: 1px solid var(--gray-200);
+        border-bottom: none;
+    }
+    .table-wrap td[data-th="Actions"]::before { display: block; margin-bottom: 8px; }
+    .table-wrap .act-row .chip { flex: 1 1 auto; min-height: 44px; }
+
+    .table-wrap .stack-2 { text-align: right; }
+    .table-wrap .stack-2 > span { display: inline; margin-left: 6px; }
+}
+
+@media (max-width: 639px) {
+    .form-grid { grid-template-columns: 1fr; gap: 18px; }
+    .new-form { padding: 18px 16px 16px; }
+    .pick-row { grid-template-columns: 1fr; }
+    .cred-card { padding: 20px 18px; }
+    .cred-list { grid-template-columns: 1fr; }
+    .cred-val--pass { font-size: 19px; }
+    .cred-actions .btn { flex: 1 1 100%; justify-content: center; }
+    .form-actions .btn { flex: 1 1 100%; justify-content: center; }
+    .form-status { order: -1; flex: 1 1 100%; }
+}

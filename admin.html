@@ -21,44 +21,158 @@
     <div class="page-container">
         <span class="hero-badge">Administration</span>
         <h1>Les comptes, <em>et qui voit quoi</em></h1>
-        <p>Renommer, désactiver, nommer un administrateur, marquer un compte de démonstration.
-           Tout est appliqué par la base, qui refuse les manoeuvres dangereuses.</p>
+        <p>Créer un accès, changer un mot de passe, nommer un administrateur, retirer un départ.
+           Chaque action est vérifiée par la base, qui refuse les manoeuvres dangereuses.</p>
     </div>
 </header>
 
 <main class="page-main page-main--pulled">
     <div class="page-container">
 
-        <!-- Création d'un compte : ce que l'application ne peut pas faire -->
-        <section class="info-panel">
+        <!-- ============================================================
+             CRÉATION D'UN COMPTE
+             Deux états possibles, décidés au chargement par un appel à la
+             fonction : elle répond, on affiche le formulaire ; elle ne
+             répond pas, on affiche la marche à suivre manuelle. Un bouton
+             qui ne marche pas est pire qu'une explication.
+             ============================================================ -->
+
+        <section class="new-block" id="new-block" hidden>
+            <div class="section-head">
+                <div>
+                    <h2>Nouveau compte</h2>
+                    <p>Le compte est immédiatement utilisable : l'adresse est confirmée d'office,
+                       puisque l'application n'envoie aucun courriel.</p>
+                </div>
+                <div class="section-head-actions">
+                    <button class="btn btn--primary" id="btn-new" type="button">
+                        <span aria-hidden="true">＋</span> Créer un compte
+                    </button>
+                </div>
+            </div>
+
+            <form class="new-form" id="new-form" hidden autocomplete="off">
+                <div class="form-grid">
+                    <div class="field">
+                        <label for="f-email">Adresse e-mail</label>
+                        <input type="email" id="f-email" required
+                               placeholder="prenom.nom@fluxym.com" autocomplete="off"
+                               inputmode="email" spellcheck="false">
+                        <p class="field-note">C'est l'identifiant de connexion. Un suffixe
+                           <code>+demo</code> avant l'arobase crée une adresse distincte qui arrive
+                           dans la même boîte : pratique pour un compte de démonstration.</p>
+                    </div>
+
+                    <div class="field">
+                        <label for="f-name">Nom affiché <span class="field-opt">facultatif</span></label>
+                        <input type="text" id="f-name" placeholder="Déduit de l'adresse si vide"
+                               autocomplete="off">
+                        <p class="field-note">Ce qui apparaîtra dans la barre de navigation et les
+                           classements. Modifiable à tout moment plus bas.</p>
+                    </div>
+
+                    <fieldset class="field field--wide">
+                        <legend>Ce que ce compte pourra faire</legend>
+                        <div class="pick-row">
+                            <label class="pick">
+                                <input type="checkbox" id="f-bdr" checked>
+                                <span class="pick-body">
+                                    <b>Prospecte</b>
+                                    <em>Saisit son activité, a ses performances, apparaît dans les classements</em>
+                                </span>
+                            </label>
+                            <label class="pick">
+                                <input type="checkbox" id="f-admin">
+                                <span class="pick-body">
+                                    <b>Administrateur</b>
+                                    <em>Voit toute l'équipe, corrige les saisies, gère cette page</em>
+                                </span>
+                            </label>
+                            <label class="pick">
+                                <input type="checkbox" id="f-demo">
+                                <span class="pick-body">
+                                    <b>Démonstration</b>
+                                    <em>Ses chiffres sont exclus des classements réels</em>
+                                </span>
+                            </label>
+                        </div>
+                        <p class="field-note" id="f-role-note"></p>
+                    </fieldset>
+
+                    <div class="field field--wide">
+                        <label for="f-pass">Mot de passe provisoire <span class="field-opt">facultatif</span></label>
+                        <input type="text" id="f-pass" placeholder="Laisser vide : généré automatiquement"
+                               autocomplete="new-password" spellcheck="false" minlength="8">
+                        <p class="field-note">Laissé vide, il est tiré au sort par le serveur sous une
+                           forme dictable au téléphone. Il ne sera affiché qu'une seule fois, juste
+                           après la création : personne, pas même la base, ne le conserve en clair.</p>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn--primary" id="f-submit" type="submit">Créer le compte</button>
+                    <button class="btn btn--ghost" id="f-cancel" type="button">Annuler</button>
+                    <span class="form-status" id="f-status" role="status"></span>
+                </div>
+            </form>
+
+            <!-- Identifiants à transmettre, affichés une seule fois -->
+            <div class="cred-card" id="cred-card" hidden>
+                <div class="cred-head">
+                    <span class="cred-icon" aria-hidden="true">🔑</span>
+                    <div>
+                        <h3 id="cred-title">Compte créé</h3>
+                        <p>Transmettez ces identifiants maintenant : le mot de passe n'est stocké
+                           nulle part et ne pourra plus être relu. Il faudrait en générer un autre.</p>
+                    </div>
+                </div>
+                <dl class="cred-list">
+                    <div><dt>Adresse</dt><dd class="cred-val" id="cred-email"></dd></div>
+                    <div><dt>Mot de passe</dt><dd class="cred-val cred-val--pass" id="cred-pass"></dd></div>
+                    <div><dt>Adresse de connexion</dt><dd class="cred-val" id="cred-url"></dd></div>
+                </dl>
+                <div class="cred-actions">
+                    <button class="btn btn--primary" id="cred-copy" type="button">Copier le message</button>
+                    <button class="btn btn--ghost" id="cred-close" type="button">J'ai transmis, masquer</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Repli : la fonction n'est pas déployée -->
+        <section class="info-panel" id="manual-block" hidden>
             <div class="info-panel-head">
                 <span class="info-panel-icon">🔑</span>
-                <h2>Créer un compte se fait dans Supabase, en quatre clics</h2>
+                <h2 id="manual-title">Créer un compte se fait dans Supabase, en quatre clics</h2>
             </div>
             <div class="info-panel-body">
-                <p>Cette page ne crée pas de compte, et c'est volontaire. Créer un utilisateur exige la
-                   clé <code>service_role</code>, qui donne tous les droits sur la base et contourne
-                   toutes les règles de sécurité. Elle n'a rien à faire dans un dépôt public, donc elle
-                   n'est pas dans cette application. Tout le reste, en revanche, se gère ici.</p>
+                <p id="manual-why">La création depuis cette page passe par une fonction hébergée chez
+                   Supabase, la seule à détenir la clé qui autorise ce geste. Elle n'est pas encore
+                   déployée, ou elle ne répond pas. En attendant, la création manuelle fonctionne
+                   parfaitement et le compte apparaîtra tout seul dans le tableau ci-dessous.</p>
                 <ol class="steps">
                     <li>Supabase → <b>Authentication</b> → <b>Users</b> → <b>Add user</b> →
                         <b>Create new user</b></li>
                     <li>Renseigner l'e-mail et un mot de passe provisoire</li>
                     <li>Cocher <b>Auto Confirm User</b>, sans quoi la personne ne pourra pas se connecter</li>
-                    <li>Valider : le profil apparaît automatiquement dans le tableau ci-dessous,
-                        en BDR et non administrateur, ce qui est le réglage le moins ouvert</li>
+                    <li>Valider : le profil apparaît dans le tableau, en BDR et non administrateur,
+                        ce qui est le réglage le moins ouvert</li>
                 </ol>
-                <p class="info-panel-note">Le nom affiché est déduit de l'adresse e-mail. Il est
-                   modifiable ici juste après.</p>
+                <p class="info-panel-note" id="manual-note">Pour activer la création depuis cette page :
+                   Supabase → <b>Edge Functions</b> → <b>Deploy a new function</b>, nommer la fonction
+                   <code>admin-users</code> et coller le contenu de
+                   <code>supabase/functions/admin-users/index.ts</code>.</p>
             </div>
         </section>
 
-        <!-- Tableau des comptes -->
+        <!-- ============================================================
+             TABLEAU DES COMPTES
+             ============================================================ -->
         <div class="section-head">
             <div>
                 <h2>Comptes</h2>
-                <p>Les modifications sont enregistrées immédiatement. La base protège le dernier
-                   administrateur actif : elle refusera de le rétrograder ou de le désactiver.</p>
+                <p>Les réglages sont enregistrés immédiatement. La base protège le dernier
+                   administrateur actif : elle refuse de le rétrograder, de le désactiver
+                   et de le supprimer.</p>
             </div>
             <div class="section-head-actions">
                 <button class="btn btn--ghost" id="btn-reload" type="button">↻ Recharger</button>
@@ -69,22 +183,21 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Nom affiché</th>
-                        <th>E-mail</th>
-                        <th>Administrateur</th>
-                        <th>Prospecte</th>
-                        <th>Démo</th>
-                        <th>Actif</th>
-                        <th>Jours saisis</th>
-                        <th>Dernière saisie</th>
-                        <th>Données</th>
+                        <th>Compte</th>
+                        <th>Rôle</th>
+                        <th>Statut</th>
+                        <th>Connexion</th>
+                        <th>Saisie</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="admin-body"></tbody>
             </table>
         </div>
 
-        <!-- Explications -->
+        <!-- ============================================================
+             EXPLICATIONS
+             ============================================================ -->
         <section class="info-panel info-panel--soft">
             <div class="info-panel-head">
                 <span class="info-panel-icon">🛡️</span>
@@ -112,10 +225,19 @@
                     <dd>Un compte désactivé ne peut plus se connecter et sort des classements, mais son
                         historique est conservé. C'est la bonne manière de gérer un départ : on ne
                         supprime pas des mois de données pour libérer un accès.</dd>
+                    <dt>Nouveau mot de passe</dt>
+                    <dd>Remplace le mot de passe du compte et l'affiche une fois, à transmettre.
+                        L'ancien cesse aussitôt de fonctionner. À utiliser quand quelqu'un a perdu
+                        son accès : c'est plus rapide et plus sûr qu'un mot de passe envoyé par
+                        message et jamais changé.</dd>
                     <dt>Effacer les données</dt>
                     <dd>Supprime les journées d'activité du compte, sans supprimer le compte. Utile
-                        pour remettre le compte de démonstration à zéro, ou pour repartir proprement.
-                        Sans retour possible.</dd>
+                        pour remettre le compte de démonstration à zéro. Sans retour possible.</dd>
+                    <dt>Supprimer le compte</dt>
+                    <dd>Détruit l'accès <b>et</b> tout l'historique de saisie, définitivement. Pour un
+                        départ, préférez <b>désactiver</b> : les chiffres passés restent
+                        consultables et comparables. La suppression n'a de sens que pour un compte
+                        créé par erreur.</dd>
                 </dl>
             </div>
         </section>
