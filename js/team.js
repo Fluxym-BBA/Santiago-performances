@@ -61,11 +61,22 @@ const state = {
     demo: false,
     inactive: false,
     duelA: null,
-    duelB: null
+    duelB: null,
+    // Personnes retirées du calcul à la main. Volontairement en mémoire et non
+    // dans le navigateur : un filtre qui survit à la fermeture de l'onglet finit
+    // par être oublié, et l'on compare alors une équipe à sept avec une équipe à
+    // huit sans le savoir. Ici, chaque ouverture de page repart de tout le monde.
+    excluded: new Set()
 };
 
 let people = [];      // [{ profile, byDate, rows, a }] trié par score décroissant
 let allProfiles = [];
+let eligible = [];    // profils que les deux filtres laissent passer, avant décochage
+
+// Les lignes de la période, gardées telles quelles. Décocher une personne est un
+// calcul local : refaire la requête à chaque clic serait payer le réseau pour
+// une information qu'on a déjà sous la main.
+let cache = { key: '', rows: [] };
 
 const effGran = () => (state.gran === 'auto' ? autoGran(state.from, state.to) : state.gran);
 const pLabel = () => periodLabelShort(state.from, state.to);
@@ -75,9 +86,17 @@ const pLabel = () => periodLabelShort(state.from, state.to);
    -------------------------------------------------------------------------- */
 
 async function load() {
-    const rows = await fetchTeamRange(state.from, state.to, {
-        includeDemo: state.demo, includeInactive: state.inactive
-    });
+    // Une même requête sert tous les réglages qui ne changent ni la période ni
+    // les deux filtres de comptes : granularité, mode de lecture, et surtout le
+    // décochage d'une personne, qui se calcule ici sans rien redemander.
+    const key = [state.from, state.to, state.demo, state.inactive].join('|');
+    if (cache.key !== key) {
+        cache.rows = await fetchTeamRange(state.from, state.to, {
+            includeDemo: state.demo, includeInactive: state.inactive
+        });
+        cache.key = key;
+    }
+    const rows = cache.rows;
 
     // Regroupement par personne. Les profils sans aucune ligne sur la période
     // sont conservés avec un score nul : un BDR qui n'a rien saisi est une
@@ -105,21 +124,37 @@ async function load() {
         map.get(r.user_id).byDate.set(r.activity_date, r);
     });
 
-    people = [...map.values()].map(p => {
-        const list = rowsForRange(p.byDate, state.from, state.to);
-        return { ...p, rows: list, a: agg(list) };
-    }).sort((x, y) => y.a.productivity_score - x.a.productivity_score);
+    // Qui a le droit d'apparaître dans la liste à cocher : tout ce que les deux
+    // filtres laissent passer, avant le décochage. Si l'on construisait cette
+    // liste après, décocher quelqu'un le ferait disparaître de la liste et il
+    // deviendrait impossible de le remettre.
+    eligible = [...map.values()].map(v => v.profile)
+        .sort((a, b) => nameOfProfile(a).localeCompare(nameOfProfile(b), 'fr'));
+
+    people = [...map.values()]
+        .filter(v => !state.excluded.has(v.profile.user_id))
+        .map(p => {
+            const list = rowsForRange(p.byDate, state.from, state.to);
+            return { ...p, rows: list, a: agg(list) };
+        }).sort((x, y) => y.a.productivity_score - x.a.productivity_score);
 
     people.forEach((p, i) => {
         p.rank = i + 1;
         p.color = BDR_COLORS[i % BDR_COLORS.length];
     });
 
+    // Une personne décochée ne peut pas rester en lice dans la comparaison :
+    // sans cela le duel afficherait encore des chiffres qui ne comptent plus.
+    const present = id => people.some(x => x.profile.user_id === id);
+    if (state.duelA && !present(state.duelA)) state.duelA = null;
+    if (state.duelB && !present(state.duelB)) state.duelB = null;
+
     if (!state.duelA && people[0]) state.duelA = people[0].profile.user_id;
     if (!state.duelB && people[1]) state.duelB = people[1].profile.user_id;
 }
 
-const nameOf = p => p.profile.display_name || p.profile.email || 'Sans nom';
+const nameOfProfile = pr => pr.display_name || pr.email || 'Sans nom';
+const nameOf = p => nameOfProfile(p.profile);
 const personBy = id => people.find(p => p.profile.user_id === id) || null;
 
 /* --------------------------------------------------------------------------
@@ -165,10 +200,18 @@ function renderKpis() {
 function renderRanking() {
     const body = document.getElementById('ranking-body');
     if (!people.length) {
-        // Distinguer « il n'y a personne » de « tout le monde est masqué par un
-        // filtre » : le second cas se répare en un clic, encore faut-il le dire.
+        // Trois causes possibles, trois phrases : il n'y a personne, tout le
+        // monde est masqué par un filtre, ou tout le monde a été décoché à la
+        // main. Les deux dernières se réparent en un clic, encore faut-il dire
+        // laquelle s'applique.
+        const byHand = eligible.filter(pr => state.excluded.has(pr.user_id)).length;
         const hidden = allProfiles.length;
-        body.innerHTML = hidden > 0
+        body.innerHTML = byHand > 0
+            ? `<tr><td colspan="13" class="td-muted">Aucun compte visible : les
+               ${byHand} personne${byHand > 1 ? 's' : ''} de la période
+               ${byHand > 1 ? 'ont' : 'a'} été décochée${byHand > 1 ? 's' : ''}
+               dans « Qui est compté ».</td></tr>`
+            : hidden > 0
             ? `<tr><td colspan="13" class="td-muted">Aucun compte visible : les
                ${hidden} compte${hidden > 1 ? 's' : ''} de la période
                ${hidden > 1 ? 'sont' : 'est'} écarté${hidden > 1 ? 's' : ''} par
@@ -603,33 +646,49 @@ function renderSummary() {
     const gran = effGran();
     const team = agg(people.flatMap(p => p.rows));
     const withData = people.filter(p => p.a.activeDays > 0).length;
-    const excluded = allProfiles.length - people.length;
+
+    // Deux causes de retrait, deux compteurs. Les mélanger reviendrait à dire
+    // « quatre comptes exclus » sans distinguer ce que l'outil a écarté de ce
+    // que l'on a soi-même décoché, et c'est précisément la confusion à éviter.
+    const byFilters = Math.max(0, allProfiles.length - eligible.length);
+    const byHand = eligible.filter(pr => state.excluded.has(pr.user_id)).length;
 
     el.innerHTML = `<p class="summary-sentence">
         Sur <b>${periodLabel(state.from, state.to)}</b>, ${people.length} compte${people.length > 1 ? 's' : ''}
         suivi${people.length > 1 ? 's' : ''}, dont <b>${withData}</b> avec au moins une saisie.
         Un point de graphique représente <b>un ${granWord(gran)}</b>.
         Total de l'équipe : <b>${fmtInt(team.productivity_score)} points</b>.
-        ${excluded > 0 ? `${excluded} compte${excluded > 1 ? 's' : ''} exclu${excluded > 1 ? 's' : ''} par les filtres.` : ''}
+        ${byFilters > 0 ? `${byFilters} compte${byFilters > 1 ? 's' : ''} exclu${byFilters > 1 ? 's' : ''} par les filtres.` : ''}
     </p>
-    ${people.length === 0 && excluded > 0 ? `
+    ${byHand > 0 ? `
+        <p class="summary-sentence summary-sentence--warn">
+            <b>Périmètre restreint à la main :</b> ${byHand} personne${byHand > 1 ? 's' : ''}
+            décochée${byHand > 1 ? 's' : ''} dans « Qui est compté ». Les totaux, les
+            moyennes et les classements ci-dessous ne portent pas sur toute l'équipe.
+            <button type="button" class="btn btn--ghost" id="btn-recheck-all">
+                Tout recocher
+            </button>
+        </p>` : ''}
+    ${people.length === 0 && byFilters > 0 && byHand === 0 ? `
         <p class="summary-sentence">
             <b>Tous les comptes de la période sont masqués par les filtres.</b>
             C'est le réglage par défaut : les comptes de démonstration et les
             comptes désactivés sont écartés pour ne pas fausser les classements.
             <button type="button" class="btn btn--ghost" id="btn-include-all">
-                Afficher les ${excluded} compte${excluded > 1 ? 's' : ''} masqué${excluded > 1 ? 's' : ''}
+                Afficher les ${byFilters} compte${byFilters > 1 ? 's' : ''} masqué${byFilters > 1 ? 's' : ''}
             </button>
         </p>` : ''}`;
 
-    // Le bouton est recréé à chaque rendu : on le recâble ici plutôt que dans
-    // le câblage initial, qui ne le verrait pas.
+    // Les boutons sont recréés à chaque rendu : on les recâble ici plutôt que
+    // dans le câblage initial, qui ne les verrait pas.
     const inc = document.getElementById('btn-include-all');
     if (inc) inc.addEventListener('click', () => {
         state.demo = true;
         state.inactive = true;
         refresh();
     });
+    const all = document.getElementById('btn-recheck-all');
+    if (all) all.addEventListener('click', () => { state.excluded.clear(); refresh(); });
 }
 
 function exportCsv() {
@@ -651,7 +710,11 @@ function exportCsv() {
     const url = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `equipe-${state.from}_${state.to}.csv`;
+    // Un export qui ne contient qu'une partie de l'équipe doit le dire dans son
+    // nom : un fichier transmis à quelqu'un d'autre n'emporte pas l'écran avec
+    // lui, et rien n'y rappellerait que des personnes ont été décochées.
+    const restricted = eligible.some(pr => state.excluded.has(pr.user_id));
+    a.download = `equipe-${state.from}_${state.to}${restricted ? '-perimetre-restreint' : ''}.csv`;
     a.click();
     URL.revokeObjectURL(url);
 }
@@ -672,6 +735,70 @@ async function refresh() {
     } catch (e) {
         toast(humanError(e), 'error');
     }
+}
+
+/* --------------------------------------------------------------------------
+   Qui compte, nom par nom
+
+   Les deux filtres au-dessus répondent à une question de nature : un compte de
+   démonstration n'est pas une vraie personne. Cette liste-ci répond à une
+   question de circonstance : ce mois-ci, untel était en formation, tel autre
+   vient d'arriver. Aucun réglage automatique ne peut deviner cela, c'est donc
+   un choix assumé et affiché.
+
+   Décocher retire la personne de tout : classement, totaux d'équipe,
+   graphiques, comparaison, export. Un demi-retrait, où la personne resterait
+   affichée sans compter, donnerait un tableau que plus personne ne sait lire.
+   -------------------------------------------------------------------------- */
+function renderPeoplePick() {
+    const box = document.getElementById('people-pick');
+    const note = document.getElementById('explain-people');
+    if (!box || !note) return;
+
+    if (!eligible.length) {
+        box.innerHTML = '<p class="pick-empty">Aucun compte ne passe les deux filtres ci-dessus.</p>';
+        note.textContent = '';
+        return;
+    }
+
+    box.innerHTML = eligible.map(pr => {
+        const id = pr.user_id;
+        const on = !state.excluded.has(id);
+        const person = people.find(x => x.profile.user_id === id);
+        const marks = [pr.is_demo ? 'démo' : '', pr.is_active ? '' : 'désactivé']
+            .filter(Boolean).join(', ');
+        // La pastille reprend la couleur du classement, pour que la liste et les
+        // graphiques désignent la même personne sans effort de mémoire.
+        const dot = on && person ? person.color : 'var(--gray-300)';
+        return `<label class="person-pick${on ? '' : ' is-off'}">
+            <input type="checkbox" data-person="${id}"${on ? ' checked' : ''}>
+            <span class="person-dot" style="background: ${dot}"></span>
+            <span class="person-name">${escapeHtml(nameOfProfile(pr))}${
+                marks ? ` <em>${marks}</em>` : ''}</span>
+        </label>`;
+    }).join('');
+
+    const off = eligible.filter(pr => state.excluded.has(pr.user_id)).length;
+    note.innerHTML = off === 0
+        ? 'Tout le monde compte. Décocher quelqu\'un le retire des classements, '
+          + 'des totaux, des graphiques et de l\'export.'
+        : `<b>${off} personne${off > 1 ? 's' : ''} retirée${off > 1 ? 's' : ''} `
+          + `du calcul à la main.</b> Les totaux ci-dessous ne portent donc plus sur `
+          + `toute l\'équipe. <button type="button" class="btn-link" id="btn-recheck">`
+          + `Tout recocher</button>`;
+
+    // Cases et bouton sont recréés à chaque rendu : on les recâble ici, comme
+    // ailleurs dans ce fichier, plutôt que dans le câblage initial.
+    box.querySelectorAll('[data-person]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            const id = cb.dataset.person;
+            if (cb.checked) state.excluded.delete(id);
+            else state.excluded.add(id);
+            refresh();
+        });
+    });
+    const again = document.getElementById('btn-recheck');
+    if (again) again.addEventListener('click', () => { state.excluded.clear(); refresh(); });
 }
 
 function syncControls() {
@@ -698,6 +825,8 @@ function syncControls() {
     document.getElementById('explain-demo').textContent = state.demo
         ? 'Les comptes de démonstration comptent dans les classements.'
         : 'Les comptes de démonstration sont ignorés partout.';
+
+    renderPeoplePick();
 }
 
 const PRESETS = [
