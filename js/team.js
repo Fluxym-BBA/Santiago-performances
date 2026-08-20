@@ -339,7 +339,7 @@ const CHARTS = [
             jamais un zéro inventé.`,
         hover: () => `le classement complet de l'équipe sur le moment pointé, la part de chacun dans
             le total, l'avance du premier sur le second, et la moyenne par BDR ayant saisi.`,
-        render: (host, shown) => drawLines(host, shown, 'productivity_score')
+        render: (host, shown, big) => drawLines(host, shown, 'productivity_score', big)
     },
     {
         key: 'calls', icon: '📞',
@@ -350,7 +350,7 @@ const CHARTS = [
             entièrement sous son contrôle. Les barres sont groupées par personne à l'intérieur de
             chaque ${granWord(effGran())}.`,
         hover: () => `tous les BDR sur le moment pointé, classés, avec la part de chacun.`,
-        render: (host, shown) => drawBars(host, shown, 'calls_made')
+        render: (host, shown, big) => drawBars(host, shown, 'calls_made', big)
     },
     {
         key: 'meetings', icon: '🤝',
@@ -361,7 +361,7 @@ const CHARTS = [
             Un BDR qui en obtient peu malgré beaucoup d'appels doit être regardé sur le taux de
             conversion plutôt que sur le volume.`,
         hover: () => `tous les BDR sur le moment pointé, classés, avec la part de chacun.`,
-        render: (host, shown) => drawBars(host, shown, 'meetings_booked')
+        render: (host, shown, big) => drawBars(host, shown, 'meetings_booked', big)
     },
     {
         key: 'rate', icon: '🎯', wide: true,
@@ -373,7 +373,7 @@ const CHARTS = [
             ne veut rien dire. L'info-bulle donne les volumes pour trancher.`,
         hover: () => `le taux de chaque BDR sur le moment pointé, avec les volumes d'appels aboutis et
             de rendez-vous qui ont servi à le calculer.`,
-        render: (host, shown) => drawRates(host, shown)
+        render: (host, shown, big) => drawRates(host, shown, big)
     }
 ];
 
@@ -388,7 +388,7 @@ function bucketsOf(list) {
     }));
 }
 
-function drawLines(host, shown, key) {
+function drawLines(host, shown, key, big = false) {
     const bk = bucketsOf(shown);
     if (!bk.length || !bk[0].list.length) return host.innerHTML = emptyStateHtml();
     lineChart(host, {
@@ -397,12 +397,12 @@ function drawLines(host, shown, key) {
             name: b.name, color: b.color,
             values: b.list.map(x => agg(x.rows).productivity_score)
         })),
-        height: 320,
+        height: big ? 480 : 320,
         tip: teamTip(bk, key)
     });
 }
 
-function drawBars(host, shown, key) {
+function drawBars(host, shown, key, big = false) {
     const bk = bucketsOf(shown);
     if (!bk.length || !bk[0].list.length) return host.innerHTML = emptyStateHtml();
     barChart(host, {
@@ -411,12 +411,12 @@ function drawBars(host, shown, key) {
             name: b.name, color: b.color,
             values: b.list.map(x => agg(x.rows)[key])
         })),
-        height: 260,
+        height: big ? 420 : 260,
         tip: teamTip(bk, key)
     });
 }
 
-function drawRates(host, shown) {
+function drawRates(host, shown, big = false) {
     const bk = bucketsOf(shown);
     if (!bk.length || !bk[0].list.length) return host.innerHTML = emptyStateHtml();
     const gran = effGran();
@@ -427,7 +427,7 @@ function drawRates(host, shown) {
             name: b.name, color: b.color,
             values: b.list.map(x => agg(x.rows).meeting_rate)
         })),
-        height: 300,
+        height: big ? 460 : 300,
         tip: i => {
             const first = bk[0].list[i];
             const label = gran === 'day' ? formatLong(first.key) : first.label;
@@ -476,6 +476,10 @@ function renderCharts() {
                     <h3 class="chart-title">${escapeHtml(c.title)}</h3>
                     <p class="chart-sub">${escapeHtml(c.sub())}</p>
                 </div>
+                <div class="chart-tools">
+                    <button class="icon-btn" type="button" data-zoom="${c.key}"
+                            title="Agrandir" aria-label="Agrandir ce graphique">⛶</button>
+                </div>
             </div>
             ${legendHtml(shown.map(p => ({ color: p.color, label: nameOf(p) })))}
             <div data-host="${c.key}"></div>
@@ -493,70 +497,23 @@ function renderCharts() {
         const host = grid.querySelector(`[data-host="${c.key}"]`);
         if (host) c.render(host, shown);
     });
+
+    grid.querySelectorAll('[data-zoom]').forEach(b =>
+        b.addEventListener('click', () => openModal(b.dataset.zoom)));
 }
 
 /* --------------------------------------------------------------------------
    Duel de deux BDR
    -------------------------------------------------------------------------- */
 
-function renderDuel() {
-    const selA = document.getElementById('duel-a');
-    const selB = document.getElementById('duel-b');
-    const grid = document.getElementById('duel-grid');
-
-    const opts = sel => people.map(p =>
-        `<option value="${p.profile.user_id}"${p.profile.user_id === sel ? ' selected' : ''}>${
-            escapeHtml(nameOf(p))}</option>`).join('');
-    selA.innerHTML = opts(state.duelA);
-    selB.innerHTML = opts(state.duelB);
-
-    const A = personBy(state.duelA), B = personBy(state.duelB);
-    if (!A || !B) {
-        grid.innerHTML = `<div class="chart-card">${emptyStateHtml(
-            'Il faut au moins deux comptes pour comparer.')}</div>`;
-        return;
-    }
-    if (A === B) {
-        grid.innerHTML = `<div class="chart-card">${emptyStateHtml(
-            'Choisissez deux personnes différentes.')}</div>`;
-        return;
-    }
-
+/* Les deux dessins du duel, extraits de renderDuel pour pouvoir être refaits
+   dans la fenêtre d'agrandissement sans dupliquer une ligne de leur contenu.
+   Le corps est celui d'origine, seul l'hôte devient un paramètre. */
+function drawDuelCompare(host, A, B) {
     const dec = state.mode === 'avg';
     const fV = v => (dec ? fmtDec(v) : fmtInt(v));
 
-    grid.innerHTML = `
-        <div class="chart-card chart-card--wide">
-            <div class="chart-head">
-                <div class="chart-icon">⚔️</div>
-                <div class="chart-titles">
-                    <h3 class="chart-title">${escapeHtml(nameOf(A))} contre ${escapeHtml(nameOf(B))}</h3>
-                    <p class="chart-sub">Action par action, ${dec ? 'en moyenne par jour actif' : 'en cumul'}, sur ${pLabel()}</p>
-                </div>
-            </div>
-            ${legendHtml([
-                { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
-                { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
-            ])}
-            <div data-host="duel-compare"></div>
-        </div>
-        <div class="chart-card chart-card--wide">
-            <div class="chart-head">
-                <div class="chart-icon">📈</div>
-                <div class="chart-titles">
-                    <h3 class="chart-title">Score dans le temps</h3>
-                    <p class="chart-sub">Les deux trajectoires, ${granWord(effGran())} par ${granWord(effGran())}</p>
-                </div>
-            </div>
-            ${legendHtml([
-                { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
-                { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
-            ])}
-            <div data-host="duel-time"></div>
-        </div>`;
-
-    // Comparaison action par action
-    compareChart(grid.querySelector('[data-host="duel-compare"]'), {
+    compareChart(host, {
         rows: METRICS.map(m => ({
             label: m.short, colorA: A_MAIN, colorB: B_MAIN,
             a: valOf(A.a, m.key, state.mode), b: valOf(B.a, m.key, state.mode)
@@ -596,16 +553,20 @@ function renderDuel() {
         }
     });
 
-    // Trajectoires
+}
+
+/* compareChart calcule sa hauteur d'après le nombre de lignes : elle n'a donc
+   pas de variante agrandie, elle gagne seulement en largeur. */
+function drawDuelTime(host, A, B, big = false) {
     const gran = effGran();
     const bA = bucketize(A.rows, gran), bB = bucketize(B.rows, gran);
-    lineChart(grid.querySelector('[data-host="duel-time"]'), {
+    lineChart(host, {
         labels: bA.map(b => b.label),
         series: [
             { name: nameOf(A), color: A_MAIN, values: bA.map(b => agg(b.rows).productivity_score), area: true },
             { name: nameOf(B), color: B_MAIN, values: bB.map(b => agg(b.rows).productivity_score) }
         ],
-        height: 300,
+        height: big ? 460 : 300,
         tip: i => {
             const ga = agg(bA[i] ? bA[i].rows : []);
             const gb = agg(bB[i] ? bB[i].rows : []);
@@ -634,8 +595,180 @@ function renderDuel() {
         }
     });
 
+}
+
+function renderDuel() {
+    const selA = document.getElementById('duel-a');
+    const selB = document.getElementById('duel-b');
+    const grid = document.getElementById('duel-grid');
+
+    const opts = sel => people.map(p =>
+        `<option value="${p.profile.user_id}"${p.profile.user_id === sel ? ' selected' : ''}>${
+            escapeHtml(nameOf(p))}</option>`).join('');
+    selA.innerHTML = opts(state.duelA);
+    selB.innerHTML = opts(state.duelB);
+
+    const A = personBy(state.duelA), B = personBy(state.duelB);
+    if (!A || !B) {
+        grid.innerHTML = `<div class="chart-card">${emptyStateHtml(
+            'Il faut au moins deux comptes pour comparer.')}</div>`;
+        return;
+    }
+    if (A === B) {
+        grid.innerHTML = `<div class="chart-card">${emptyStateHtml(
+            'Choisissez deux personnes différentes.')}</div>`;
+        return;
+    }
+
+    const dec = state.mode === 'avg';
+    const fV = v => (dec ? fmtDec(v) : fmtInt(v));
+
+    grid.innerHTML = `
+        <div class="chart-card chart-card--wide">
+            <div class="chart-head">
+                <div class="chart-icon">⚔️</div>
+                <div class="chart-titles">
+                    <h3 class="chart-title">${escapeHtml(nameOf(A))} contre ${escapeHtml(nameOf(B))}</h3>
+                    <p class="chart-sub">Action par action, ${dec ? 'en moyenne par jour actif' : 'en cumul'}, sur ${pLabel()}</p>
+                </div>
+                <div class="chart-tools">
+                    <button class="icon-btn" type="button" data-zoom="duel-compare"
+                            title="Agrandir" aria-label="Agrandir ce graphique">⛶</button>
+                </div>
+            </div>
+            ${legendHtml([
+                { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
+                { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
+            ])}
+            <div data-host="duel-compare"></div>
+        </div>
+        <div class="chart-card chart-card--wide">
+            <div class="chart-head">
+                <div class="chart-icon">📈</div>
+                <div class="chart-titles">
+                    <h3 class="chart-title">Score dans le temps</h3>
+                    <p class="chart-sub">Les deux trajectoires, ${granWord(effGran())} par ${granWord(effGran())}</p>
+                </div>
+                <div class="chart-tools">
+                    <button class="icon-btn" type="button" data-zoom="duel-time"
+                            title="Agrandir" aria-label="Agrandir ce graphique">⛶</button>
+                </div>
+            </div>
+            ${legendHtml([
+                { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
+                { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
+            ])}
+            <div data-host="duel-time"></div>
+        </div>`;
+
+    drawDuelCompare(grid.querySelector('[data-host="duel-compare"]'), A, B);
+    drawDuelTime(grid.querySelector('[data-host="duel-time"]'), A, B);
+
+    grid.querySelectorAll('[data-zoom]').forEach(b =>
+        b.addEventListener('click', () => openModal(b.dataset.zoom)));
+
     selA.onchange = () => { state.duelA = selA.value; renderDuel(); };
     selB.onchange = () => { state.duelB = selB.value; renderDuel(); };
+}
+
+/* --------------------------------------------------------------------------
+   Agrandissement d'une carte
+
+   Le squelette de la fenêtre existait déjà dans team.html depuis que la page a
+   été calquée sur le tableau de bord, mais rien ne le pilotait : c'est ce
+   moteur qui manquait. Même ergonomie que sur la page Performances, à un détail
+   près assumé dans ce lot : la fenêtre montre la période globale, les dates
+   propres à un graphique viendront ensuite.
+
+   Aucun contenu n'est dupliqué. La fenêtre appelle la même fonction de dessin
+   que la carte, avec un hôte plus large et une hauteur plus généreuse. Deux
+   dessins qui divergeraient au fil des évolutions seraient pires que pas
+   d'agrandissement du tout.
+   -------------------------------------------------------------------------- */
+
+let openKey = null;
+
+/** Ce qu'il faut savoir pour redessiner une carte, qu'elle vienne de la grille
+    ou du duel. Renvoie null quand il n'y a rien à montrer. */
+function expandable(key) {
+    const c = CHARTS.find(x => x.key === key);
+    if (c) {
+        const shown = shownPeople();
+        if (!shown.length) return null;
+        return {
+            icon: c.icon,
+            title: c.title,
+            sub: c.sub(),
+            legend: shown.map(p => ({ color: p.color, label: nameOf(p) })),
+            note: `<p>${c.note()}</p>
+                   <p class="chart-note-hover"><b>Au survol :</b> ${c.hover()}</p>`,
+            draw: host => c.render(host, shown, true)
+        };
+    }
+
+    const A = personBy(state.duelA), B = personBy(state.duelB);
+    if (!A || !B || A === B) return null;
+    const legend = [
+        { periodStyle: 'a', color: A_MAIN, label: nameOf(A) },
+        { periodStyle: 'b', color: B_MAIN, label: nameOf(B) }
+    ];
+
+    if (key === 'duel-compare') return {
+        icon: '⚔️',
+        title: `${nameOf(A)} contre ${nameOf(B)}`,
+        sub: `Action par action, ${state.mode === 'avg' ? 'en moyenne par jour actif' : 'en cumul'}, sur ${pLabel()}`,
+        legend,
+        note: `<p>Chaque ligne est une action, les deux barres se lisent l'une contre l'autre.
+               Le survol donne le cumul, la moyenne par jour actif, le nombre de jours saisis,
+               et l'écart en valeur comme en pourcentage.</p>`,
+        draw: host => drawDuelCompare(host, A, B)
+    };
+
+    if (key === 'duel-time') return {
+        icon: '📈',
+        title: `Score dans le temps : ${nameOf(A)} et ${nameOf(B)}`,
+        sub: `Les deux trajectoires, ${granWord(effGran())} par ${granWord(effGran())}`,
+        legend,
+        note: `<p>Deux trajectoires de score sur la même échelle. Une courbe qui s'interrompt
+               signale des périodes sans aucune saisie, jamais un zéro inventé.</p>`,
+        draw: host => drawDuelTime(host, A, B, true)
+    };
+
+    return null;
+}
+
+function openModal(key) {
+    // On n'ouvre pas une fenêtre vide : si la carte n'a rien à montrer, le
+    // bouton ne fait rien plutôt que d'afficher un cadre blanc.
+    if (!expandable(key)) return;
+    openKey = key;
+    document.getElementById('modal').hidden = false;
+    document.body.style.overflow = 'hidden';
+    paintModal();
+}
+
+function closeModal() {
+    openKey = null;
+    document.getElementById('modal').hidden = true;
+    document.body.style.overflow = '';
+}
+
+function paintModal() {
+    const e = openKey ? expandable(openKey) : null;
+    // Le contenu a pu disparaître sous les pieds de la fenêtre : une personne
+    // décochée, un duel devenu impossible. On referme plutôt que de montrer une
+    // carte vide.
+    if (!e) return closeModal();
+
+    document.getElementById('modal-title').textContent = `${e.icon}  ${e.title}`;
+    document.getElementById('modal-sub').textContent = e.sub;
+    document.getElementById('modal-body').innerHTML = `
+        ${legendHtml(e.legend)}
+        <div id="modal-host"></div>
+        <details class="chart-note" open><summary>Comment lire ce graphique</summary>
+            ${e.note}
+        </details>`;
+    e.draw(document.getElementById('modal-host'));
 }
 
 /* --------------------------------------------------------------------------
@@ -733,6 +866,9 @@ async function refresh() {
         renderCharts();
         renderDuel();
         syncControls();
+        // Si une carte est ouverte en grand pendant qu'un réglage change, elle
+        // doit suivre : une fenêtre figée sur d'anciens chiffres tromperait.
+        if (openKey) paintModal();
     } catch (e) {
         toast(humanError(e), 'error');
     }
@@ -878,6 +1014,16 @@ function wire() {
 
     document.getElementById('btn-export').addEventListener('click', exportCsv);
 
+    // Fenêtre d'agrandissement : trois façons de la fermer, comme sur la page
+    // Performances. La croix, le clic à côté de la carte, et Échap.
+    document.getElementById('modal-close').addEventListener('click', closeModal);
+    document.getElementById('modal').addEventListener('click', e => {
+        if (e.target.id === 'modal') closeModal();
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && openKey) closeModal();
+    });
+
     // Raccourcis de la zone A
     document.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => {
         const k = b.dataset.a;
@@ -914,7 +1060,9 @@ function wire() {
 
         allProfiles = await listProfiles();
         wire();
-        onResize(() => { renderCharts(); renderDuel(); });
+        // Les graphiques se redessinent à la largeur disponible : la fenêtre
+        // agrandie aussi, sinon son contenu resterait à l'ancienne taille.
+        onResize(() => { renderCharts(); renderDuel(); if (openKey) paintModal(); });
         await refresh();
         hideVeil();
     } catch (e) {
