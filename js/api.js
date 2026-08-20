@@ -282,6 +282,29 @@ const LEVEL_LABEL = {
     member:  'Membre'
 };
 
+/**
+ * L'échelle, du plus haut au plus bas, prête à peupler un sélecteur.
+ *
+ * Dérivée des deux tables ci-dessus et non recopiée : ajouter un niveau demain
+ * ne devra se faire qu'à un seul endroit, sans quoi l'écran des comptes et les
+ * règles finiraient par ne plus dire la même chose.
+ */
+export const LEVELS = Object.keys(LEVEL_RANK)
+    .sort((a, b) => LEVEL_RANK[b] - LEVEL_RANK[a])
+    .map(key => ({ key, rank: LEVEL_RANK[key], label: LEVEL_LABEL[key] }));
+
+/**
+ * Rang d'un niveau nommé, sans passer par un profil.
+ *
+ * À ne pas confondre avec levelRank(profil), qui renvoie zéro dès que le compte
+ * est désactivé. Cette fonction-ci compare des niveaux entre eux, exactement
+ * comme level_rank() dans la base : c'est elle qu'il faut utiliser pour savoir
+ * si l'on a le droit d'agir sur un compte. Confondre les deux laisserait croire
+ * qu'un administrateur désactivé est modifiable par n'importe qui, alors que la
+ * base le refuse.
+ */
+export const rankOfLevel = level => LEVEL_RANK[level] || 1;
+
 /** Rang du niveau. Zéro pour un profil absent ou désactivé. */
 export function levelRank(p) {
     if (!p || p.is_active === false) return 0;
@@ -412,6 +435,28 @@ export async function adminUpdateProfile(userId, patch) {
         p_user_id: userId,
         p_display_name: patch.display_name ?? null,
         p_is_admin: patch.is_admin ?? null,
+        p_is_bdr: patch.is_bdr ?? null,
+        p_is_demo: patch.is_demo ?? null,
+        p_is_active: patch.is_active ?? null
+    });
+    if (error) throw error;
+    return normalize(Array.isArray(data) ? data[0] : data);
+}
+
+/**
+ * Modification d'un profil par niveaux.
+ *
+ * Remplace adminUpdateProfile pour l'écran des comptes : la fonction de base
+ * admin_set_level applique la règle unique du projet, à savoir qu'on n'agit que
+ * sur un compte de niveau strictement inférieur au sien et qu'on n'attribue
+ * jamais un niveau supérieur ou égal au sien. Les champs laissés à null ne sont
+ * pas touchés, ce qui permet d'envoyer un seul réglage à la fois.
+ */
+export async function adminSetLevel(userId, patch = {}) {
+    const { data, error } = await supabase.rpc('admin_set_level', {
+        p_user_id: userId,
+        p_display_name: patch.display_name ?? null,
+        p_access_level: patch.access_level ?? null,
         p_is_bdr: patch.is_bdr ?? null,
         p_is_demo: patch.is_demo ?? null,
         p_is_active: patch.is_active ?? null

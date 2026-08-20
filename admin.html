@@ -21,7 +21,7 @@
     <div class="page-container">
         <span class="hero-badge">Administration</span>
         <h1>Les comptes, <em>et qui voit quoi</em></h1>
-        <p>Créer un accès, changer un mot de passe, nommer un administrateur, retirer un départ.
+        <p>Créer un accès, changer un mot de passe, régler un niveau d'accès, retirer un départ.
            Chaque action est vérifiée par la base, qui refuse les manoeuvres dangereuses.</p>
     </div>
 </header>
@@ -71,6 +71,15 @@
                            classements. Modifiable à tout moment plus bas.</p>
                     </div>
 
+                    <div class="field">
+                        <label for="f-level">Niveau d'accès</label>
+                        <select class="chart-select level-select" id="f-level"></select>
+                        <p class="field-note">Quatre niveaux, du plus faible au plus fort :
+                           <b>membre</b>, <b>responsable</b>, <b>administrateur</b>,
+                           <b>propriétaire</b>. La liste s'arrête à ce que votre propre niveau
+                           permet d'attribuer : on ne crée jamais son égal.</p>
+                    </div>
+
                     <fieldset class="field field--wide">
                         <legend>Ce que ce compte pourra faire</legend>
                         <div class="pick-row">
@@ -79,13 +88,6 @@
                                 <span class="pick-body">
                                     <b>Prospecte</b>
                                     <em>Saisit son activité, a ses performances, apparaît dans les classements</em>
-                                </span>
-                            </label>
-                            <label class="pick">
-                                <input type="checkbox" id="f-admin">
-                                <span class="pick-body">
-                                    <b>Administrateur</b>
-                                    <em>Voit toute l'équipe, corrige les saisies, gère cette page</em>
                                 </span>
                             </label>
                             <label class="pick">
@@ -154,8 +156,8 @@
                         <b>Create new user</b></li>
                     <li>Renseigner l'e-mail et un mot de passe provisoire</li>
                     <li>Cocher <b>Auto Confirm User</b>, sans quoi la personne ne pourra pas se connecter</li>
-                    <li>Valider : le profil apparaît dans le tableau, en BDR et non administrateur,
-                        ce qui est le réglage le moins ouvert</li>
+                    <li>Valider : le profil apparaît dans le tableau au niveau <b>membre</b> et
+                        prospecte, ce qui est le réglage le moins ouvert</li>
                 </ol>
                 <p class="info-panel-note" id="manual-note">Pour activer la création depuis cette page :
                    Supabase → <b>Edge Functions</b> → <b>Deploy a new function</b>, nommer la fonction
@@ -170,9 +172,10 @@
         <div class="section-head">
             <div>
                 <h2>Comptes</h2>
-                <p>Les réglages sont enregistrés immédiatement. La base protège le dernier
-                   administrateur actif : elle refuse de le rétrograder, de le désactiver
-                   et de le supprimer.</p>
+                <p>Les réglages sont enregistrés immédiatement. Vous n'agissez que sur les
+                   comptes de niveau strictement inférieur au vôtre, et la base protège le
+                   dernier propriétaire actif : elle refuse de le rétrograder, de le
+                   désactiver et de le supprimer.</p>
             </div>
             <div class="section-head-actions">
                 <button class="btn btn--ghost" id="btn-reload" type="button">↻ Recharger</button>
@@ -205,15 +208,28 @@
             </div>
             <div class="info-panel-body">
                 <dl class="def-list">
-                    <dt>Administrateur et Prospecte : deux réglages indépendants</dt>
-                    <dd>Ce sont deux questions distinctes. <b>Administrateur</b> donne accès à la vue
-                        d'équipe, à cette page, et le droit de corriger la saisie de n'importe qui.
-                        <b>Prospecte</b> dit si la personne saisit son activité, apparaît dans les
+                    <dt>Le niveau d'accès : quatre barreaux, une seule règle</dt>
+                    <dd>Du plus faible au plus fort : <b>Membre</b> ne voit que ses propres chiffres.
+                        <b>Responsable</b> voit toute l'équipe et ses classements, en lecture seule.
+                        <b>Administrateur</b> voit l'équipe et gère les comptes de cette page, mais ne
+                        peut pas corriger les chiffres de quelqu'un d'autre. <b>Propriétaire</b> peut
+                        tout, y compris cette correction.</dd>
+                    <dd>La règle est unique et tenue par la base, pas par cet écran : on n'agit que
+                        sur un compte de niveau strictement inférieur au sien, et on n'attribue jamais
+                        un niveau supérieur ou égal au sien. Un administrateur ne peut donc ni
+                        modifier, ni supprimer un propriétaire, ni nommer un second administrateur.
+                        Les niveaux hors de portée apparaissent dans la liste déroulante mais ne sont
+                        pas choisissables : le niveau réel du compte reste lisible.</dd>
+                    <dd>Pourquoi un administrateur ne corrige pas les chiffres d'un commercial :
+                        l'outil suit une activité déclarée. Si un tiers peut réécrire la saisie de
+                        quelqu'un, le chiffre n'appartient plus à celui qui l'a saisi et la saisie
+                        quotidienne perd son sens.</dd>
+                    <dt>Prospecte : un axe indépendant du niveau</dt>
+                    <dd><b>Prospecte</b> dit si la personne saisit son activité, apparaît dans les
                         classements et dispose des pages « Ma journée » et « Mes performances ».
-                        Un administrateur qui ne prospecte pas n'a donc ni page de saisie, ni score, et
-                        ne pollue aucun classement. Un manager qui prospecte aussi peut cumuler les
-                        deux. Un compte sans aucun des deux est un observateur : il consulte l'équipe
-                        et n'administre rien.</dd>
+                        C'est une question distincte du niveau. Un administrateur qui ne prospecte pas
+                        n'a donc ni page de saisie, ni score, et ne pollue aucun classement. Un
+                        responsable qui prospecte aussi cumule les deux.</dd>
                     <dd>Un BDR ne voit strictement que ses propres lignes, y compris s'il interroge la
                         base directement avec la clé publique : la règle est posée dans PostgreSQL,
                         pas dans le navigateur.</dd>

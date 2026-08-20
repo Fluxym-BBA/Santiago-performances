@@ -10,16 +10,35 @@
    Ce que fait cet écran, en revanche, c'est ne jamais promettre une action
    qui sera refusée. Un bouton désactivé dit pourquoi il l'est, et la création
    de compte n'apparaît que si la fonction qui la réalise répond vraiment.
+
+   Le pouvoir est une échelle à quatre barreaux, et non deux cases : membre,
+   responsable, administrateur, propriétaire. La règle est unique et recopiée
+   ici telle qu'elle est écrite dans la base, pour que l'écran refuse ce que la
+   base refuserait : on n'agit que sur un compte de niveau strictement
+   inférieur au sien, et on n'attribue jamais un niveau supérieur ou égal au
+   sien. Son propre compte est la seule exception à la première moitié.
    ========================================================================== */
 
 import {
-    requireAuth, isAdmin, myProfile, listProfiles, adminUpdateProfile,
+    requireAuth, myProfile, listProfiles, adminSetLevel,
     adminWipeActivity, fetchTeamRange, humanError, todayISO, addDaysISO, formatLong,
     adminFnStatus, adminAuthInfo, adminCreateAccount, adminSetPassword,
-    adminDeleteAccount, adminDeletePreview
+    adminDeleteAccount, adminDeletePreview,
+    LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank
 } from './api.js';
 import { renderNav } from './nav.js';
 import { escapeHtml, fmtInt, toast, hideVeil } from './ui.js';
+
+/* Ce que chaque niveau autorise, en une ligne. L'échelle elle-même vit dans
+   api.js : ici on ne fait que l'expliquer à l'écran, au moment du choix. */
+const LEVEL_HINT = {
+    owner:   'tout, y compris corriger les chiffres des autres',
+    admin:   'voit toute l\'équipe et gère les comptes, mais ne corrige pas les chiffres d\'autrui',
+    manager: 'voit toute l\'équipe en lecture, ne gère aucun compte',
+    member:  'ne voit que ses propres chiffres'
+};
+
+const labelOf = key => (LEVELS.find(l => l.key === key) || {}).label || key;
 
 let profiles = [];
 let stats = new Map();    // user_id -> { days, last }
@@ -89,25 +108,71 @@ function nameOf(id) {
    Rendu du tableau
 
    Six colonnes, pas onze. Les réglages qui répondent à la même question sont
-   regroupés dans une seule cellule : « Administrateur » et « Prospecte » sont
+   regroupés dans une seule cellule : le niveau d'accès et « Prospecte » sont
    deux facettes du rôle, « Démo » et « Actif » deux facettes du statut. Un
    tableau qu'on lit sans faire défiler vaut mieux qu'un tableau exhaustif.
+
+   Le niveau est une liste déroulante et non quatre boutons : quatre boutons
+   par ligne doubleraient la largeur de la colonne, et un libellé coupé est
+   proscrit dans ce projet. La liste montre les quatre barreaux de l'échelle,
+   ceux qui sont hors de portée étant présents mais non choisissables : le
+   niveau réel du compte reste ainsi lisible même quand on ne peut pas y
+   toucher.
    -------------------------------------------------------------------------- */
+
+/** Les options du sélecteur de niveau pour un compte donné. */
+function levelOptions(p, myRankNow) {
+    return LEVELS.map(l => {
+        const current = l.key === p.access_level;
+        // La base refuse d'attribuer un niveau supérieur ou égal au sien. On ne
+        // le propose donc pas, mais on garde l'option quand elle décrit l'état
+        // réel du compte, sinon le sélecteur afficherait un niveau faux.
+        const off = !current && l.rank >= myRankNow;
+        return `<option value="${l.key}"${current ? ' selected' : ''}`
+             + `${off ? ' disabled' : ''}>${l.label}</option>`;
+    }).join('');
+}
 
 function render() {
     const body = document.getElementById('admin-body');
     const me = myProfile();
-    const activeAdmins = profiles.filter(p => p.is_admin && p.is_active).length;
+    const myRankNow = myRank();
+    const activeOwners = profiles.filter(p => p.access_level === 'owner' && p.is_active).length;
 
     body.innerHTML = profiles.map(p => {
         const s2 = stats.get(p.user_id) || { days: 0, last: null };
         const a = auth.get(p.user_id) || null;
         const isMe = p.user_id === me.user_id;
-        const lastAdmin = p.is_admin && p.is_active && activeAdmins <= 1;
-        const lock = lastAdmin
-            ? 'Seul administrateur actif : nommez quelqu\'un d\'autre pour pouvoir modifier ce réglage'
-            : '';
+
+        // rankOfLevel et non levelRank : ici on compare des niveaux entre eux,
+        // comme le fait la base. levelRank renverrait zéro pour un compte
+        // désactivé et laisserait croire qu'un administrateur mis de côté est
+        // redevenu modifiable par tout le monde.
+        const pRank = rankOfLevel(p.access_level);
+
+        // La règle unique, côté cible. Son propre compte échappe à la
+        // comparaison, exactement comme dans admin_set_level. Le premier terme
+        // est une ceinture de sécurité : sous le niveau administrateur, la base
+        // refuse tout, et l'écran ne doit pas proposer ce qu'elle refusera,
+        // même si main() interdit déjà la page.
+        const locked = myRankNow < 3 || (!isMe && pRank >= myRankNow);
+
+        // Le dernier propriétaire actif ne peut être ni rétrogradé, ni
+        // désactivé, ni supprimé : la base le refuse, l'écran ne le propose pas.
+        const lastOwner = p.access_level === 'owner' && p.is_active && activeOwners <= 1;
+
+        const note = locked
+            ? `Niveau ${levelLabel(p).toLowerCase()}, égal ou supérieur au vôtre : `
+              + `la base refuse toute modification de ce compte`
+            : lastOwner
+                ? 'Dernier propriétaire actif : nommez un autre propriétaire avant de '
+                  + 'changer son niveau ou de le désactiver'
+                : '';
+        const lockAttr = locked ? ` disabled title="${note}"` : '';
+        const frozen = locked || lastOwner;
+        const frozenAttr = frozen ? ` disabled title="${note}"` : '';
         const seen = a ? whenLabel(a.last_sign_in_at) : null;
+        const who = escapeHtml(p.display_name || p.email || 'ce compte');
 
         return `
         <tr${isMe ? ' class="row-me"' : ''}>
@@ -115,7 +180,7 @@ function render() {
                 <div class="acct">
                     <input class="cell-input" data-name="${p.user_id}"
                            value="${escapeHtml(p.display_name || '')}"
-                           placeholder="Nom affiché" aria-label="Nom affiché">
+                           placeholder="Nom affiché" aria-label="Nom affiché"${lockAttr}>
                     <span class="acct-mail">${escapeHtml(p.email || '')}${
                         isMe ? ' <b class="badge">vous</b>' : ''}</span>
                 </div>
@@ -123,28 +188,26 @@ function render() {
 
             <td data-th="Rôle">
                 <div class="tog-stack">
-                    <button class="toggle${p.is_admin ? ' toggle--on' : ''}" type="button"
-                            data-admin="${p.user_id}" aria-pressed="${p.is_admin}"
-                            ${lastAdmin ? `disabled title="${lock}"` : ''}>
-                        ${p.is_admin ? 'Administrateur' : 'Pas administrateur'}
-                    </button>
+                    <select class="chart-select level-select" data-level="${p.user_id}"
+                            aria-label="Niveau d'accès de ${who}"${frozenAttr}>
+                        ${levelOptions(p, myRankNow)}
+                    </select>
                     <button class="toggle${p.is_bdr ? ' toggle--on' : ''}" type="button"
-                            data-bdr="${p.user_id}" aria-pressed="${p.is_bdr}">
+                            data-bdr="${p.user_id}" aria-pressed="${p.is_bdr}"${lockAttr}>
                         ${p.is_bdr ? 'Prospecte' : 'Ne prospecte pas'}
                     </button>
                 </div>
-                ${lastAdmin ? `<span class="cell-note">${lock}</span>` : ''}
+                ${note ? `<span class="cell-note">${note}</span>` : ''}
             </td>
 
             <td data-th="Statut">
                 <div class="tog-stack">
                     <button class="toggle${p.is_active ? ' toggle--on' : ''}" type="button"
-                            data-active="${p.user_id}" aria-pressed="${p.is_active}"
-                            ${lastAdmin ? `disabled title="${lock}"` : ''}>
+                            data-active="${p.user_id}" aria-pressed="${p.is_active}"${frozenAttr}>
                         ${p.is_active ? 'Actif' : 'Désactivé'}
                     </button>
                     <button class="toggle${p.is_demo ? ' toggle--on toggle--warn' : ''}" type="button"
-                            data-demo="${p.user_id}" aria-pressed="${p.is_demo}">
+                            data-demo="${p.user_id}" aria-pressed="${p.is_demo}"${lockAttr}>
                         ${p.is_demo ? 'Démonstration' : 'Compte réel'}
                     </button>
                 </div>
@@ -170,11 +233,11 @@ function render() {
             <td data-th="Actions">
                 <div class="act-row">
                     ${fn.ok ? `<button class="chip chip--sm" type="button"
-                            data-pass="${p.user_id}">Mot de passe</button>` : ''}
+                            data-pass="${p.user_id}"${lockAttr}>Mot de passe</button>` : ''}
                     ${s2.days ? `<button class="chip chip--sm chip--warn" type="button"
-                            data-wipe="${p.user_id}">Effacer données</button>` : ''}
+                            data-wipe="${p.user_id}"${lockAttr}>Effacer données</button>` : ''}
                     ${fn.ok && !isMe ? `<button class="chip chip--sm chip--danger" type="button"
-                            data-del="${p.user_id}">Supprimer</button>` : ''}
+                            data-del="${p.user_id}"${lockAttr}>Supprimer</button>` : ''}
                     ${!fn.ok && !s2.days ? '<span class="td-muted">—</span>' : ''}
                 </div>
             </td>
@@ -190,7 +253,7 @@ function render() {
 
 async function apply(userId, patch, message) {
     try {
-        const updated = await adminUpdateProfile(userId, patch);
+        const updated = await adminSetLevel(userId, patch);
         const i = profiles.findIndex(p => p.user_id === userId);
         if (i >= 0 && updated) profiles[i] = updated;
         toast(message, 'success');
@@ -217,19 +280,46 @@ function wireRows() {
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
     });
 
-    body.querySelectorAll('[data-admin]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const id = btn.dataset.admin;
+    // Niveau d'accès. Une liste déroulante n'a pas d'état intermédiaire : la
+    // valeur choisie est envoyée telle quelle, et la base tranche. En cas de
+    // refus, apply() rappelle render(), ce qui remet le sélecteur sur le niveau
+    // réel du compte au lieu de laisser à l'écran un choix qui n'a pas eu lieu.
+    body.querySelectorAll('[data-level]').forEach(sel => {
+        sel.addEventListener('change', () => {
+            const id = sel.dataset.level;
             const p = profiles.find(x => x.user_id === id);
-            apply(id, { is_admin: !p.is_admin },
-                !p.is_admin
-                    ? `${nameOf(id)} est désormais administrateur`
-                    : `${nameOf(id)} n'est plus administrateur`);
+            const level = sel.value;
+            if (!p || !level || level === p.access_level) return;
+
+            const label = labelOf(level);
+            const hint = LEVEL_HINT[level] || '';
+            const down = rankOfLevel(level) < rankOfLevel(p.access_level);
+            const isMe = id === myProfile().user_id;
+
+            // Une baisse de niveau retire des accès à quelqu'un qui s'en sert
+            // peut-être aujourd'hui. Sur son propre compte, elle peut en outre
+            // fermer la porte derrière soi : les deux méritent d'être dits
+            // avant, pas découverts après.
+            let ask = '';
+            if (isMe) {
+                ask = `ATTENTION : c'est votre propre compte.\n\n`
+                    + `Passer au niveau « ${label} » (${hint}).\n\n`
+                    + `Vous ne pourrez pas revenir en arrière vous-même : `
+                    + `seul un compte de niveau supérieur pourra vous le rendre.`;
+            } else if (down) {
+                ask = `Ramener ${nameOf(id)} au niveau « ${label} » ?\n\n`
+                    + `Ce niveau ${hint}.`;
+            }
+            if (ask && !confirm(ask)) { sel.value = p.access_level; return; }
+
+            apply(id, { access_level: level },
+                `${nameOf(id)} passe au niveau ${label.toLowerCase()}`);
         });
     });
 
-    // Les deux axes sont indépendants : administrer et prospecter sont deux
-    // questions distinctes, et c'est tout l'intérêt du modèle.
+    // Les deux axes restent indépendants : le niveau dit ce que le compte a le
+    // droit de voir et de faire, « Prospecte » dit s'il saisit son activité.
+    // Un responsable peut prospecter, un administrateur peut ne pas prospecter.
     body.querySelectorAll('[data-bdr]').forEach(btn => {
         btn.addEventListener('click', () => {
             const id = btn.dataset.bdr;
@@ -449,17 +539,26 @@ async function copyCred() {
    Formulaire de création
    -------------------------------------------------------------------------- */
 
-/** Dit en une phrase ce que le compte pourra faire : les cases seules ne le
-    disent pas, et la combinaison des deux axes n'est pas devinable. */
+/** Dit en une phrase ce que le compte pourra faire : le niveau et la case
+    « Prospecte » se combinent, et la combinaison n'est pas devinable. */
 function roleSentence() {
-    const admin = document.getElementById('f-admin').checked;
+    const level = document.getElementById('f-level').value || 'member';
     const bdr = document.getElementById('f-bdr').checked;
     const demo = document.getElementById('f-demo').checked;
-    let s;
-    if (admin && bdr) s = 'Manager qui prospecte : saisie, performances, vue d\'équipe et gestion des comptes.';
-    else if (admin)   s = 'Administrateur pur : ni page de saisie, ni score, absent des classements. Vue d\'équipe et gestion des comptes.';
-    else if (bdr)     s = 'BDR : sa saisie et ses performances, rien d\'autre. Il ne voit aucun autre utilisateur.';
-    else              s = 'Observateur : ne saisit rien, n\'administre rien. Il ne verra presque aucune page.';
+
+    const voit = level === 'member'
+        ? 'Ne voit que ses propres chiffres.'
+        : level === 'manager'
+            ? 'Voit toute l\'équipe et ses classements, en lecture seule : aucun compte à gérer, aucune saisie d\'autrui à corriger.'
+            : level === 'admin'
+                ? 'Voit toute l\'équipe et gère les comptes. Ne peut pas corriger les chiffres de quelqu\'un d\'autre : seul le propriétaire le peut.'
+                : 'Tout, y compris corriger les chiffres des autres.';
+
+    const fait = bdr
+        ? ' Saisit son activité, a ses performances et apparaît dans les classements.'
+        : ' Ne saisit rien : ni page de saisie, ni score, absent des classements.';
+
+    let s = voit + fait;
     if (demo) s += ' Compte de démonstration : ses chiffres restent hors des classements réels.';
     return s;
 }
@@ -469,11 +568,20 @@ function wireForm() {
     const form = document.getElementById('new-form');
     const btnNew = document.getElementById('btn-new');
     const note = document.getElementById('f-role-note');
+    const level = document.getElementById('f-level');
 
     block.hidden = false;
 
+    // Le sélecteur est peuplé ici et non dans le HTML : l'échelle des niveaux
+    // n'a qu'une seule source de vérité, api.js, et la liste s'arrête à ce que
+    // l'on a le droit d'attribuer. On ne fabrique pas son égal.
+    const rank = myRank();
+    level.innerHTML = LEVELS.filter(l => l.rank < rank)
+        .map(l => `<option value="${l.key}"${l.key === 'member' ? ' selected' : ''}>`
+                + `${l.label}</option>`).join('');
+
     const refreshNote = () => { note.textContent = roleSentence(); };
-    ['f-admin', 'f-bdr', 'f-demo'].forEach(id =>
+    ['f-level', 'f-bdr', 'f-demo'].forEach(id =>
         document.getElementById(id).addEventListener('change', refreshNote));
     refreshNote();
 
@@ -507,15 +615,33 @@ function wireForm() {
 
         submit.disabled = true;
         status.textContent = 'Création du compte…';
+        // La fonction de création ne connaît que l'ancienne case
+        // « administrateur ». Les niveaux « membre » et « administrateur » sont
+        // donc obtenus directement, et « responsable », qui n'a pas
+        // d'équivalent, est appliqué juste après par la base. Deux appels au
+        // lieu d'un, mais aucune modification de la fonction hébergée : elle
+        // sera reprise plus tard, avec un seul appel.
+        const wanted = document.getElementById('f-level').value || 'member';
         try {
             const r = await adminCreateAccount({
                 email,
                 display_name: document.getElementById('f-name').value.trim(),
-                is_admin: document.getElementById('f-admin').checked,
+                is_admin: wanted === 'admin' || wanted === 'owner',
                 is_bdr: document.getElementById('f-bdr').checked,
                 is_demo: document.getElementById('f-demo').checked,
                 password: pass || null
             });
+
+            // Le compte existe : à partir d'ici on n'échoue plus sans afficher
+            // le mot de passe, qui n'est lisible qu'une fois.
+            if (wanted === 'manager' && r.user_id) {
+                try {
+                    await adminSetLevel(r.user_id, { access_level: 'manager' });
+                } catch (e) {
+                    toast(`Compte créé, mais le niveau responsable n'a pas pu être `
+                        + `appliqué : ${humanError(e)}. Réglez-le dans le tableau.`, 'error');
+                }
+            }
             close();
             showCredentials({
                 title: `Compte créé pour ${r.email}`,
@@ -565,11 +691,11 @@ function showManual(fnState) {
         await requireAuth({ needs: 'admin' });
         renderNav();
 
-        if (!isAdmin()) {
+        if (!canManageAccounts()) {
             document.querySelector('.page-main').innerHTML = `
                 <div class="page-container"><div class="chart-card">
                     <h3 class="chart-title">Page réservée aux administrateurs</h3>
-                    <p class="chart-sub">Votre compte n'a pas accès à la gestion des comptes.
+                    <p class="chart-sub">Votre niveau d'accès ne permet pas de gérer les comptes.
                        Retournez à <a href="./dashboard.html">vos performances</a>.</p>
                 </div></div>`;
             hideVeil();
