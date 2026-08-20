@@ -63,3 +63,13 @@ de tableau de bord à outil de pilotage. Pas encore engagé.
 | 20/08/2026 | v5 | multi-utilisateurs, RLS, vue d'équipe |
 | 20/08/2026 | v6 lot 1 | rôles à deux axes, contexte par URL, nav, responsive |
 | 20/08/2026 | v6 lot 2 | création de compte, mot de passe, suppression |
+
+
+- 20/08 : migrations 2 et 3 appliquées et vérifiées, Edge Function admin-users
+  déployée en v1, code v6 lots 1 et 2 confirmés en ligne. Création de compte
+  depuis admin.html opérationnelle, testée par la création de 3 comptes démo.
+- 20/08 : seed-demo-team.sql ajouté. 3 mois de données sur 3 comptes de démo
+  avec profils différenciés, pour tester les comparaisons entre personnes et
+  l'écart à la moyenne d'équipe. Données déjà en base.
+- Reste à faire : effacer les 65 jours fictifs du compte administrateur, créer
+  le compte de Santiago, et arbitrer si BBA Test 3 doit rester administrateur.
