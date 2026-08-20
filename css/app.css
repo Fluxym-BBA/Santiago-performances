@@ -244,7 +244,12 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
     border-bottom: 1px solid var(--gray-200);
 }
 .menu-head-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.menu-head-text b {
+/* Combinateur d'enfant direct volontaire. Le nom est un <b> enfant direct de
+   .menu-head-text, alors que les badges sont des <b> imbriqués dans
+   .menu-badges. Sans le « > », cette règle l'emportait sur .badge--admin par
+   spécificité (0-1-1 contre 0-1-0) : le badge était repeint en marine sur
+   fond marine, donc invisible, et sa taille passait de 9,5 à 14 pixels. */
+.menu-head-text > b {
     font-size: 14px;
     font-weight: 900;
     color: var(--navy);
@@ -2425,15 +2430,25 @@ tr.row-me td:first-child { box-shadow: inset 3px 0 0 var(--cyan); }
 
 /* --- Bloc de création ----------------------------------------------------- */
 
-.new-block { margin-bottom: 34px; }
-
-.new-form {
+/* Ce bloc est le premier élément remonté sur la bannière marine par
+   .page-main--pulled. Sans surface propre, son intitulé s'affichait en marine
+   sur marine. Le défaut est apparu le jour où la fonction serveur a été
+   déployée : c'est elle qui décide lequel des deux blocs est affiché en
+   premier, et le repli qu'elle remplaçait avait, lui, un fond. La carte est
+   donc portée par le bloc et non par le formulaire qu'il contient. */
+.new-block {
+    margin-bottom: 34px;
     background: var(--white);
     border: 1px solid var(--gray-200);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-md);
-    padding: 26px 26px 22px;
-    margin-top: 4px;
+    padding: 22px 26px 26px;
+}
+
+.new-form {
+    border-top: 1px solid var(--gray-200);
+    padding: 22px 0 0;
+    margin-top: 20px;
 }
 
 .form-grid {
@@ -2684,13 +2699,15 @@ tr.row-me td:first-child { box-shadow: inset 3px 0 0 var(--cyan); }
 
 @media (min-width: 640px) and (max-width: 1023px) {
     .form-grid { grid-template-columns: 1fr; gap: 20px; }
-    .new-form { padding: 22px 20px 18px; }
+    .new-block { padding: 20px 22px 22px; }
+    .new-form { padding: 20px 0 0; }
     .cred-val--pass { font-size: 18px; }
 }
 
 /* Téléphone couché : la hauteur est le vrai budget, pas la largeur. */
 @media (max-height: 460px) and (orientation: landscape) {
-    .new-form { padding: 16px 18px 14px; }
+    .new-block { padding: 16px 18px 18px; }
+    .new-form { padding: 16px 0 0; }
     .form-grid { gap: 14px 20px; }
     .field-note { display: none; }          /* l'essentiel d'abord */
     .pick-body em { display: none; }
@@ -2753,7 +2770,8 @@ tr.row-me td:first-child { box-shadow: inset 3px 0 0 var(--cyan); }
 
 @media (max-width: 639px) {
     .form-grid { grid-template-columns: 1fr; gap: 18px; }
-    .new-form { padding: 18px 16px 16px; }
+    .new-block { padding: 18px 16px 18px; }
+    .new-form { padding: 18px 0 0; }
     .pick-row { grid-template-columns: 1fr; }
     .cred-card { padding: 20px 18px; }
     .cred-list { grid-template-columns: 1fr; }
