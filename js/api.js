@@ -153,13 +153,17 @@ export async function getSession() {
 export function homePageFor(p) {
     if (!p) return './login.html';
     if (p.is_bdr) return './index.html';
-    if (p.is_admin) return './team.html';
+    if (canReadAll(p)) return './team.html';
+    // Un compte qui ne prospecte pas et ne voit pas l'équipe n'a pas de page
+    // utile. On l'envoie quand même vers la vue d'équipe, qui sait afficher un
+    // refus explicite : le garde-fou anti-boucle de requireAuth l'y laisse.
     return './team.html';
 }
 
 /**
  * @param {object}  opts
- * @param {'bdr'|'admin'|null} opts.needs  Aptitude exigée par la page.
+ * @param {'bdr'|'admin'|'team'|null} opts.needs  Aptitude exigée par la page.
+ *        'team' vaut pour « voit toute l'équipe », donc responsable et au-dessus.
  */
 export async function requireAuth({ needs = null } = {}) {
     if (!CONFIG_OK) {
@@ -193,12 +197,23 @@ export async function requireAuth({ needs = null } = {}) {
     // Exception nécessaire : un administrateur pur n'est pas commercial, mais il
     // doit pouvoir ouvrir les pages d'un commercial lorsqu'il en consulte un.
     // C'est le cas de `dashboard.html?u=...` ouvert depuis la vue d'équipe.
-    const asVisitor = me.is_admin && isViewingOther();
+    // canReadAll et non is_admin : un responsable en lecture seule doit pouvoir
+    // ouvrir le tableau de bord d'un commercial depuis la vue d'équipe.
+    const asVisitor = canReadAll(me) && isViewingOther();
     const wrong = (needs === 'bdr' && !me.is_bdr && !asVisitor)
-               || (needs === 'admin' && !me.is_admin);
+               || (needs === 'admin' && !canManageAccounts(me))
+               || (needs === 'team' && !canReadAll(me));
     if (wrong) {
-        location.replace(homePageFor(me));
-        throw new Error('Page non applicable à ce profil');
+        // Garde-fou anti-boucle. Si la page d'accueil calculée est la page
+        // courante, rediriger reviendrait à boucler indéfiniment : on laisse
+        // alors la page s'afficher et présenter son propre refus. Le cas s'est
+        // présenté avec un profil ni administrateur ni commercial.
+        const target = homePageFor(me);
+        const current = './' + (location.pathname.split('/').pop() || 'index.html');
+        if (target !== current) {
+            location.replace(target);
+            throw new Error('Page non applicable à ce profil');
+        }
     }
     return session;
 }
@@ -242,18 +257,68 @@ function normalize(p) {
         ...p,
         is_admin: !!isAdmin,
         is_bdr: p.is_bdr ?? (p.role ? p.role !== 'admin' : true),
+        // Repli volontaire, pour la même raison que ci-dessus : si la migration
+        // des niveaux n'a pas encore été exécutée, le niveau est déduit de
+        // l'ancienne case et l'application se comporte à l'identique.
+        access_level: p.access_level ?? (isAdmin ? 'admin' : 'member'),
         is_demo: !!p.is_demo,
         is_active: p.is_active !== false
     };
 }
 
+/* --------------------------------------------------------------------------
+   Les niveaux d'accès
+
+   Le pouvoir est une échelle ordonnée, la prospection un axe indépendant.
+   Comparer des rangs plutôt que d'empiler des cases évite d'avoir à traiter
+   une combinaison par cas : « au moins responsable » s'écrit une fois.
+   -------------------------------------------------------------------------- */
+
+const LEVEL_RANK  = { owner: 4, admin: 3, manager: 2, member: 1 };
+const LEVEL_LABEL = {
+    owner:   'Propriétaire',
+    admin:   'Administrateur',
+    manager: 'Responsable',
+    member:  'Membre'
+};
+
+/** Rang du niveau. Zéro pour un profil absent ou désactivé. */
+export function levelRank(p) {
+    if (!p || p.is_active === false) return 0;
+    return LEVEL_RANK[p.access_level] || 1;
+}
+
+/** Niveau écrit en clair. */
+export function levelLabel(p) {
+    return (p && LEVEL_LABEL[p.access_level]) || 'Membre';
+}
+
+/**
+ * Voit les données de toute l'équipe. Responsable et au-dessus.
+ * Le nom dit ce que ça autorise, pas qui l'est : c'est ce qui permettra
+ * d'ajouter un niveau demain sans relire tous les appels.
+ */
+export function canReadAll(p) {
+    return levelRank(p || myProfile()) >= 2;
+}
+
+/** Administre les comptes. Administrateur et au-dessus. */
+export function canManageAccounts(p) {
+    return levelRank(p || myProfile()) >= 3;
+}
+
+/** Corrige les chiffres d'autrui. Le propriétaire seul, comme en base. */
+export function canWriteAny(p) {
+    return levelRank(p || myProfile()) >= 4;
+}
+
 /** Rôle écrit en clair, pour que personne n'ait à deviner ce qu'il est ici. */
 export function roleLabel(p) {
     if (!p) return '';
-    if (p.is_admin && p.is_bdr) return 'Admin et BDR';
-    if (p.is_admin) return 'Administrateur';
-    if (p.is_bdr) return 'BDR';
-    return 'Observateur';
+    if (levelRank(p) >= 2) {
+        return p.is_bdr ? `${levelLabel(p)} et BDR` : levelLabel(p);
+    }
+    return p.is_bdr ? 'BDR' : 'Observateur';
 }
 
 /**
@@ -300,6 +365,8 @@ export async function loadProfile(session) {
 
 export function myProfile() { return _me; }
 export function isAdmin() { return !!_me && _me.is_admin; }
+/** Mon niveau, en rang. Raccourci de lecture pour les pages. */
+export function myRank() { return levelRank(_me); }
 export function isBdr() { return !!_me && _me.is_bdr; }
 
 /** Profil dont on regarde les données. Jamais nul après loadProfile(). */

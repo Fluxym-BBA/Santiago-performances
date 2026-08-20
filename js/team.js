@@ -13,7 +13,7 @@
    ========================================================================== */
 
 import {
-    requireAuth, isAdmin, myProfile, linkFor, listProfiles,
+    requireAuth, isAdmin, canReadAll, myProfile, linkFor, listProfiles,
     fetchTeamRange, todayISO, addDaysISO, formatLong, formatShort, periodLength,
     startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter,
     periodLabel, periodLabelShort, humanError, METRICS, SCORE_WEIGHTS
@@ -165,7 +165,15 @@ function renderKpis() {
 function renderRanking() {
     const body = document.getElementById('ranking-body');
     if (!people.length) {
-        body.innerHTML = '<tr><td colspan="13" class="td-muted">Aucun compte à afficher sur cette période.</td></tr>';
+        // Distinguer « il n'y a personne » de « tout le monde est masqué par un
+        // filtre » : le second cas se répare en un clic, encore faut-il le dire.
+        const hidden = allProfiles.length;
+        body.innerHTML = hidden > 0
+            ? `<tr><td colspan="13" class="td-muted">Aucun compte visible : les
+               ${hidden} compte${hidden > 1 ? 's' : ''} de la période
+               ${hidden > 1 ? 'sont' : 'est'} écarté${hidden > 1 ? 's' : ''} par
+               les filtres « Qui est compté ».</td></tr>`
+            : '<tr><td colspan="13" class="td-muted">Aucun compte à afficher sur cette période.</td></tr>';
         return;
     }
     const dec = state.mode === 'avg';
@@ -603,7 +611,25 @@ function renderSummary() {
         Un point de graphique représente <b>un ${granWord(gran)}</b>.
         Total de l'équipe : <b>${fmtInt(team.productivity_score)} points</b>.
         ${excluded > 0 ? `${excluded} compte${excluded > 1 ? 's' : ''} exclu${excluded > 1 ? 's' : ''} par les filtres.` : ''}
-    </p>`;
+    </p>
+    ${people.length === 0 && excluded > 0 ? `
+        <p class="summary-sentence">
+            <b>Tous les comptes de la période sont masqués par les filtres.</b>
+            C'est le réglage par défaut : les comptes de démonstration et les
+            comptes désactivés sont écartés pour ne pas fausser les classements.
+            <button type="button" class="btn btn--ghost" id="btn-include-all">
+                Afficher les ${excluded} compte${excluded > 1 ? 's' : ''} masqué${excluded > 1 ? 's' : ''}
+            </button>
+        </p>` : ''}`;
+
+    // Le bouton est recréé à chaque rendu : on le recâble ici plutôt que dans
+    // le câblage initial, qui ne le verrait pas.
+    const inc = document.getElementById('btn-include-all');
+    if (inc) inc.addEventListener('click', () => {
+        state.demo = true;
+        state.inactive = true;
+        refresh();
+    });
 }
 
 function exportCsv() {
@@ -732,15 +758,15 @@ function wire() {
 
 (async function main() {
     try {
-        await requireAuth({ needs: 'admin' });
+        await requireAuth({ needs: 'team' });
         renderNav();
 
         // Garde-fou côté écran. La vraie barrière est la RLS : sans le rôle
         // admin, la base ne renverrait de toute façon que ses propres lignes.
-        if (!isAdmin()) {
+        if (!canReadAll()) {
             document.querySelector('.page-main').innerHTML = `
                 <div class="page-container"><div class="chart-card">
-                    <h3 class="chart-title">Page réservée aux administrateurs</h3>
+                    <h3 class="chart-title">Page réservée à l'encadrement</h3>
                     <p class="chart-sub">Votre compte n'a pas accès à la vue d'équipe.
                        Retournez à <a href="./dashboard.html">vos performances</a>.</p>
                 </div></div>`;

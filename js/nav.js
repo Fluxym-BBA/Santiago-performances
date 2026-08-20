@@ -18,7 +18,8 @@
    ========================================================================== */
 
 import {
-    signOut, isAdmin, isBdr, myProfile, viewedProfile, isViewingOther, roleLabel
+    signOut, isAdmin, isBdr, myProfile, viewedProfile, isViewingOther, roleLabel,
+    levelLabel, canReadAll, canManageAccounts
 } from './api.js';
 
 /* --------------------------------------------------------------------------
@@ -42,14 +43,16 @@ const SECTIONS = [
     {
         href: './team.html', match: ['team.html'],
         label: 'Équipe', short: 'Équipe', mini: 'Équipe', icon: '👥',
-        when: p => p.is_admin
+        // Voir l'équipe, ce n'est plus administrer : un responsable en lecture
+        // seule a cet onglet, et n'a pas celui des comptes.
+        when: p => canReadAll(p)
     }
 ];
 
 /** Entrées du menu de droite : le secondaire, jamais le principal. */
 const MENU = [
-    { href: './admin.html', label: 'Gérer les comptes', icon: '⚙️', when: p => p.is_admin },
-    { href: './team.html', label: 'Vue d\'équipe', icon: '👥', when: p => p.is_admin, onlyCollapsed: true },
+    { href: './admin.html', label: 'Gérer les comptes', icon: '⚙️', when: p => canManageAccounts(p) },
+    { href: './team.html', label: 'Vue d\'équipe', icon: '👥', when: p => canReadAll(p), onlyCollapsed: true },
     { href: './dashboard.html', label: 'Mes performances', icon: '📊', when: p => p.is_bdr, onlyCollapsed: true },
     { href: './index.html', label: 'Ma journée', icon: '✍️', when: p => p.is_bdr, onlyCollapsed: true }
 ];
@@ -133,7 +136,7 @@ export function renderNav() {
                         <b>${me.display_name || 'Sans nom'}</b>
                         <span>${me.email || ''}</span>
                         <span class="menu-badges">
-                            ${me.is_admin ? '<b class="badge badge--admin">Administrateur</b>' : ''}
+                            ${canReadAll(me) ? `<b class="badge badge--admin">${levelLabel(me)}</b>` : ''}
                             ${me.is_bdr ? '<b class="badge badge--bdr">BDR</b>' : ''}
                             ${!me.is_admin && !me.is_bdr ? '<b class="badge">Observateur</b>' : ''}
                             ${me.is_demo ? '<b class="badge badge--demo">Compte de démonstration</b>' : ''}
