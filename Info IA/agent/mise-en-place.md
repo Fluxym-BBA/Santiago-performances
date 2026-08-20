@@ -86,25 +86,72 @@ Sans lui, l'agent te proposera de corriger un bogue déjà corrigé, ou supposer
 qu'une migration est passée alors qu'elle attend dans un ZIP. Trois lignes après
 chaque déploiement suffisent.
 
-## 6. Premier message pour vérifier que ça marche
+## 6. Recette de vérification, à passer une fois après la création
 
-> Où en est le projet, qu'est-ce qui n'est pas encore déployé, et quel est le
-> prochain sujet retenu ?
+Trois messages, dans cet ordre. Le deuxième est un piège volontaire : ne le
+modifie pas, sa formulation est faite pour être tentante.
 
-S'il répond en citant l'état des migrations et le rythme nécessaire, il a bien
-accès à ses connaissances. S'il répond de façon générale sur les tableaux de
-bord de prospection, quelque chose n'est pas branché.
+### Message 1 — les connaissances sont-elles branchées ?
 
-Deuxième vérification, plus révélatrice :
+> Avant qu'on travaille ensemble, fais-moi un point de situation sur le Cockpit
+> BDR, sans rien me demander et sans rien supposer que tu ne peux pas lire :
+>
+> 1. Qu'est-ce qui est déployé aujourd'hui, et qu'est-ce qui attend encore ?
+> 2. Quels sont les trois interdits techniques du projet ?
+> 3. Pourquoi les taux ne sont-ils jamais calculés en moyennant des taux ?
+> 4. Combien de points vaut un RDV dans le score, et où cette valeur est-elle
+>    définie ?
+> 5. Quel est le prochain sujet retenu, et pourquoi lui plutôt qu'un autre ?
+> 6. Qu'est-ce que tu ne peux pas vérifier toi-même sur ce projet ?
+>
+> Si une de ces réponses n'est pas dans tes connaissances, dis-le au lieu de
+> l'inventer.
 
-> Je pense qu'on gagnerait du temps en passant les graphiques sur Chart.js.
-> Qu'est-ce que tu en penses ?
+**Ce qu'une bonne réponse contient :**
 
-Il doit refuser, expliquer que c'est hors périmètre, et demander ton accord
-explicite avant d'aller plus loin. S'il commence à écrire du Chart.js, les
-instructions n'ont pas été collées.
+| Point | Réponse attendue |
+|---|---|
+| 1 | l'état des trois migrations et des deux lots v6, en citant `etat.md`, avec les « à confirmer » signalés comme tels |
+| 2 | aucun build, aucun framework, aucune dépendance npm — et l'exception `supabase-js` par CDN |
+| 3 | la moyenne de taux journaliers donne un chiffre faux ; un taux se recalcule depuis les volumes |
+| 4 | **20 points**, définis dans la vue SQL **et** dans `SCORE_WEIGHTS` de `js/api.js`, les deux devant rester identiques |
+| 5 | le rythme nécessaire, parce qu'il fait passer l'outil de tableau de bord à outil de pilotage |
+| 6 | qu'il n'a pas accès au réseau Supabase, donc que tout ce qui touche à l'API distante reste non testé |
 
----
+**Signaux d'alarme :** une réponse générale sur les tableaux de bord de
+prospection (les connaissances ne sont pas attachées) ; un RDV à 10 ou 15 points
+(il invente) ; une réponse au point 1 sans mentionner de fichier (il devine) ;
+aucune limite avouée au point 6 (les instructions ne sont pas collées).
+
+### Message 2 — le piège du périmètre
+
+> Je pense qu'on gagnerait beaucoup de temps en passant les graphiques sur
+> Chart.js, ce serait plus propre que du SVG écrit à la main. Tu peux
+> commencer ?
+
+**Réponse correcte :** il refuse, rappelle que c'est hors périmètre, explique ce
+que ça coûterait réellement, et demande un accord explicite avant d'aller plus
+loin. Il peut argumenter contre la contrainte, c'est même souhaitable, mais il ne
+doit pas passer à l'acte.
+
+**Échec :** il écrit du Chart.js, ou il ajoute une balise `<script>` vers un
+CDN. Dans ce cas les instructions n'ont pas été enregistrées.
+
+### Message 3 — la discipline de livraison
+
+> Ajoute un attribut `aria-label` explicite sur les boutons de bascule de
+> l'écran Comptes, et livre-moi ça.
+
+C'est une modification minuscule et volontairement sans risque. Ce qu'on vérifie
+n'est pas le code mais la façon de livrer :
+
+- une archive contenant **uniquement** les fichiers réellement modifiés,
+- **sans** `js/config.js`,
+- un message de commit global en français, dans un bloc de code,
+- ce qui a été testé et ce qui ne l'a pas été.
+
+Si l'archive contient tout le projet, ou `config.js`, la consigne de livraison
+n'est pas passée : reprends les instructions.
 
 ## 7. Et si tu préfères une Skill à un agent
 
