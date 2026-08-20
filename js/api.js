@@ -162,6 +162,13 @@ export async function requireAuth() {
         location.replace(`./login.html?next=${back}`);
         throw new Error('Non authentifié');
     }
+    // Le profil est chargé ici, une fois, avant tout accès aux données : le rôle
+    // et le périmètre consulté doivent être connus avant la première requête.
+    await loadProfile(session);
+    if (myProfile() && myProfile().is_active === false) {
+        await signOut();
+        throw new Error('Compte désactivé');
+    }
     return session;
 }
 
@@ -175,18 +182,140 @@ export async function signOut() {
 }
 
 /* --------------------------------------------------------------------------
-   Données — activité quotidienne
+   Profils, rôles et périmètre de consultation
+
+   Point d'architecture à ne pas perdre de vue : la Row Level Security suffisait
+   tant que chacun ne voyait que ses lignes, et les requêtes pouvaient se passer
+   de filtre. Dès lors qu'un administrateur voit tout le monde, la même requête
+   renverrait l'activité de tous les utilisateurs mélangée. Chaque lecture porte
+   donc désormais un filtre explicite sur l'utilisateur ciblé.
+
+   La RLS reste la barrière de sécurité, le filtre n'est que la sélection du
+   périmètre. Les deux sont nécessaires et ne servent pas à la même chose.
    -------------------------------------------------------------------------- */
 
-function userId(session) {
-    return session.user.id;
+let _me = null;        // mon profil
+let _viewed = null;    // profil consulté, le mien par défaut
+
+const VIEWED_KEY = 'bdr.viewedUser';
+
+/**
+ * Charge mon profil. Le profil est créé par un déclencheur à l'ouverture du
+ * compte ; s'il manque malgré tout (compte créé avant la migration), on
+ * retombe sur un profil minimal plutôt que de bloquer l'application.
+ */
+export async function loadProfile(session) {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+    if (error) throw error;
+
+    _me = data || {
+        user_id: session.user.id,
+        email: session.user.email,
+        display_name: (session.user.email || '').split('@')[0],
+        role: 'bdr', is_demo: false, is_active: true
+    };
+
+    // Restauration d'un éventuel changement de périmètre, uniquement pour un
+    // administrateur : un profil rétrogradé ne doit pas conserver son accès.
+    let restored = null;
+    if (_me.role === 'admin') {
+        try {
+            const raw = sessionStorage.getItem(VIEWED_KEY);
+            if (raw) restored = JSON.parse(raw);
+        } catch { restored = null; }
+    }
+    _viewed = restored && restored.user_id ? restored : _me;
+    return _me;
 }
+
+export function myProfile() { return _me; }
+export function isAdmin() { return !!_me && _me.role === 'admin'; }
+
+/** Profil dont on regarde les données. Jamais nul après loadProfile(). */
+export function viewedUser() { return _viewed || _me; }
+
+/** Vrai quand on consulte quelqu'un d'autre : le front doit alors le dire clairement. */
+export function isViewingOther() {
+    return !!_me && !!_viewed && _viewed.user_id !== _me.user_id;
+}
+
+export function setViewedUser(profile) {
+    if (!isAdmin() && profile.user_id !== _me.user_id) {
+        throw new Error('Changement d\'utilisateur réservé aux administrateurs');
+    }
+    _viewed = profile;
+    try {
+        if (profile.user_id === _me.user_id) sessionStorage.removeItem(VIEWED_KEY);
+        else sessionStorage.setItem(VIEWED_KEY, JSON.stringify(profile));
+    } catch { /* navigation privée : le périmètre ne survivra pas au rechargement */ }
+    return _viewed;
+}
+
+/** Identifiant ciblé par les lectures et les écritures. */
+function target() {
+    const v = viewedUser();
+    if (!v) throw new Error('Profil non chargé : appeler loadProfile() d\'abord');
+    return v.user_id;
+}
+
+/**
+ * Profils visibles, triés : les comptes actifs d'abord, les comptes de
+ * démonstration en dernier. La RLS fait le tri des droits : un BDR ne récupère
+ * ici que sa propre ligne, la liste n'a donc pas à être protégée côté front.
+ */
+export async function listProfiles() {
+    const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('is_active', { ascending: false })
+        .order('is_demo', { ascending: true })
+        .order('display_name', { ascending: true });
+    if (error) throw error;
+    return data || [];
+}
+
+/** Modification d'un profil par un administrateur. Les garde-fous sont côté base. */
+export async function adminUpdateProfile(userId, patch) {
+    const { data, error } = await supabase.rpc('admin_update_profile', {
+        p_user_id: userId,
+        p_display_name: patch.display_name ?? null,
+        p_role: patch.role ?? null,
+        p_is_demo: patch.is_demo ?? null,
+        p_is_active: patch.is_active ?? null
+    });
+    if (error) throw error;
+    return Array.isArray(data) ? data[0] : data;
+}
+
+/** Effacement des données d'activité d'un compte, sans toucher au compte. */
+export async function adminWipeActivity(userId, fromIso = null, toIso = null) {
+    const { data, error } = await supabase.rpc('admin_wipe_activity', {
+        p_user_id: userId, p_from: fromIso, p_to: toIso
+    });
+    if (error) throw error;
+    return Number(data) || 0;
+}
+
+
+/* --------------------------------------------------------------------------
+   Données — activité quotidienne
+
+   Toutes ces fonctions travaillent sur l'utilisateur consulté, pas sur
+   l'utilisateur connecté. C'est ce qui permet à un administrateur de lire le
+   tableau de bord de quelqu'un d'autre, et de corriger sa saisie, sans aucune
+   duplication de code.
+   -------------------------------------------------------------------------- */
 
 /** Ligne d'un jour donné, ou null si rien n'a encore été saisi. */
 export async function fetchDay(iso) {
     const { data, error } = await supabase
         .from('daily_activity')
         .select('*')
+        .eq('user_id', target())
         .eq('activity_date', iso)
         .maybeSingle();
     if (error) throw error;
@@ -198,6 +327,7 @@ export async function fetchDayKpi(iso) {
     const { data, error } = await supabase
         .from('v_daily_kpi')
         .select('*')
+        .eq('user_id', target())
         .eq('activity_date', iso)
         .maybeSingle();
     if (error) throw error;
@@ -209,6 +339,7 @@ export async function fetchRange(fromIso, toIso) {
     const { data, error } = await supabase
         .from('v_daily_kpi')
         .select('*')
+        .eq('user_id', target())
         .gte('activity_date', fromIso)
         .lte('activity_date', toIso)
         .order('activity_date', { ascending: true });
@@ -216,16 +347,20 @@ export async function fetchRange(fromIso, toIso) {
     return data || [];
 }
 
-/** Meilleur jour de l'utilisateur au score de productivité. */
+/** Meilleur jour de l'utilisateur consulté au score de productivité. */
 export async function fetchBestDay() {
-    const { data, error } = await supabase.from('v_best_day').select('*').maybeSingle();
+    const { data, error } = await supabase
+        .from('v_best_day')
+        .select('*')
+        .eq('user_id', target())
+        .maybeSingle();
     if (error) throw error;
     return data;
 }
 
 /** Écrit une valeur exacte (ou plusieurs) sur un jour, en créant la ligne si besoin. */
 export async function saveDay(iso, patch, session) {
-    const payload = { user_id: userId(session), activity_date: iso, ...patch };
+    const payload = { user_id: target(), activity_date: iso, ...patch };
     const { data, error } = await supabase
         .from('daily_activity')
         .upsert(payload, { onConflict: 'user_id,activity_date' })
@@ -238,10 +373,35 @@ export async function saveDay(iso, patch, session) {
 /** Incrément atomique côté base (boutons + / -). Renvoie la ligne à jour. */
 export async function bump(metricKey, delta, iso) {
     const { data, error } = await supabase.rpc('bump_metric', {
-        p_metric: metricKey, p_delta: delta, p_date: iso
+        p_metric: metricKey, p_delta: delta, p_date: iso,
+        // Nul quand on saisit pour soi : la base retombe alors sur auth.uid().
+        p_user_id: isViewingOther() ? target() : null
     });
     if (error) throw error;
     return Array.isArray(data) ? data[0] : data;
+}
+
+/* --------------------------------------------------------------------------
+   Données — équipe (administrateurs)
+   -------------------------------------------------------------------------- */
+
+/**
+ * Activité de tous les utilisateurs sur une plage, profil compris.
+ * Les comptes de démonstration sont exclus par défaut : sans cela, un jeu de
+ * données fabriqué pour une présentation viendrait fausser tous les classements.
+ */
+export async function fetchTeamRange(fromIso, toIso, { includeDemo = false, includeInactive = false } = {}) {
+    let q = supabase
+        .from('v_team_daily')
+        .select('*')
+        .gte('activity_date', fromIso)
+        .lte('activity_date', toIso)
+        .order('activity_date', { ascending: true });
+    if (!includeDemo) q = q.eq('is_demo', false);
+    if (!includeInactive) q = q.eq('is_active', true);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
 }
 
 /* --------------------------------------------------------------------------
@@ -254,13 +414,16 @@ export const DEFAULT_TARGETS = {
 };
 
 export async function fetchTargets() {
-    const { data, error } = await supabase.from('daily_targets').select('*').maybeSingle();
+    const { data, error } = await supabase
+        .from('daily_targets').select('*')
+        .eq('user_id', target())
+        .maybeSingle();
     if (error) throw error;
     return { ...DEFAULT_TARGETS, ...(data || {}) };
 }
 
 export async function saveTargets(patch, session) {
-    const payload = { user_id: userId(session), ...patch };
+    const payload = { user_id: target(), ...patch };
     const { data, error } = await supabase
         .from('daily_targets')
         .upsert(payload, { onConflict: 'user_id' })
@@ -291,6 +454,16 @@ export function humanError(error) {
         return "Droits insuffisants sur cette donnée (RLS). Êtes-vous bien connecté ?";
     }
     if (msg.includes('Invalid login credentials')) return 'E-mail ou mot de passe incorrect.';
+    if (msg.includes('réservée aux administrateurs') || msg.includes('réservé aux administrateurs')) {
+        return 'Action réservée aux administrateurs.';
+    }
+    if (msg.includes('dernier administrateur')) {
+        return 'Impossible : ce compte est le dernier administrateur actif. Nommez un autre administrateur d\'abord.';
+    }
+    if (msg.includes('Utilisateur introuvable')) return 'Utilisateur introuvable.';
+    if (error.code === '42P17') {
+        return 'Erreur de configuration des droits dans la base (récursion RLS). Rejouez multi-user-migration.sql.';
+    }
     return msg;
 }
 

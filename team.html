@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Équipe | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<div class="loading-veil">Chargement de l'équipe…</div>
+
+<nav id="main-nav"></nav>
+
+<header class="page-hero">
+    <div class="page-container">
+        <span class="hero-badge">Vue d'équipe</span>
+        <h1>L'équipe, <em>d'un seul regard</em></h1>
+        <p>Le même moteur de périodes que la page Performances, appliqué à tout le monde.
+           Les comptes de démonstration sont exclus par défaut pour ne pas fausser les classements.</p>
+    </div>
+</header>
+
+<main class="page-main page-main--pulled">
+    <div class="page-container">
+
+        <!-- ==============================================================
+             PILOTAGE
+             ============================================================== -->
+        <section class="control-panel">
+
+            <div class="preset-row" id="preset-row">
+                <span class="date-bar-label">Périodes courantes</span>
+            </div>
+
+            <div class="control-zones">
+
+                <div class="control-zone control-zone--a">
+                    <div class="zone-head">
+                        <span class="zone-dot zone-dot--a"></span>
+                        <span class="zone-title">Période analysée</span>
+                        <span class="zone-hint" id="hint-a">…</span>
+                    </div>
+                    <div class="date-range">
+                        <label class="sr-only" for="a-from">Début de la période</label>
+                        <input type="date" id="a-from">
+                        <span>→</span>
+                        <label class="sr-only" for="a-to">Fin de la période</label>
+                        <input type="date" id="a-to">
+                    </div>
+                    <div class="zone-shortcuts">
+                        <button class="chip chip--sm" data-a="7" type="button">7 j</button>
+                        <button class="chip chip--sm" data-a="30" type="button">30 j</button>
+                        <button class="chip chip--sm" data-a="week" type="button">Cette semaine</button>
+                        <button class="chip chip--sm" data-a="month" type="button">Ce mois</button>
+                        <button class="chip chip--sm" data-a="quarter" type="button">Ce trimestre</button>
+                    </div>
+                </div>
+
+                <div class="control-zone control-zone--c">
+                    <div class="zone-head">
+                        <span class="zone-dot zone-dot--c"></span>
+                        <span class="zone-title">Qui est compté</span>
+                    </div>
+                    <div class="seg-label">Comptes de démonstration</div>
+                    <div class="seg" id="seg-demo">
+                        <button data-demo="0" type="button">Exclus</button>
+                        <button data-demo="1" type="button">Inclus</button>
+                    </div>
+                    <div class="seg-explain" id="explain-demo"></div>
+                    <div class="seg-label">Comptes désactivés</div>
+                    <div class="seg" id="seg-inactive">
+                        <button data-inactive="0" type="button">Exclus</button>
+                        <button data-inactive="1" type="button">Inclus</button>
+                    </div>
+                </div>
+
+                <div class="control-zone control-zone--c">
+                    <div class="zone-head">
+                        <span class="zone-dot zone-dot--c"></span>
+                        <span class="zone-title">Réglages de lecture</span>
+                    </div>
+                    <div class="seg-label">Un point de graphique = </div>
+                    <div class="seg" id="seg-gran">
+                        <button data-gran="auto" type="button">Auto</button>
+                        <button data-gran="day" type="button">Un jour</button>
+                        <button data-gran="week" type="button">Une semaine</button>
+                        <button data-gran="month" type="button">Un mois</button>
+                    </div>
+                    <div class="seg-explain" id="explain-gran"></div>
+                    <div class="seg-label">Chiffres du classement en</div>
+                    <div class="seg" id="seg-mode">
+                        <button data-mode="total" type="button">Cumul</button>
+                        <button data-mode="avg" type="button">Moyenne / jour actif</button>
+                    </div>
+                    <div class="seg-explain" id="explain-mode"></div>
+                </div>
+            </div>
+
+            <div class="control-summary" id="control-summary"></div>
+        </section>
+
+        <!-- KPI de l'équipe -->
+        <div class="kpi-grid" id="kpi-grid"></div>
+
+        <!-- CLASSEMENT -->
+        <div class="section-head">
+            <div>
+                <h2>Classement sur la période</h2>
+                <p>Trié par score de productivité. Le bouton « ouvrir » bascule le tableau de bord
+                   individuel sur la personne choisie, sans quitter votre session.</p>
+            </div>
+            <div class="section-head-actions">
+                <button class="btn btn--ghost" id="btn-export" type="button">⬇ Exporter en CSV</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th><th>BDR</th><th>Appels</th><th>Aboutis</th><th>RDV</th><th>E-mails</th>
+                        <th>Entrep.</th><th>Contacts</th><th>Abouti %</th><th>RDV %</th>
+                        <th>Jours</th><th>Score</th><th></th>
+                    </tr>
+                </thead>
+                <tbody id="ranking-body"></tbody>
+            </table>
+        </div>
+
+        <!-- GRAPHIQUES -->
+        <div class="section-head">
+            <div>
+                <h2>Graphiques</h2>
+                <p><b>Survolez n'importe quel endroit d'un graphique</b> : le détail du moment pointé
+                   s'affiche pour chaque BDR, avec son rang et sa part de l'activité de l'équipe.
+                   Chaque BDR a sa couleur, tenue d'un graphique à l'autre.</p>
+            </div>
+        </div>
+        <div class="charts-grid" id="charts-grid"></div>
+
+        <!-- DUEL -->
+        <div class="section-head">
+            <div>
+                <h2>Deux BDR face à face</h2>
+                <p>Même code couleur que la page Performances : le
+                   <b style="color:var(--a2)">bleu</b> est le premier choisi, le
+                   <b style="color:var(--b2)">violet</b> le second.</p>
+            </div>
+        </div>
+        <div class="modal-local-bar">
+            <span class="date-bar-label">Comparer</span>
+            <select class="chart-select" id="duel-a"></select>
+            <span class="date-bar-label">à</span>
+            <select class="chart-select" id="duel-b"></select>
+        </div>
+        <div class="charts-grid" id="duel-grid"></div>
+
+    </div>
+</main>
+
+<div class="modal-backdrop" id="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-head">
+            <div>
+                <h3 id="modal-title">…</h3>
+                <p id="modal-sub">…</p>
+            </div>
+            <button class="modal-close" id="modal-close" type="button" aria-label="Fermer">×</button>
+        </div>
+        <div class="modal-body" id="modal-body"></div>
+    </div>
+</div>
+
+<footer class="app-footer">
+    Cockpit BDR · Fluxym — vue réservée aux administrateurs (vue <code>v_team_daily</code>).
+</footer>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/team.js"></script>
+</body>
+</html>

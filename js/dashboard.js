@@ -7,14 +7,16 @@
    ========================================================================== */
 
 import {
-    requireAuth, METRICS, EMPTY_DAY,
-    todayISO, addDaysISO, diffDays, formatLong, formatShort, isWeekend,
-    startOfWeek, endOfWeek, startOfMonth, endOfMonth, addMonthsISO,
-    startOfQuarter, endOfQuarter, weekLabel, monthLabel,
-    periodLength, countWorkdays, previousPeriod, samePeriodLastYear,
-    periodLabel, periodLabelShort, minISO, maxISO,
-    fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS
+    requireAuth, METRICS, todayISO, addDaysISO, diffDays,
+    formatLong, isWeekend, startOfWeek, endOfWeek, startOfMonth,
+    endOfMonth, addMonthsISO, startOfQuarter, endOfQuarter, periodLength,
+    previousPeriod, samePeriodLastYear, periodLabel, periodLabelShort, minISO,
+    maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS
 } from './api.js';
+import {
+    num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
+    autoGran, granWord
+} from './analytics.js';
 import {
     $, toast, fmtInt, fmtDec, delta, escapeHtml, hideVeil,
     lineChart, barChart, compareChart, funnel, legendHtml
@@ -45,65 +47,18 @@ let bestEver = null;      // meilleur jour absolu (vue v_best_day)
    Accès aux données
    -------------------------------------------------------------------------- */
 
-const zeroDay = iso => ({
-    ...EMPTY_DAY, activity_date: iso, productivity_score: 0, total_actions: 0,
-    connect_rate: null, meeting_rate: null, calls_per_meeting: null, notes: null
-});
-
-const num = (r, k) => Number(r?.[k]) || 0;
-const score = r => num(r, 'productivity_score');
-const isActive = r => num(r, 'total_actions') > 0;
-
 /** Lignes d'une période, jours manquants complétés à zéro. */
-function rowsFor(p) {
-    const out = [];
-    for (let iso = p.from; diffDays(p.to, iso) >= 0; iso = addDaysISO(iso, 1)) {
-        out.push(byDate.get(iso) || zeroDay(iso));
-    }
-    return out;
-}
+const rowsFor = p => rowsForRange(byDate, p.from, p.to);
 
-/** Agrégat d'une liste de jours : cumuls, jours actifs, taux recalculés. */
-function agg(rows) {
-    const a = { days: rows.length, activeDays: 0 };
-    [...METRICS.map(m => m.key), 'productivity_score', 'total_actions']
-        .forEach(k => { a[k] = 0; });
-
-    rows.forEach(r => {
-        if (isActive(r)) a.activeDays++;
-        [...METRICS.map(m => m.key), 'productivity_score', 'total_actions']
-            .forEach(k => { a[k] += num(r, k); });
-    });
-
-    a.workdays = rows.filter(r => !isWeekend(r.activity_date)).length;
-    a.connect_rate = a.calls_made > 0 ? (a.calls_connected / a.calls_made) * 100 : null;
-    a.meeting_rate = a.calls_connected > 0 ? (a.meetings_booked / a.calls_connected) * 100 : null;
-    a.calls_per_meeting = a.meetings_booked > 0 ? a.calls_made / a.meetings_booked : null;
-    a.crm = a.companies_created + a.contacts_created;
-    return a;
-}
-
-/**
- * Valeur d'un agrégat selon le mode de lecture.
- * En moyenne, on divise par les jours ACTIFS et non par les jours calendaires :
- * un week-end ou un jour de formation ne doit pas diluer la performance.
- */
-function val(a, key, mode = effMode()) {
-    const raw = key === 'crm' ? a.crm : (a[key] ?? 0);
-    if (mode === 'total') return raw;
-    return a.activeDays > 0 ? raw / a.activeDays : 0;
-}
+/** Valeur d'un agrégat selon le mode de lecture, avec le mode courant par défaut. */
+const val = (a, key, mode = effMode()) => valOf(a, key, mode);
 
 /* --------------------------------------------------------------------------
    Granularité et mode effectifs
    -------------------------------------------------------------------------- */
 
 function effGran() {
-    if (state.gran !== 'auto') return state.gran;
-    const span = periodLength(state.a.from, state.a.to);
-    if (span <= 31) return 'day';
-    if (span <= 180) return 'week';
-    return 'month';
+    return state.gran === 'auto' ? autoGran(state.a.from, state.a.to) : state.gran;
 }
 
 const lengthsDiffer = () =>
@@ -113,22 +68,6 @@ const lengthsDiffer = () =>
 function effMode() {
     if (state.modeTouched) return state.mode;
     return lengthsDiffer() ? 'avg' : 'total';
-}
-
-/** Regroupe des jours en paquets (jour, semaine ISO ou mois). */
-function bucketize(rows, gran) {
-    if (gran === 'day') {
-        return rows.map(r => ({ key: r.activity_date, label: formatShort(r.activity_date), rows: [r] }));
-    }
-    const map = new Map();
-    rows.forEach(r => {
-        const key = gran === 'week' ? startOfWeek(r.activity_date) : startOfMonth(r.activity_date);
-        if (!map.has(key)) {
-            map.set(key, { key, label: gran === 'week' ? weekLabel(key) : monthLabel(key), rows: [] });
-        }
-        map.get(key).rows.push(r);
-    });
-    return [...map.values()].sort((x, y) => x.key.localeCompare(y.key));
 }
 
 /* --------------------------------------------------------------------------
@@ -203,7 +142,7 @@ const B_SHADES = ['#8b5cf6', '#6d28d9', '#4c1d95'];
 const A_MAIN = A_SHADES[0];
 const B_MAIN = B_SHADES[0];
 
-const granWord = g => ({ day: 'jour', week: 'semaine', month: 'mois' }[g || effGran()]);
+// granWord vient d'analytics.js
 const granWordPlural = g => ({ day: 'jours', week: 'semaines', month: 'mois' }[g || effGran()]);
 
 /** Libellé de période prêt à afficher dans une légende. */
@@ -1167,7 +1106,8 @@ function renderTable(aRows) {
         return `
         <tr class="${cls.join(' ')}">
             <td>${escapeHtml(formatLong(r.activity_date).replace(/ \d{4}$/, ''))}
-                ${r.notes ? `<span title="${escapeHtml(r.notes)}" style="cursor:help"> 📝</span>` : ''}</td>
+                ${r.notes ? `<span title="${escapeHtml(r.notes)}" style="cursor:help"> 📝</span>` : ''}
+                ${r.is_correction ? '<b class="tag tag--fix" title="Dernière écriture faite par un administrateur, pas par le titulaire du compte">corrigé</b>' : ''}</td>
             <td>${fmtInt(num(r, 'calls_made'))}</td>
             <td>${fmtInt(num(r, 'calls_connected'))}</td>
             <td><b>${fmtInt(num(r, 'meetings_booked'))}</b></td>

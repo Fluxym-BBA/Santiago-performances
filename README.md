@@ -33,6 +33,9 @@ Santiago-performances/
 │   ├── api.js               client Supabase, auth, requêtes, dates, métriques
 │   ├── ui.js                helpers d'affichage, toasts, graphiques SVG
 │   ├── tooltip.js           moteur d'info-bulles (survol des graphiques)
+│   ├── analytics.js         calculs partagés (agrégats, paquets, taux)
+│   ├── team.js              vue d'équipe (administrateurs)
+│   ├── admin.js             gestion des comptes (administrateurs)
 │   ├── nav.js               barre de navigation injectée
 │   ├── login.js             écran de connexion
 │   ├── saisie.js            logique de la page de saisie
@@ -145,6 +148,84 @@ Chaque carte porte **ses propres dates**, réglables directement dans la grille
 Dès qu'une carte quitte la période globale, elle est bordée de violet et sa
 référence devient la période précédente équivalente, ce qui est écrit dans sa
 légende. Un bouton ramène à la période globale.
+
+## Plusieurs utilisateurs
+
+### Une seule base, jamais une base par personne
+
+L'isolation est assurée par la **Row Level Security** de PostgreSQL : une seule
+table, et chaque ligne n'est visible que de son propriétaire. La règle est posée
+dans la base, pas dans le navigateur, donc elle tient même si quelqu'un
+interroge l'API directement avec la clé publique.
+
+Une base par utilisateur voudrait dire autant de projets Supabase, autant de
+jeux de clés, autant de migrations à rejouer à chaque évolution, et surtout
+aucune requête possible entre deux personnes, donc aucune vue d'équipe.
+
+### Deux rôles
+
+| | BDR | Administrateur |
+|---|---|---|
+| Ses propres données | lecture et écriture | lecture et écriture |
+| Données des autres | **rien du tout** | lecture, et correction |
+| Vue d'équipe | non | oui |
+| Gestion des comptes | non | oui |
+| Sélecteur d'utilisateur dans la barre de navigation | non | oui |
+
+Le rôle est stocké dans la table `profiles`. Il n'est **pas** dans
+`user_metadata` : cette partie du jeton est modifiable par l'utilisateur
+lui-même, n'importe qui pourrait se déclarer administrateur.
+
+### Mise en service
+
+1. Exécuter `multi-user-migration.sql` dans le SQL Editor de Supabase. Le script
+   est rejouable sans risque et n'efface aucune donnée. Il se termine par la
+   promotion de `bbartoli@fluxym.com` en administrateur : adapter l'adresse si
+   besoin, c'est la seule ligne à personnaliser.
+2. Créer les comptes dans Supabase → Authentication → Users → Add user →
+   Create new user, avec **Auto Confirm User** coché. Le profil apparaît
+   automatiquement dans la page Comptes.
+3. Ajuster les noms affichés, les rôles et les comptes de démonstration depuis
+   la page **Comptes** de l'application.
+
+La création d'un compte ne peut pas se faire depuis l'application : elle exige
+la clé `service_role`, qui donne tous les droits et contourne toute la sécurité.
+Elle n'a rien à faire dans un dépôt public. Tout le reste se gère dans l'écran
+Comptes.
+
+### Le compte de démonstration
+
+C'est un compte comme un autre, marqué `is_demo`, alimenté par `seed-demo.sql`.
+Ses chiffres sont **exclus par défaut** de la vue d'équipe et de ses classements,
+ce qui permet de montrer l'outil avec 90 jours d'historique crédible sans
+polluer les statistiques réelles et sans jamais toucher aux données d'un vrai
+BDR.
+
+L'adresse peut être un alias : `bbartoli+demo@fluxym.com` arrive dans la boîte
+de `bbartoli@fluxym.com` tout en étant un compte distinct pour Supabase. Comme
+aucun e-mail n'est envoyé par l'application, l'adresse n'a même pas besoin
+d'exister, mais un alias reste préférable si la récupération de mot de passe est
+activée un jour.
+
+### Corriger la saisie de quelqu'un
+
+Un administrateur choisit la personne dans le sélecteur de la barre de
+navigation, puis saisit normalement. Deux garde-fous :
+
+- un **bandeau permanent** en haut de page, orange sur la page de saisie, rappelle
+  dans quel compte on écrit ;
+- la journée modifiée porte la mention **corrigé** dans le tableau
+  d'historique, parce que la base enregistre l'auteur de chaque écriture dans
+  `updated_by`. Une correction ne peut donc pas passer pour une saisie du
+  titulaire.
+
+### Ce que la vue d'équipe ajoute
+
+Classement sur la période, indicateurs cumulés, quatre graphiques où **une
+couleur désigne une personne** et non une période, un duel de deux BDR face à
+face qui reprend le code bleu et violet, et un export CSV. Au-delà de huit
+personnes, seules les huit premières sont tracées : le classement reste complet,
+mais huit courbes est la limite de lisibilité.
 
 ## Le survol des graphiques
 

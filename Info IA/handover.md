@@ -199,6 +199,91 @@ Si un graphique est ajouté au registre, lui donner un `tip` et un `hover` (la
 phrase « Au survol » de la note dépliable). Sans `tip`, aucune bande n'est créée :
 pas de surcoût, mais pas d'info-bulle non plus.
 
+## 6 ter. Le multi-utilisateurs (v5)
+
+### Le choix d'architecture, et pourquoi il ne faut pas le défaire
+
+Une seule base, une seule table, isolation par RLS. La demande initiale parlait
+de « une base par utilisateur » : c'est la mauvaise réponse. Vingt-deux projets
+Supabase, vingt-deux jeux de clés, vingt-deux migrations à rejouer, et aucune
+requête inter-utilisateurs possible, donc pas de vue d'équipe. La RLS est le
+mécanisme prévu par PostgreSQL pour exactement ce besoin.
+
+### Les trois pièges du multi-tenant, tous désamorcés
+
+1. **Le rôle dans le jeton.** Ne JAMAIS mettre le rôle dans `user_metadata` :
+   le client peut le modifier lui-même avec `auth.updateUser()`, donc n'importe
+   qui se promeut administrateur. `app_metadata` serait sûr mais exige la clé
+   `service_role`. D'où la table `profiles` plus la fonction `is_admin()`.
+2. **La récursion RLS.** Une règle sur `profiles` qui interroge `profiles`
+   provoque l'erreur 42P17. `is_admin()` est donc en `SECURITY DEFINER`, avec
+   `search_path` figé pour qu'un schéma pirate ne puisse pas détourner la
+   résolution des noms.
+3. **Les vues qui contournent la RLS.** Une vue s'exécute par défaut avec les
+   droits de son propriétaire, donc elle expose tout à tout le monde.
+   `with (security_invoker = true)` est obligatoire sur `v_daily_kpi`,
+   `v_best_day` et `v_team_daily`. C'était déjà le cas, ne pas le retirer.
+
+### Restriction des colonnes modifiables
+
+La règle RLS `profiles_update_own_name` autorise un utilisateur à modifier SA
+ligne, et c'est le `GRANT UPDATE (display_name)` qui décide quelles colonnes.
+Une policy ne sait pas restreindre par colonne : sans ce GRANT limité, un BDR
+pourrait se promouvoir administrateur. Le rôle, l'activation et le marqueur de
+démonstration passent obligatoirement par `admin_update_profile()`, qui vérifie
+les droits et **protège le dernier administrateur actif** : sans ce garde-fou,
+une fausse manoeuvre rendrait l'administration définitivement inaccessible.
+
+### Le piège côté front, celui qui a demandé le plus d'attention
+
+Tant que chacun ne voyait que ses lignes, les requêtes pouvaient se passer de
+filtre : la RLS faisait le tri. Dès qu'un administrateur voit tout le monde, la
+**même requête renvoie l'activité de tous les utilisateurs mélangée**. Chaque
+lecture porte donc désormais un `.eq('user_id', target())` explicite.
+
+La RLS reste la barrière de sécurité, le filtre n'est que la sélection du
+périmètre. Les deux sont nécessaires et ne servent pas à la même chose. Si une
+requête est ajoutée un jour dans `api.js`, elle doit porter ce filtre, sinon un
+administrateur verra des données agrégées de toute l'équipe en croyant regarder
+une seule personne. Le fichier de test dédié vérifie ce point sur toutes les
+lectures et écritures.
+
+### État du périmètre consulté
+
+`viewedUser()` est l'utilisateur regardé, `myProfile()` celui connecté. Ils
+diffèrent quand un administrateur consulte quelqu'un d'autre.
+
+- persistance en `sessionStorage`, jamais `localStorage` : le périmètre ne doit
+  pas survivre à la fermeture du navigateur ;
+- restauration **ignorée pour un non-administrateur** : un compte rétrogradé ne
+  conserve pas son accès ;
+- `bump()` envoie `p_user_id: null` quand on saisit pour soi, et la base retombe
+  sur `auth.uid()`. Elle refuse une cible différente si l'appelant n'est pas
+  administrateur.
+
+### analytics.js
+
+Les calculs d'agrégat, de paquets et de granularité sont sortis de
+`dashboard.js` le jour où la vue d'équipe en a eu besoin. Dupliquer un calcul de
+taux ou de jours actifs aurait garanti que les deux pages finissent par afficher
+des chiffres différents pour la même chose. Règle du module : aucun DOM, aucun
+état, aucun réseau. Tout entre par les arguments.
+
+### Couleurs de la vue d'équipe
+
+Sur `team.html` une couleur désigne une **personne**, pas une période, et elle
+est tenue du classement aux graphiques. Le bleu et le violet reprennent leur
+rôle habituel dans le duel, qui est bien une comparaison de deux ensembles.
+Au-delà de `MAX_SERIES` (8), seules les premières du classement sont tracées.
+
+### Ce qui reste hors de portée du front
+
+Créer un compte, réinitialiser un mot de passe, supprimer un compte
+d'authentification : tout cela exige `service_role`, donc Supabase ou une Edge
+Function. Une Edge Function imposerait un déploiement par CLI, ce qui casserait
+la règle « aucun build ». L'écran Comptes explique donc la marche à suivre dans
+Supabase en quatre étapes plutôt que de promettre un bouton qui échouerait.
+
 ## 7. Pièges connus
 
 - **Dates** : toujours passer par `toISO()` / `fromISO()` de `api.js`. Un

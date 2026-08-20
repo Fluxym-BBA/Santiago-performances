@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Comptes | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<div class="loading-veil">Chargement des comptes…</div>
+
+<nav id="main-nav"></nav>
+
+<header class="page-hero">
+    <div class="page-container">
+        <span class="hero-badge">Administration</span>
+        <h1>Les comptes, <em>et qui voit quoi</em></h1>
+        <p>Renommer, désactiver, nommer un administrateur, marquer un compte de démonstration.
+           Tout est appliqué par la base, qui refuse les manoeuvres dangereuses.</p>
+    </div>
+</header>
+
+<main class="page-main page-main--pulled">
+    <div class="page-container">
+
+        <!-- Création d'un compte : ce que l'application ne peut pas faire -->
+        <section class="info-panel">
+            <div class="info-panel-head">
+                <span class="info-panel-icon">🔑</span>
+                <h2>Créer un compte se fait dans Supabase, en quatre clics</h2>
+            </div>
+            <div class="info-panel-body">
+                <p>Cette page ne crée pas de compte, et c'est volontaire. Créer un utilisateur exige la
+                   clé <code>service_role</code>, qui donne tous les droits sur la base et contourne
+                   toutes les règles de sécurité. Elle n'a rien à faire dans un dépôt public, donc elle
+                   n'est pas dans cette application. Tout le reste, en revanche, se gère ici.</p>
+                <ol class="steps">
+                    <li>Supabase → <b>Authentication</b> → <b>Users</b> → <b>Add user</b> →
+                        <b>Create new user</b></li>
+                    <li>Renseigner l'e-mail et un mot de passe provisoire</li>
+                    <li>Cocher <b>Auto Confirm User</b>, sans quoi la personne ne pourra pas se connecter</li>
+                    <li>Valider : le profil apparaît automatiquement dans le tableau ci-dessous</li>
+                </ol>
+                <p class="info-panel-note">Le nom affiché est déduit de l'adresse e-mail. Il est
+                   modifiable ici juste après.</p>
+            </div>
+        </section>
+
+        <!-- Tableau des comptes -->
+        <div class="section-head">
+            <div>
+                <h2>Comptes</h2>
+                <p>Les modifications sont enregistrées immédiatement. La base protège le dernier
+                   administrateur actif : elle refusera de le rétrograder ou de le désactiver.</p>
+            </div>
+            <div class="section-head-actions">
+                <button class="btn btn--ghost" id="btn-reload" type="button">↻ Recharger</button>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nom affiché</th>
+                        <th>E-mail</th>
+                        <th>Rôle</th>
+                        <th>Démo</th>
+                        <th>Actif</th>
+                        <th>Jours saisis</th>
+                        <th>Dernière saisie</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="admin-body"></tbody>
+            </table>
+        </div>
+
+        <!-- Explications -->
+        <section class="info-panel info-panel--soft">
+            <div class="info-panel-head">
+                <span class="info-panel-icon">🛡️</span>
+                <h2>Ce que chaque réglage change vraiment</h2>
+            </div>
+            <div class="info-panel-body">
+                <dl class="def-list">
+                    <dt>Rôle administrateur</dt>
+                    <dd>Accès à la vue d'équipe, à cette page, au sélecteur d'utilisateur de la barre
+                        de navigation, et droit de corriger la saisie de n'importe qui. Un BDR ne voit
+                        strictement que ses propres lignes, y compris s'il interroge la base
+                        directement : la règle est posée dans PostgreSQL, pas dans le navigateur.</dd>
+                    <dt>Compte de démonstration</dt>
+                    <dd>Les chiffres du compte sont exclus par défaut de la vue d'équipe et de ses
+                        classements. C'est le compte à utiliser pour montrer l'outil sans polluer les
+                        statistiques réelles, et sans jamais toucher aux données d'un vrai BDR.</dd>
+                    <dt>Compte actif</dt>
+                    <dd>Un compte désactivé ne peut plus se connecter et sort des classements, mais son
+                        historique est conservé. C'est la bonne manière de gérer un départ : on ne
+                        supprime pas des mois de données pour libérer un accès.</dd>
+                    <dt>Effacer les données</dt>
+                    <dd>Supprime les journées d'activité du compte, sans supprimer le compte. Utile
+                        pour remettre le compte de démonstration à zéro, ou pour repartir proprement.
+                        Sans retour possible.</dd>
+                </dl>
+            </div>
+        </section>
+
+    </div>
+</main>
+
+<footer class="app-footer">
+    Cockpit BDR · Fluxym — page réservée aux administrateurs.
+</footer>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/admin.js"></script>
+</body>
+</html>
