@@ -33,6 +33,12 @@ Santiago-performances/
 ├── accounts-migration-v3.sql    migration 3 : suppression de compte sans dégât
 ├── seed-demo.sql                90 jours de données de démonstration
 ├── reset-demo.sql               remise à zéro du compte de démonstration
+├── Info IA/
+│   ├── handover.md          architecture, décisions, pièges (source unique)
+│   ├── etat.md              ce qui est déployé — à tenir à jour
+│   └── agent/
+│       ├── instructions.md      instructions de l'agent Dust du projet
+│       └── mise-en-place.md     comment créer cet agent
 ├── supabase/
 │   └── functions/
 │       └── admin-users/

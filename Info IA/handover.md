@@ -3,6 +3,18 @@
 **Dernière mise à jour : 20/08/2026 (v6 lot 2 — gestion des comptes)**
 **État de référence : branche `main`**
 
+> **Ce document décrit l'architecture et ne bouge qu'avec elle.** Ce qui est
+> réellement déployé à un instant donné se trouve dans `Info IA/etat.md`, le
+> seul fichier à tenir à jour après chaque déploiement. Les instructions de
+> l'agent Dust qui travaille sur ce projet sont dans
+> `Info IA/agent/instructions.md`, et sa mise en place dans
+> `Info IA/agent/mise-en-place.md`.
+>
+> Règle à tenir : **il n'existe qu'une seule description du projet, celle-ci.**
+> Ne pas la recopier dans les instructions de l'agent ni ailleurs. Deux
+> descriptions du même projet finissent toujours par se contredire, et c'est
+> exactement le piège déjà évité sur les poids du score.
+
 ## 1. Ce qu'est le projet
 
 Application de suivi quotidien de la productivité d'un BDR, pour Santiago.
