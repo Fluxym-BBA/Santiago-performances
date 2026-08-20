@@ -6,10 +6,10 @@
    ========================================================================== */
 
 import {
-    requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY,
-    todayISO, addDaysISO, formatLong, relativeLabel, diffDays,
-    fetchDay, saveDay, bump, fetchTargets, saveTargets, humanError,
-    SCORE_WEIGHTS, scoreOf
+    requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY, todayISO,
+    addDaysISO, formatLong, relativeLabel, diffDays, fetchDay,
+    saveDay, bump, fetchTargets, saveTargets, humanError,
+    SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -96,7 +96,54 @@ function schedule(key, fn, ms = 600) {
     timers[key] = setTimeout(fn, ms);
 }
 
+/* --------------------------------------------------------------------------
+   Mode correction
+
+   Un administrateur peut écrire dans le compte d'un commercial, mais jamais
+   sans le savoir. Une confirmation est demandée une seule fois par session de
+   travail, avant la première écriture : redemander à chaque bouton rendrait la
+   correction d'une journée entière insupportable, ne rien demander du tout
+   ramènerait le risque de l'ancien sélecteur permanent.
+   -------------------------------------------------------------------------- */
+
+let fixConfirmed = false;
+
+function allowWrite() {
+    if (!isViewingOther() || fixConfirmed) return true;
+    const v = viewedProfile();
+    const name = v.display_name || v.email || 'cet utilisateur';
+    const ok = confirm(
+        `Vous allez modifier la saisie de ${name}.\n\n`
+        + `Journée concernée : ${formatLong(day)}.\n\n`
+        + `Vos modifications seront enregistrées sur son compte et signalées `
+        + `comme une correction dans son historique.\n\nContinuer ?`);
+    if (ok) {
+        fixConfirmed = true;
+        status('Mode correction actif', 'saving');
+    }
+    return ok;
+}
+
+/** Adapte l'en-tête de la page quand on corrige le compte de quelqu'un. */
+function renderIdentity() {
+    if (!isViewingOther()) return;
+    const v = viewedProfile();
+    const name = v.display_name || v.email || 'cet utilisateur';
+    const badge = document.querySelector('.hero-badge');
+    const title = document.querySelector('.page-hero h1');
+    const sub = document.querySelector('.page-hero p');
+    if (badge) badge.textContent = 'Correction';
+    if (title) title.innerHTML = `Corriger la saisie de <em>${escapeHtml(name)}</em>`;
+    if (sub) {
+        sub.innerHTML = `Vous n'êtes pas sur votre propre journée. Chaque modification sera `
+            + `enregistrée sur le compte de <b>${escapeHtml(name)}</b> et marquée comme une `
+            + `correction. <a href="${escapeHtml(`./dashboard.html?u=${v.user_id}`)}">Retour à sa fiche</a>`;
+    }
+    document.title = `Corriger ${name} | Cockpit BDR — Fluxym`;
+}
+
 async function persist(patch) {
+    if (!allowWrite()) return;
     status('Enregistrement…', 'saving');
     try {
         const saved = await saveDay(day, patch, session);
@@ -113,6 +160,7 @@ async function persist(patch) {
 async function onBump(key, d) {
     const before = Number(row[key]) || 0;
     if (d < 0 && before === 0) return;
+    if (!allowWrite()) return;
 
     // Retour visuel immédiat, correction si la base refuse.
     row[key] = Math.max(0, before + d);
@@ -311,8 +359,9 @@ function buildTargets() {
    -------------------------------------------------------------------------- */
 
 (async function init() {
-    session = await requireAuth();
-    renderNav(session);
+    session = await requireAuth({ needs: 'bdr' });
+    renderNav();
+    renderIdentity();
     buildCards();
     buildScoreExplain();
 

@@ -50,48 +50,62 @@ async function load() {
 function render() {
     const body = document.getElementById('admin-body');
     const me = myProfile();
-    const activeAdmins = profiles.filter(p => p.role === 'admin' && p.is_active).length;
+    const activeAdmins = profiles.filter(p => p.is_admin && p.is_active).length;
 
     body.innerHTML = profiles.map(p => {
-        const s = stats.get(p.user_id) || { days: 0, last: null };
+        const s2 = stats.get(p.user_id) || { days: 0, last: null };
         const isMe = p.user_id === me.user_id;
         // Le dernier administrateur actif est verrouillé côté écran aussi, pour
         // que le bouton ne promette pas une action que la base refusera.
-        const lastAdmin = p.role === 'admin' && p.is_active && activeAdmins <= 1;
+        const lastAdmin = p.is_admin && p.is_active && activeAdmins <= 1;
+        const lockNote = lastAdmin
+            ? 'Seul administrateur actif : nommez quelqu\'un d\'autre pour pouvoir changer ce réglage'
+            : '';
 
         return `
         <tr${isMe ? ' class="row-me"' : ''}>
-            <td>
+            <td data-th="Nom">
                 <input class="cell-input" data-name="${p.user_id}"
                        value="${escapeHtml(p.display_name || '')}"
                        placeholder="Nom affiché" aria-label="Nom affiché">
             </td>
-            <td class="td-muted">${escapeHtml(p.email || '')}${isMe ? ' <b class="tag">vous</b>' : ''}</td>
-            <td>
-                <select class="cell-input" data-role="${p.user_id}"${lastAdmin ? ' disabled' : ''}
-                        title="${lastAdmin ? 'Dernier administrateur actif : rôle verrouillé' : ''}">
-                    <option value="bdr"${p.role === 'bdr' ? ' selected' : ''}>BDR</option>
-                    <option value="admin"${p.role === 'admin' ? ' selected' : ''}>Administrateur</option>
-                </select>
+            <td data-th="E-mail" class="td-muted td-mail">${escapeHtml(p.email || '')}${
+                isMe ? ' <b class="badge">vous</b>' : ''}</td>
+            <td data-th="Administrateur">
+                <button class="toggle${p.is_admin ? ' toggle--on' : ''}" type="button"
+                        data-admin="${p.user_id}" aria-pressed="${p.is_admin}"
+                        ${lastAdmin ? `disabled title="${lockNote}"` : ''}>
+                    ${p.is_admin ? 'Administrateur' : 'Non'}
+                </button>
+                ${lastAdmin ? `<span class="cell-note">${lockNote}</span>` : ''}
             </td>
-            <td>
-                <button class="toggle${p.is_demo ? ' toggle--on' : ''}" type="button"
+            <td data-th="Prospecte">
+                <button class="toggle${p.is_bdr ? ' toggle--on' : ''}" type="button"
+                        data-bdr="${p.user_id}" aria-pressed="${p.is_bdr}">
+                    ${p.is_bdr ? 'BDR' : 'Ne saisit pas'}
+                </button>
+            </td>
+            <td data-th="Démo">
+                <button class="toggle${p.is_demo ? ' toggle--on toggle--warn' : ''}" type="button"
                         data-demo="${p.user_id}" aria-pressed="${p.is_demo}">
                     ${p.is_demo ? 'Démo' : 'Réel'}
                 </button>
             </td>
-            <td>
+            <td data-th="Actif">
                 <button class="toggle${p.is_active ? ' toggle--on' : ''}" type="button"
                         data-active="${p.user_id}" aria-pressed="${p.is_active}"
-                        ${lastAdmin ? 'disabled title="Dernier administrateur actif"' : ''}>
+                        ${lastAdmin ? `disabled title="${lockNote}"` : ''}>
                     ${p.is_active ? 'Actif' : 'Désactivé'}
                 </button>
             </td>
-            <td>${s.days ? `<b>${fmtInt(s.days)}</b>` : '<span class="td-muted">aucune</span>'}</td>
-            <td class="td-muted">${s.last ? formatLong(s.last) : '—'}</td>
-            <td>
-                <button class="chip chip--sm chip--danger" type="button"
-                        data-wipe="${p.user_id}">Effacer les données</button>
+            <td data-th="Jours saisis">${
+                !p.is_bdr ? '<span class="td-muted">sans objet</span>'
+                : s2.days ? `<b>${fmtInt(s2.days)}</b>` : '<span class="td-muted">aucune</span>'}</td>
+            <td data-th="Dernière saisie" class="td-muted">${
+                !p.is_bdr ? '—' : s2.last ? formatLong(s2.last) : '—'}</td>
+            <td data-th="Données">
+                ${p.is_bdr ? `<button class="chip chip--sm chip--danger" type="button"
+                        data-wipe="${p.user_id}">Effacer</button>` : '<span class="td-muted">—</span>'}
             </td>
         </tr>`;
     }).join('');
@@ -133,11 +147,31 @@ function wireRows() {
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
     });
 
-    body.querySelectorAll('[data-role]').forEach(sel => {
-        sel.addEventListener('change', () => {
-            const id = sel.dataset.role;
-            apply(id, { role: sel.value },
-                `${nameOf(id)} est désormais ${sel.value === 'admin' ? 'administrateur' : 'BDR'}`);
+    body.querySelectorAll('[data-admin]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.admin;
+            const p = profiles.find(x => x.user_id === id);
+            apply(id, { is_admin: !p.is_admin },
+                !p.is_admin
+                    ? `${nameOf(id)} est désormais administrateur`
+                    : `${nameOf(id)} n'est plus administrateur`);
+        });
+    });
+
+    // Les deux axes sont indépendants : administrer et prospecter sont deux
+    // questions distinctes, et c'est tout l'intérêt du modèle.
+    body.querySelectorAll('[data-bdr]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.bdr;
+            const p = profiles.find(x => x.user_id === id);
+            if (p.is_bdr && (stats.get(id)?.days || 0) > 0 && !confirm(
+                `${nameOf(id)} a déjà saisi ${stats.get(id).days} journée(s).\n\n`
+                + `En le retirant des BDR, ses données restent en base mais il `
+                + `disparaît des classements et perd l'accès à la saisie.\n\nContinuer ?`)) return;
+            apply(id, { is_bdr: !p.is_bdr },
+                !p.is_bdr
+                    ? `${nameOf(id)} saisit désormais son activité`
+                    : `${nameOf(id)} ne saisit plus d'activité et sort des classements`);
         });
     });
 
@@ -197,8 +231,8 @@ function wireRows() {
 
 (async function main() {
     try {
-        const session = await requireAuth();
-        renderNav(session);
+        const session = await requireAuth({ needs: 'admin' });
+        renderNav();
 
         if (!isAdmin()) {
             document.querySelector('.page-main').innerHTML = `

@@ -125,18 +125,64 @@ function emptyState(container, message) {
     container.innerHTML = `<div class="chart-empty">${escapeHtml(message)}</div>`;
 }
 
-function baseFrame(container, { width = 760, height = 260, pad }) {
+/**
+ * Cadre d'un graphique, dimensionné sur la place réellement disponible.
+ *
+ * Le viewBox était figé à 760 unités de large. Comme le SVG occupe 100 % de son
+ * conteneur, sur un téléphone de 375 pixels tout était mis à l'échelle 0,49 :
+ * un texte déclaré à 11 pixels s'affichait à 5, donc illisible. En calant la
+ * largeur du viewBox sur celle du conteneur, une unité SVG vaut un pixel écran
+ * et les tailles de texte sont respectées à toutes les tailles d'écran.
+ *
+ * La hauteur est bornée par celle de la fenêtre, ce qui règle le cas du
+ * téléphone en paysage : il n'y reste qu'environ 350 pixels utiles, et un
+ * graphique de 320 y remplirait tout l'écran.
+ */
+/** Largeur réellement disponible pour un graphique, en pixels. */
+function availWidth(container) {
+    const w = Math.round(container.getBoundingClientRect().width);
+    return Math.max(300, Math.min(w || 760, 1100));
+}
+
+function frameSize(container, height) {
+    const width = availWidth(container);
+    const vh = (typeof window !== 'undefined' && window.innerHeight) || 900;
+    const maxH = Math.max(150, Math.round(vh * 0.62));
+    // Sous 420 pixels de large, on gagne aussi un peu de hauteur : les
+    // graphiques doivent rester lisibles sans occuper tout le défilement.
+    const wanted = width < 420 ? Math.round(height * 0.88) : height;
+    return { width, height: Math.min(wanted, maxH) };
+}
+
+function baseFrame(container, { width: forced = null, height = 260, pad, clampHeight = true }) {
     // Un nouveau rendu invalide la bulle en cours : sans cela, changer de période
     // pendant que la souris est sur un graphique laisserait affichées les valeurs
     // de l'ancienne période.
     hideTip();
     container.innerHTML = '';
+
+    // clampHeight = false pour les graphiques dont la hauteur est une somme de
+    // lignes : les rogner couperait la dernière ligne au lieu de la comprimer.
+    const width = forced || availWidth(container);
+    if (clampHeight) height = frameSize(container, height).height;
+
+    // Marges resserrées sur petit écran, mais seulement quand la marge gauche
+    // sert à un axe numérique. Une marge large porte des libellés de texte :
+    // la réduire les tronquerait, ce qui est exactement ce qu'on veut éviter.
+    const p = width < 480 && pad.l < 60
+        ? { ...pad, l: Math.min(pad.l, 34), r: Math.min(pad.r, 34) }
+        : pad;
+
     const svg = svgEl('svg', {
         class: 'chart-svg', viewBox: `0 0 ${width} ${height}`,
         role: 'img', preserveAspectRatio: 'xMidYMid meet'
     });
     container.appendChild(svg);
-    return { svg, width, height, pad, uid: `c${++uidSeq}`, plotW: width - pad.l - pad.r, plotH: height - pad.t - pad.b };
+    return {
+        svg, width, height, pad: p, uid: `c${++uidSeq}`,
+        plotW: width - p.l - p.r, plotH: height - p.t - p.b,
+        narrow: width < 480
+    };
 }
 
 function drawGrid(f, max, ticks = 4) {
@@ -157,7 +203,10 @@ function drawGrid(f, max, ticks = 4) {
 }
 
 function drawXLabels(f, labels) {
-    const step = Math.max(1, Math.ceil(labels.length / 10));
+    // Le nombre d'étiquettes dépend de la place : une étiquette a besoin d'au
+    // moins 58 pixels pour ne pas chevaucher sa voisine.
+    const room = Math.max(2, Math.floor(f.plotW / 58));
+    const step = Math.max(1, Math.ceil(labels.length / room));
     labels.forEach((lab, i) => {
         if (i % step !== 0 && i !== labels.length - 1) return;
         const x = f.pad.l + (labels.length === 1 ? f.plotW / 2 : (f.plotW * i) / (labels.length - 1));
@@ -426,10 +475,18 @@ export function barChart(container, { labels, series, height = 260, yMax = null,
  */
 export function compareChart(container, { rows, labelA, labelB, height, fmt = fmtInt, tip = null }) {
     if (!rows.length) return emptyState(container, 'Aucune donnée à comparer.');
-    const rowH = 54;
-    const pad = { l: 138, r: 96, t: 8, b: 10 };
+    // Les libellés de métrique occupent la marge gauche : sur un écran étroit
+    // on la réduit proportionnellement et on rapetisse la police, plutôt que de
+    // couper « Rendez-vous » en « Rendez-... ».
+    const avail = availWidth(container);
+    const narrow = avail < 560;
+    const rowH = narrow ? 48 : 54;
+    const labelSize = narrow ? 11.5 : 13.5;
+    const pad = narrow
+        ? { l: Math.round(avail * 0.30), r: Math.round(avail * 0.17), t: 8, b: 10 }
+        : { l: 138, r: 96, t: 8, b: 10 };
     const H = height || pad.t + pad.b + rows.length * rowH;
-    const f = baseFrame(container, { height: H, pad });
+    const f = baseFrame(container, { height: H, pad, clampHeight: false });
 
     const max = niceMax(Math.max(1, ...rows.flatMap(r => [Number(r.a) || 0, Number(r.b) || 0])));
 
@@ -442,8 +499,8 @@ export function compareChart(container, { rows, labelA, labelB, height, fmt = fm
         const top = f.pad.t + i * rowH;
 
         const lab = svgEl('text', {
-            x: f.pad.l - 14, y: top + rowH / 2 + 2, 'text-anchor': 'end',
-            fill: '#111827', 'font-size': 13.5, 'font-weight': 800
+            x: f.pad.l - (narrow ? 8 : 14), y: top + rowH / 2 + 2, 'text-anchor': 'end',
+            fill: '#111827', 'font-size': labelSize, 'font-weight': 800
         });
         lab.textContent = r.label;
         f.svg.appendChild(lab);
@@ -451,7 +508,7 @@ export function compareChart(container, { rows, labelA, labelB, height, fmt = fm
         [['a', 0, r.colorA], ['b', 1, r.colorB]].forEach(([key, k, col]) => {
             const v = Number(r[key]) || 0;
             const w = (v / max) * f.plotW;
-            const y = top + 8 + k * 19;
+            const y = top + (narrow ? 6 : 8) + k * (narrow ? 17 : 19);
 
             f.svg.appendChild(svgEl('rect', {
                 x: f.pad.l, y, width: f.plotW, height: 15, rx: 7.5, fill: '#f3f4f6'
@@ -463,8 +520,8 @@ export function compareChart(container, { rows, labelA, labelB, height, fmt = fm
             // Valeur écrite en bout de barre, dans la couleur de sa période :
             // plus besoin de deviner quelle barre est laquelle.
             const val = svgEl('text', {
-                x: f.pad.l + f.plotW + 10, y: y + 12,
-                fill: col, 'font-size': 12.5, 'font-weight': 900
+                x: f.pad.l + f.plotW + (narrow ? 6 : 10), y: y + 12,
+                fill: col, 'font-size': narrow ? 11.5 : 12.5, 'font-weight': 900
             });
             val.textContent = fmt(v);
             f.svg.appendChild(val);
@@ -518,6 +575,40 @@ export function funnel(container, steps, tip = null) {
         stepEl.addEventListener('pointermove', moveTip);
         stepEl.addEventListener('pointerleave', hideTip);
     });
+}
+
+/* --------------------------------------------------------------------------
+   Redimensionnement
+
+   Les graphiques sont dessinés pour la largeur disponible au moment du rendu.
+   Faire tourner un téléphone ou redimensionner une fenêtre change cette
+   largeur, il faut donc redessiner. On ne réagit qu'aux variations réelles
+   (plus de 40 pixels de large, ou un changement d'orientation) : sur mobile,
+   le simple défilement fait varier la hauteur de la fenêtre à cause de la
+   barre d'adresse, et redessiner à chaque pixel rendrait la page inutilisable.
+   -------------------------------------------------------------------------- */
+
+export function onResize(callback, delay = 220) {
+    let w = window.innerWidth;
+    let portrait = window.innerHeight >= window.innerWidth;
+    let timer = null;
+
+    const handler = () => {
+        const nw = window.innerWidth;
+        const np = window.innerHeight >= window.innerWidth;
+        if (Math.abs(nw - w) < 40 && np === portrait) return;
+        w = nw;
+        portrait = np;
+        clearTimeout(timer);
+        timer = setTimeout(callback, delay);
+    };
+
+    window.addEventListener('resize', handler);
+    window.addEventListener('orientationchange', handler);
+    return () => {
+        window.removeEventListener('resize', handler);
+        window.removeEventListener('orientationchange', handler);
+    };
 }
 
 /* --- Voile de chargement -------------------------------------------------- */

@@ -4,7 +4,10 @@
    dans Supabase (Authentication → Users → Add user → Auto Confirm User).
    ========================================================================== */
 
-import { signIn, getSession, CONFIG_OK, humanError } from './api.js';
+import {
+    signIn, getSession, CONFIG_OK, humanError, loadProfile,
+    myProfile, homePageFor
+} from './api.js';
 import { $, hideVeil } from './ui.js';
 
 const form = $('#login-form');
@@ -16,11 +19,25 @@ function showError(msg) {
     errorBox.classList.add('login-error--visible');
 }
 
-function nextPage() {
+/**
+ * Où envoyer la personne après sa connexion.
+ *
+ * La page demandée l'emporte, si elle est locale. Sinon, la destination dépend
+ * du profil : un administrateur qui ne prospecte pas n'a rien à faire sur la
+ * page de saisie, son point d'entrée est la vue d'équipe. Avant, tout le monde
+ * atterrissait sur « Ma journée », y compris ceux pour qui elle n'a aucun sens.
+ */
+async function nextPage(session) {
     const next = new URLSearchParams(location.search).get('next');
     // On n'accepte qu'une cible locale, jamais une URL absolue.
     if (next && /^[a-z0-9._-]+\.html(\?[^#]*)?$/i.test(next)) return `./${next}`;
-    return './index.html';
+
+    try {
+        await loadProfile(session);
+        return homePageFor(myProfile());
+    } catch {
+        return './index.html';
+    }
 }
 
 (async function init() {
@@ -33,7 +50,8 @@ function nextPage() {
     }
 
     // Déjà connecté : on court-circuite l'écran de login.
-    if (await getSession()) { location.replace(nextPage()); return; }
+    const existing = await getSession();
+    if (existing) { location.replace(await nextPage(existing)); return; }
 
     form.addEventListener('submit', async e => {
         e.preventDefault();
@@ -41,7 +59,7 @@ function nextPage() {
         submit.disabled = true;
         submit.textContent = 'Connexion…';
 
-        const { error } = await signIn($('#email').value, $('#password').value);
+        const { data, error } = await signIn($('#email').value, $('#password').value);
 
         if (error) {
             showError(humanError(error));
@@ -50,6 +68,6 @@ function nextPage() {
             $('#password').select();
             return;
         }
-        location.replace(nextPage());
+        location.replace(await nextPage(data?.session || await getSession()));
     });
 })();

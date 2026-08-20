@@ -45,7 +45,8 @@
                         <b>Create new user</b></li>
                     <li>Renseigner l'e-mail et un mot de passe provisoire</li>
                     <li>Cocher <b>Auto Confirm User</b>, sans quoi la personne ne pourra pas se connecter</li>
-                    <li>Valider : le profil apparaît automatiquement dans le tableau ci-dessous</li>
+                    <li>Valider : le profil apparaît automatiquement dans le tableau ci-dessous,
+                        en BDR et non administrateur, ce qui est le réglage le moins ouvert</li>
                 </ol>
                 <p class="info-panel-note">Le nom affiché est déduit de l'adresse e-mail. Il est
                    modifiable ici juste après.</p>
@@ -70,12 +71,13 @@
                     <tr>
                         <th>Nom affiché</th>
                         <th>E-mail</th>
-                        <th>Rôle</th>
+                        <th>Administrateur</th>
+                        <th>Prospecte</th>
                         <th>Démo</th>
                         <th>Actif</th>
                         <th>Jours saisis</th>
                         <th>Dernière saisie</th>
-                        <th>Actions</th>
+                        <th>Données</th>
                     </tr>
                 </thead>
                 <tbody id="admin-body"></tbody>
@@ -90,11 +92,18 @@
             </div>
             <div class="info-panel-body">
                 <dl class="def-list">
-                    <dt>Rôle administrateur</dt>
-                    <dd>Accès à la vue d'équipe, à cette page, au sélecteur d'utilisateur de la barre
-                        de navigation, et droit de corriger la saisie de n'importe qui. Un BDR ne voit
-                        strictement que ses propres lignes, y compris s'il interroge la base
-                        directement : la règle est posée dans PostgreSQL, pas dans le navigateur.</dd>
+                    <dt>Administrateur et Prospecte : deux réglages indépendants</dt>
+                    <dd>Ce sont deux questions distinctes. <b>Administrateur</b> donne accès à la vue
+                        d'équipe, à cette page, et le droit de corriger la saisie de n'importe qui.
+                        <b>Prospecte</b> dit si la personne saisit son activité, apparaît dans les
+                        classements et dispose des pages « Ma journée » et « Mes performances ».
+                        Un administrateur qui ne prospecte pas n'a donc ni page de saisie, ni score, et
+                        ne pollue aucun classement. Un manager qui prospecte aussi peut cumuler les
+                        deux. Un compte sans aucun des deux est un observateur : il consulte l'équipe
+                        et n'administre rien.</dd>
+                    <dd>Un BDR ne voit strictement que ses propres lignes, y compris s'il interroge la
+                        base directement avec la clé publique : la règle est posée dans PostgreSQL,
+                        pas dans le navigateur.</dd>
                     <dt>Compte de démonstration</dt>
                     <dd>Les chiffres du compte sont exclus par défaut de la vue d'équipe et de ses
                         classements. C'est le compte à utiliser pour montrer l'outil sans polluer les

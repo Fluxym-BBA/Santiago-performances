@@ -145,7 +145,23 @@ export async function getSession() {
 }
 
 /** Redirige vers login.html si aucune session valide. Renvoie la session. */
-export async function requireAuth() {
+/**
+ * Page d'accueil naturelle d'un profil.
+ * Un administrateur pur n'a rien à faire sur la page de saisie : sa porte
+ * d'entrée est la vue d'équipe.
+ */
+export function homePageFor(p) {
+    if (!p) return './login.html';
+    if (p.is_bdr) return './index.html';
+    if (p.is_admin) return './team.html';
+    return './team.html';
+}
+
+/**
+ * @param {object}  opts
+ * @param {'bdr'|'admin'|null} opts.needs  Aptitude exigée par la page.
+ */
+export async function requireAuth({ needs = null } = {}) {
     if (!CONFIG_OK) {
         document.body.innerHTML =
             '<div style="max-width:620px;margin:80px auto;padding:32px;font-family:Inter,sans-serif;' +
@@ -163,11 +179,26 @@ export async function requireAuth() {
         throw new Error('Non authentifié');
     }
     // Le profil est chargé ici, une fois, avant tout accès aux données : le rôle
-    // et le périmètre consulté doivent être connus avant la première requête.
+    // et le contexte consulté doivent être connus avant la première requête.
     await loadProfile(session);
     if (myProfile() && myProfile().is_active === false) {
         await signOut();
         throw new Error('Compte désactivé');
+    }
+
+    // Un profil qui n'a rien à faire sur cette page est redirigé vers la sienne
+    // plutôt que de tomber sur un écran vide ou un message d'erreur. Ce n'est
+    // pas une mesure de sécurité : celle-là est dans la base.
+    const me = myProfile();
+    // Exception nécessaire : un administrateur pur n'est pas commercial, mais il
+    // doit pouvoir ouvrir les pages d'un commercial lorsqu'il en consulte un.
+    // C'est le cas de `dashboard.html?u=...` ouvert depuis la vue d'équipe.
+    const asVisitor = me.is_admin && isViewingOther();
+    const wrong = (needs === 'bdr' && !me.is_bdr && !asVisitor)
+               || (needs === 'admin' && !me.is_admin);
+    if (wrong) {
+        location.replace(homePageFor(me));
+        throw new Error('Page non applicable à ce profil');
     }
     return session;
 }
@@ -197,85 +228,115 @@ export async function signOut() {
 let _me = null;        // mon profil
 let _viewed = null;    // profil consulté, le mien par défaut
 
-const VIEWED_KEY = 'bdr.viewedUser';
+/**
+ * Normalise un profil venant de la base.
+ *
+ * is_admin et is_bdr remplacent l'ancienne colonne role. Le repli sur role est
+ * volontaire : il rend l'ordre de déploiement indifférent, l'application
+ * fonctionnant avant comme après l'exécution de la migration.
+ */
+function normalize(p) {
+    if (!p) return p;
+    const isAdmin = p.is_admin ?? (p.role === 'admin');
+    return {
+        ...p,
+        is_admin: !!isAdmin,
+        is_bdr: p.is_bdr ?? (p.role ? p.role !== 'admin' : true),
+        is_demo: !!p.is_demo,
+        is_active: p.is_active !== false
+    };
+}
+
+/** Rôle écrit en clair, pour que personne n'ait à deviner ce qu'il est ici. */
+export function roleLabel(p) {
+    if (!p) return '';
+    if (p.is_admin && p.is_bdr) return 'Admin et BDR';
+    if (p.is_admin) return 'Administrateur';
+    if (p.is_bdr) return 'BDR';
+    return 'Observateur';
+}
 
 /**
- * Charge mon profil. Le profil est créé par un déclencheur à l'ouverture du
- * compte ; s'il manque malgré tout (compte créé avant la migration), on
- * retombe sur un profil minimal plutôt que de bloquer l'application.
+ * Charge mon profil, puis résout le contexte demandé par l'URL.
+ *
+ * Le paramètre `?u=<identifiant>` désigne l'utilisateur consulté. Faire porter
+ * ce contexte par l'URL et non par la session est un choix de sécurité autant
+ * que d'ergonomie : la page est rechargeable et partageable, on ne peut pas
+ * « rester » par inadvertance dans le compte d'un tiers, et un rafraîchissement
+ * ne réserve aucune surprise.
  */
 export async function loadProfile(session) {
     const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
+        .from('profiles').select('*')
         .eq('user_id', session.user.id)
         .maybeSingle();
     if (error) throw error;
 
-    _me = data || {
+    _me = normalize(data) || normalize({
         user_id: session.user.id,
         email: session.user.email,
         display_name: (session.user.email || '').split('@')[0],
-        role: 'bdr', is_demo: false, is_active: true
-    };
+        is_admin: false, is_bdr: true, is_demo: false, is_active: true
+    });
 
-    // Restauration d'un éventuel changement de périmètre, uniquement pour un
-    // administrateur : un profil rétrogradé ne doit pas conserver son accès.
-    let restored = null;
-    if (_me.role === 'admin') {
-        try {
-            const raw = sessionStorage.getItem(VIEWED_KEY);
-            if (raw) restored = JSON.parse(raw);
-        } catch { restored = null; }
+    _viewed = _me;
+
+    const wanted = new URLSearchParams(location.search).get('u');
+    if (wanted && wanted !== _me.user_id) {
+        if (!_me.is_admin) {
+            // Un non-administrateur qui bricole l'URL est renvoyé chez lui.
+            // La base refuserait de toute façon de livrer les données.
+            const url = new URL(location.href);
+            url.searchParams.delete('u');
+            location.replace(url.toString());
+            throw new Error('Accès refusé');
+        }
+        const { data: other } = await supabase
+            .from('profiles').select('*').eq('user_id', wanted).maybeSingle();
+        if (other) _viewed = normalize(other);
     }
-    _viewed = restored && restored.user_id ? restored : _me;
     return _me;
 }
 
 export function myProfile() { return _me; }
-export function isAdmin() { return !!_me && _me.role === 'admin'; }
+export function isAdmin() { return !!_me && _me.is_admin; }
+export function isBdr() { return !!_me && _me.is_bdr; }
 
 /** Profil dont on regarde les données. Jamais nul après loadProfile(). */
-export function viewedUser() { return _viewed || _me; }
+export function viewedProfile() { return _viewed || _me; }
 
-/** Vrai quand on consulte quelqu'un d'autre : le front doit alors le dire clairement. */
+/** Vrai quand on consulte quelqu'un d'autre : l'écran doit alors le dire. */
 export function isViewingOther() {
     return !!_me && !!_viewed && _viewed.user_id !== _me.user_id;
 }
 
-export function setViewedUser(profile) {
-    if (!isAdmin() && profile.user_id !== _me.user_id) {
-        throw new Error('Changement d\'utilisateur réservé aux administrateurs');
-    }
-    _viewed = profile;
-    try {
-        if (profile.user_id === _me.user_id) sessionStorage.removeItem(VIEWED_KEY);
-        else sessionStorage.setItem(VIEWED_KEY, JSON.stringify(profile));
-    } catch { /* navigation privée : le périmètre ne survivra pas au rechargement */ }
-    return _viewed;
+/** Lien vers une page dans le contexte d'un utilisateur donné. */
+export function linkFor(page, userId = null, extra = {}) {
+    const url = new URL(page, location.href);
+    if (userId && userId !== _me?.user_id) url.searchParams.set('u', userId);
+    Object.entries(extra).forEach(([k, v]) => { if (v != null) url.searchParams.set(k, v); });
+    return url.pathname.split('/').pop() + url.search;
 }
 
 /** Identifiant ciblé par les lectures et les écritures. */
 function target() {
-    const v = viewedUser();
+    const v = viewedProfile();
     if (!v) throw new Error('Profil non chargé : appeler loadProfile() d\'abord');
     return v.user_id;
 }
 
 /**
- * Profils visibles, triés : les comptes actifs d'abord, les comptes de
- * démonstration en dernier. La RLS fait le tri des droits : un BDR ne récupère
- * ici que sa propre ligne, la liste n'a donc pas à être protégée côté front.
+ * Profils visibles. La RLS fait le tri des droits : un BDR ne récupère ici que
+ * sa propre ligne, la liste n'a donc pas à être protégée côté front.
  */
 export async function listProfiles() {
     const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
+        .from('profiles').select('*')
         .order('is_active', { ascending: false })
         .order('is_demo', { ascending: true })
         .order('display_name', { ascending: true });
     if (error) throw error;
-    return data || [];
+    return (data || []).map(normalize);
 }
 
 /** Modification d'un profil par un administrateur. Les garde-fous sont côté base. */
@@ -283,12 +344,13 @@ export async function adminUpdateProfile(userId, patch) {
     const { data, error } = await supabase.rpc('admin_update_profile', {
         p_user_id: userId,
         p_display_name: patch.display_name ?? null,
-        p_role: patch.role ?? null,
+        p_is_admin: patch.is_admin ?? null,
+        p_is_bdr: patch.is_bdr ?? null,
         p_is_demo: patch.is_demo ?? null,
         p_is_active: patch.is_active ?? null
     });
     if (error) throw error;
-    return Array.isArray(data) ? data[0] : data;
+    return normalize(Array.isArray(data) ? data[0] : data);
 }
 
 /** Effacement des données d'activité d'un compte, sans toucher au compte. */
@@ -390,13 +452,17 @@ export async function bump(metricKey, delta, iso) {
  * Les comptes de démonstration sont exclus par défaut : sans cela, un jeu de
  * données fabriqué pour une présentation viendrait fausser tous les classements.
  */
-export async function fetchTeamRange(fromIso, toIso, { includeDemo = false, includeInactive = false } = {}) {
+export async function fetchTeamRange(fromIso, toIso,
+    { includeDemo = false, includeInactive = false, onlyBdr = true } = {}) {
     let q = supabase
         .from('v_team_daily')
         .select('*')
         .gte('activity_date', fromIso)
         .lte('activity_date', toIso)
         .order('activity_date', { ascending: true });
+    // Un administrateur pur ne prospecte pas : le faire figurer dans un
+    // classement avec un score de zéro n'aurait aucun sens.
+    if (onlyBdr) q = q.eq('is_bdr', true);
     if (!includeDemo) q = q.eq('is_demo', false);
     if (!includeInactive) q = q.eq('is_active', true);
     const { data, error } = await q;

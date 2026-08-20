@@ -11,15 +11,17 @@ import {
     formatLong, isWeekend, startOfWeek, endOfWeek, startOfMonth,
     endOfMonth, addMonthsISO, startOfQuarter, endOfQuarter, periodLength,
     previousPeriod, samePeriodLastYear, periodLabel, periodLabelShort, minISO,
-    maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS
+    maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS,
+    isViewingOther, viewedProfile, isAdmin, linkFor
 } from './api.js';
 import {
     num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
     autoGran, granWord
 } from './analytics.js';
 import {
-    $, toast, fmtInt, fmtDec, delta, escapeHtml, hideVeil,
-    lineChart, barChart, compareChart, funnel, legendHtml
+    $, toast, fmtInt, fmtDec, delta,
+    escapeHtml, hideVeil, lineChart, barChart, compareChart,
+    funnel, legendHtml, onResize
 } from './ui.js';
 import { renderNav } from './nav.js';
 
@@ -159,6 +161,53 @@ function currentStreak() {
         iso = addDaysISO(iso, -1);
     }
     return n;
+}
+
+/* --------------------------------------------------------------------------
+   Identité consultée
+
+   Quand un administrateur ouvre la fiche de quelqu'un, la page doit dire de
+   qui il s'agit dès le premier coup d'oeil, et rester en lecture seule. La
+   correction reste possible mais demande un geste explicite : c'est ce qui
+   remplace l'ancien sélecteur permanent, où l'on pouvait écrire dans le
+   mauvais compte sans s'en rendre compte.
+   -------------------------------------------------------------------------- */
+
+/** Adapte le titre de la page au profil consulté. */
+function renderIdentity() {
+    if (!isViewingOther()) return;
+    const v = viewedProfile();
+    const name = v.display_name || v.email || 'cet utilisateur';
+
+    const badge = document.querySelector('.hero-badge');
+    const title = document.querySelector('.page-hero h1');
+    const sub = document.querySelector('.page-hero p');
+    if (badge) badge.textContent = 'Fiche d\'un BDR';
+    if (title) title.innerHTML = `${escapeHtml(name)}, <em>en détail</em>`;
+    if (sub) {
+        sub.innerHTML = `Vous consultez les performances de <b>${escapeHtml(name)}</b>`
+            + `${v.email ? ` (${escapeHtml(v.email)})` : ''}, en lecture seule. `
+            + `Les mêmes périodes, les mêmes graphiques et les mêmes info-bulles que sur votre propre page. `
+            + `<a href="./team.html">Retour à l'équipe</a>`;
+    }
+    document.title = `${name} | Cockpit BDR — Fluxym`;
+}
+
+/**
+ * Lien de modification d'une journée.
+ * Sur sa propre fiche, c'est un lien direct. Sur celle de quelqu'un d'autre,
+ * c'est une correction : le mot le dit, et la page de saisie demandera
+ * confirmation avant d'écrire.
+ */
+function editLink(iso) {
+    if (!isViewingOther()) {
+        return `<a class="link-edit" href="./index.html?date=${iso}">modifier</a>`;
+    }
+    if (!isAdmin()) return '<span class="td-muted">—</span>';
+    const v = viewedProfile();
+    return `<a class="link-edit link-edit--fix"
+               href="${linkFor('./index.html', v.user_id, { date: iso })}"
+               title="Corriger cette journée sur le compte de ${escapeHtml(v.display_name || v.email)}">corriger</a>`;
 }
 
 /* --------------------------------------------------------------------------
@@ -1103,21 +1152,25 @@ function renderTable(aRows) {
         const cls = [];
         if (r.activity_date === T) cls.push('is-today');
         if (score(r) === best) cls.push('is-best');
+        // data-th porte l'intitulé de colonne : sous 760 pixels le tableau se
+        // transforme en cartes empilées et c'est cet attribut qui sert
+        // d'étiquette. Onze colonnes ne se lisent pas sur un téléphone, et
+        // aucun défilement horizontal n'y changerait rien.
         return `
         <tr class="${cls.join(' ')}">
-            <td>${escapeHtml(formatLong(r.activity_date).replace(/ \d{4}$/, ''))}
+            <td data-th="Jour" class="td-day">${escapeHtml(formatLong(r.activity_date).replace(/ \d{4}$/, ''))}
                 ${r.notes ? `<span title="${escapeHtml(r.notes)}" style="cursor:help"> 📝</span>` : ''}
                 ${r.is_correction ? '<b class="tag tag--fix" title="Dernière écriture faite par un administrateur, pas par le titulaire du compte">corrigé</b>' : ''}</td>
-            <td>${fmtInt(num(r, 'calls_made'))}</td>
-            <td>${fmtInt(num(r, 'calls_connected'))}</td>
-            <td><b>${fmtInt(num(r, 'meetings_booked'))}</b></td>
-            <td>${fmtInt(num(r, 'emails_sent'))}</td>
-            <td>${fmtInt(num(r, 'companies_created'))}</td>
-            <td>${fmtInt(num(r, 'contacts_created'))}</td>
-            <td class="${r.connect_rate == null ? 'td-muted' : ''}">${r.connect_rate == null ? '–' : fmtDec(r.connect_rate) + ' %'}</td>
-            <td class="${r.meeting_rate == null ? 'td-muted' : ''}">${r.meeting_rate == null ? '–' : fmtDec(r.meeting_rate) + ' %'}</td>
-            <td><b>${fmtInt(score(r))}</b></td>
-            <td><a class="link-edit" href="./index.html?date=${r.activity_date}">modifier</a></td>
+            <td data-th="Appels">${fmtInt(num(r, 'calls_made'))}</td>
+            <td data-th="Aboutis">${fmtInt(num(r, 'calls_connected'))}</td>
+            <td data-th="RDV"><b>${fmtInt(num(r, 'meetings_booked'))}</b></td>
+            <td data-th="E-mails">${fmtInt(num(r, 'emails_sent'))}</td>
+            <td data-th="Entreprises">${fmtInt(num(r, 'companies_created'))}</td>
+            <td data-th="Contacts">${fmtInt(num(r, 'contacts_created'))}</td>
+            <td data-th="Taux aboutis" class="${r.connect_rate == null ? 'td-muted' : ''}">${r.connect_rate == null ? '–' : fmtDec(r.connect_rate) + ' %'}</td>
+            <td data-th="Taux RDV" class="${r.meeting_rate == null ? 'td-muted' : ''}">${r.meeting_rate == null ? '–' : fmtDec(r.meeting_rate) + ' %'}</td>
+            <td data-th="Score" class="td-score"><b>${fmtInt(score(r))}</b></td>
+            <td data-th="" class="td-action">${editLink(r.activity_date)}</td>
         </tr>`;
     }).join('');
 }
@@ -1198,8 +1251,9 @@ async function refresh() {
    -------------------------------------------------------------------------- */
 
 (async function init() {
-    const session = await requireAuth();
-    renderNav(session);
+    const session = await requireAuth({ needs: 'bdr' });
+    renderNav();
+    renderIdentity();
 
     // Un lien ?date=... (venu de la saisie) ouvre ce jour comparé à la veille.
     const wanted = new URLSearchParams(location.search).get('date');
@@ -1272,6 +1326,11 @@ async function refresh() {
     bindLocal('#modal-from'); bindLocal('#modal-to');
 
     $('#btn-export').addEventListener('click', exportCsv);
+
+    // Rotation du téléphone ou redimensionnement : les graphiques sont dessinés
+    // pour une largeur donnée, il faut les refaire. Seuls les graphiques sont
+    // reconstruits, pas les données, donc aucune requête n'est relancée.
+    onResize(() => { renderCharts(); if (openKey) paintModal(); });
 
     await refresh();
     hideVeil();

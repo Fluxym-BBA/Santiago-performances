@@ -284,6 +284,88 @@ Function. Une Edge Function imposerait un déploiement par CLI, ce qui casserait
 la règle « aucun build ». L'écran Comptes explique donc la marche à suivre dans
 Supabase en quatre étapes plutôt que de promettre un bouton qui échouerait.
 
+## 6 quater. Rôles à deux axes, contexte par URL, responsive (v6)
+
+### Le modèle de rôles
+
+`role` texte a disparu, remplacé par `is_admin` et `is_bdr`, deux booléens
+indépendants. Motif : un seul axe forçait un administrateur à être traité comme
+un commercial, avec une page de saisie qui n'avait pas de sens et un score de
+zéro dans les classements.
+
+`is_admin()` a gardé exactement son nom et sa signature, elle lit simplement la
+nouvelle colonne. C'est ce qui a permis de ne toucher **aucune** règle RLS : tout
+l'intérêt d'être passé par une fonction plutôt que d'écrire `role = 'admin'`
+dans chaque policy. Ne pas revenir en arrière là-dessus.
+
+`normalize()` dans `api.js` accepte encore l'ancienne colonne `role` en repli.
+Cela rend l'ordre de déploiement indifférent, l'application fonctionnant avant
+comme après la migration. Ce repli peut être retiré une fois la migration passée
+partout, mais il ne coûte rien.
+
+Conséquences en cascade, à ne pas oublier si un écran est ajouté :
+- `fetchTeamRange` filtre `is_bdr = true` par défaut ;
+- `team.js` exclut les non-commerciaux de la liste des personnes suivies ;
+- `requireAuth({ needs })` redirige vers `homePageFor()` ;
+- la navigation est construite depuis le profil, pas écrite en dur.
+
+### Le contexte est dans l'URL, plus jamais dans la session
+
+`sessionStorage` et `setViewedUser()` ont disparu. Le contexte vient du
+paramètre `?u=<identifiant>`, résolu une seule fois par `loadProfile()`.
+
+C'était un vrai défaut de conception : un état caché décidait dans quel compte
+on écrivait, et le bandeau n'était qu'un pansement. Avec l'URL, la page est
+rechargeable et partageable, il n'y a rien à « remettre à zéro », et un
+non-administrateur qui bricole le paramètre est redirigé.
+
+Exception à connaître dans `requireAuth` : `needs: 'bdr'` est satisfait si
+l'appelant est administrateur **et** en train de consulter quelqu'un. Sans cette
+exception, un administrateur pur ne pourrait pas ouvrir `dashboard.html?u=...`,
+alors que c'est précisément le chemin prévu depuis la vue d'équipe.
+
+`linkFor(page, userId, extra)` construit les liens : il omet le paramètre quand
+la cible est soi-même, ce qui évite des URL inutilement bavardes.
+
+L'écriture pour autrui demande une confirmation nommée, une fois par session de
+travail (`allowWrite()` dans `saisie.js`). Redemander à chaque bouton rendrait
+la correction d'une journée insupportable, ne rien demander ramènerait le risque
+de l'ancien sélecteur.
+
+### La barre de navigation
+
+Trois paliers dans `css/app.css`, un seul jeu d'éléments dans `nav.js`. La règle
+non négociable : **rien n'est jamais tronqué**. Concrètement, `white-space:
+nowrap` sur tous les libellés, aucun `text-overflow: ellipsis` dans le fichier,
+des libellés déclinés en trois longueurs (`label`, `short`, `mini`), et un nom
+raccourci volontairement en « Prénom N. » par `shortNameOf()`.
+
+Si une section est ajoutée, vérifier que trois onglets tiennent encore à 1024
+pixels. Au-delà de trois, la barre doit passer en mode réduit plus tôt, pas
+comprimer.
+
+### Le responsive du contenu
+
+Quatre points, tous dans `ui.js` et `css/app.css` :
+
+1. `baseFrame` cale la largeur du repère SVG sur celle du conteneur
+   (`availWidth`). Avant, le repère était figé à 760 : sur 375 pixels, tout
+   était divisé par deux, textes compris. Ne jamais revenir à une largeur fixe.
+2. La hauteur est bornée à 62 % de la hauteur de fenêtre, sauf `clampHeight:
+   false`, utilisé par `compareChart` dont la hauteur est une somme de lignes :
+   la rogner couperait la dernière ligne.
+3. Les marges sont resserrées sur petit écran **uniquement si la marge gauche
+   sert à un axe numérique** (`pad.l < 60`). Une marge large porte des libellés
+   de texte, la réduire les tronquerait.
+4. `onResize` ne réagit qu'aux variations réelles, plus de 40 pixels de large ou
+   un changement d'orientation. Sur mobile, le défilement fait varier la hauteur
+   de la fenêtre à cause de la barre d'adresse : redessiner à chaque pixel
+   rendrait la page inutilisable.
+
+Les tableaux deviennent des cartes sous 760 pixels grâce à l'attribut `data-th`
+porté par chaque cellule. **Toute nouvelle colonne doit porter son `data-th`**,
+sinon elle apparaîtra sans étiquette sur téléphone.
+
 ## 7. Pièges connus
 
 - **Dates** : toujours passer par `toISO()` / `fromISO()` de `api.js`. Un

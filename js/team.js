@@ -13,7 +13,7 @@
    ========================================================================== */
 
 import {
-    requireAuth, isAdmin, myProfile, viewedUser, setViewedUser, listProfiles,
+    requireAuth, isAdmin, myProfile, linkFor, listProfiles,
     fetchTeamRange, todayISO, addDaysISO, formatLong, formatShort, periodLength,
     startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter,
     periodLabel, periodLabelShort, humanError, METRICS, SCORE_WEIGHTS
@@ -21,12 +21,10 @@ import {
 import {
     num, score, isActive, agg, valOf, bucketize, autoGran, granWord, rowsForRange
 } from './analytics.js';
+import { renderNav } from './nav.js';
 import {
-    renderNav
-} from './nav.js';
-import {
-    escapeHtml, fmtInt, fmtDec, toast, hideVeil, lineChart, barChart, compareChart,
-    legendHtml
+    escapeHtml, fmtInt, fmtDec, toast, hideVeil,
+    lineChart, barChart, compareChart, legendHtml, onResize
 } from './ui.js';
 
 /** État vide, écrit ici : ui.js ne l'expose que pour ses propres graphiques. */
@@ -85,8 +83,12 @@ async function load() {
     // sont conservés avec un score nul : un BDR qui n'a rien saisi est une
     // information, le faire disparaître du classement serait trompeur.
     const map = new Map();
+    // Seuls les commerciaux entrent dans un classement : un administrateur pur
+    // ne prospecte pas, l'y faire figurer avec un score de zéro n'a aucun sens.
     allProfiles
-        .filter(p => (state.demo || !p.is_demo) && (state.inactive || p.is_active))
+        .filter(p => p.is_bdr
+            && (state.demo || !p.is_demo)
+            && (state.inactive || p.is_active))
         .forEach(p => map.set(p.user_id, { profile: p, byDate: new Map() }));
 
     rows.forEach(r => {
@@ -94,7 +96,8 @@ async function load() {
             map.set(r.user_id, {
                 profile: {
                     user_id: r.user_id, display_name: r.display_name, email: r.email,
-                    role: r.role, is_demo: r.is_demo, is_active: r.is_active
+                    is_admin: r.is_admin, is_bdr: r.is_bdr,
+                    is_demo: r.is_demo, is_active: r.is_active
                 },
                 byDate: new Map()
             });
@@ -171,43 +174,35 @@ function renderRanking() {
 
     body.innerHTML = people.map(p => {
         const a = p.a;
-        const isMe = me && p.profile.user_id === me.user_id;
+        const isMe = me && p.profile.user_id === me.user_id;   // vrai seulement pour un manager qui prospecte aussi
         const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
         return `
         <tr${isMe ? ' class="row-me"' : ''}>
-            <td class="rank-cell">${medal}</td>
-            <td>
+            <td data-th="Rang" class="rank-cell">${medal}</td>
+            <td data-th="BDR" class="td-day">
                 <span class="bdr-chip">
                     <span class="bdr-dot" style="background:${p.color}"></span>
                     ${escapeHtml(nameOf(p))}
                     ${p.profile.is_demo ? '<b class="tag tag--demo">démo</b>' : ''}
                     ${p.profile.is_active ? '' : '<b class="tag">inactif</b>'}
-                    ${p.profile.role === 'admin' ? '<b class="tag tag--admin">admin</b>' : ''}
+                    ${p.profile.is_admin ? '<b class="tag tag--admin">admin</b>' : ''}
                 </span>
             </td>
-            <td>${f(valOf(a, 'calls_made', state.mode))}</td>
-            <td>${f(valOf(a, 'calls_connected', state.mode))}</td>
-            <td>${f(valOf(a, 'meetings_booked', state.mode))}</td>
-            <td>${f(valOf(a, 'emails_sent', state.mode))}</td>
-            <td>${f(valOf(a, 'companies_created', state.mode))}</td>
-            <td>${f(valOf(a, 'contacts_created', state.mode))}</td>
-            <td>${a.connect_rate == null ? '–' : fmtDec(a.connect_rate) + ' %'}</td>
-            <td>${a.meeting_rate == null ? '–' : fmtDec(a.meeting_rate) + ' %'}</td>
-            <td class="td-muted">${fmtInt(a.activeDays)} / ${fmtInt(a.days)}</td>
-            <td><b>${f(valOf(a, 'productivity_score', state.mode))}</b></td>
-            <td>${isMe ? '<span class="td-muted">vous</span>'
-                       : `<button class="chip chip--sm" type="button" data-open="${p.profile.user_id}">ouvrir →</button>`}</td>
+            <td data-th="Appels">${f(valOf(a, 'calls_made', state.mode))}</td>
+            <td data-th="Aboutis">${f(valOf(a, 'calls_connected', state.mode))}</td>
+            <td data-th="RDV">${f(valOf(a, 'meetings_booked', state.mode))}</td>
+            <td data-th="E-mails">${f(valOf(a, 'emails_sent', state.mode))}</td>
+            <td data-th="Entreprises">${f(valOf(a, 'companies_created', state.mode))}</td>
+            <td data-th="Contacts">${f(valOf(a, 'contacts_created', state.mode))}</td>
+            <td data-th="Taux aboutis">${a.connect_rate == null ? '–' : fmtDec(a.connect_rate) + ' %'}</td>
+            <td data-th="Taux RDV">${a.meeting_rate == null ? '–' : fmtDec(a.meeting_rate) + ' %'}</td>
+            <td data-th="Jours saisis" class="td-muted">${fmtInt(a.activeDays)} / ${fmtInt(a.days)}</td>
+            <td data-th="Score" class="td-score"><b>${f(valOf(a, 'productivity_score', state.mode))}</b></td>
+            <td data-th="" class="td-action"><a class="chip chip--sm" href="${linkFor('./dashboard.html', p.profile.user_id)}"
+                   title="Voir la fiche de ${escapeHtml(nameOf(p))}">ouvrir →</a></td>
         </tr>`;
     }).join('');
 
-    body.querySelectorAll('[data-open]').forEach(b => {
-        b.addEventListener('click', () => {
-            const prof = allProfiles.find(x => x.user_id === b.dataset.open);
-            if (!prof) return;
-            setViewedUser(prof);
-            location.href = './dashboard.html';
-        });
-    });
 }
 
 /* --------------------------------------------------------------------------
@@ -612,10 +607,10 @@ function renderSummary() {
 }
 
 function exportCsv() {
-    const head = ['Rang', 'BDR', 'E-mail', 'Role', 'Demo', 'Actif', 'Jours saisis', 'Jours periode',
+    const head = ['Rang', 'BDR', 'E-mail', 'Admin', 'Demo', 'Actif', 'Jours saisis', 'Jours periode',
         ...METRICS.map(m => m.short), 'Taux aboutis %', 'Taux RDV %', 'Score'];
     const lines = people.map(p => [
-        p.rank, nameOf(p), p.profile.email || '', p.profile.role,
+        p.rank, nameOf(p), p.profile.email || '', p.profile.is_admin ? 'oui' : 'non',
         p.profile.is_demo ? 'oui' : 'non', p.profile.is_active ? 'oui' : 'non',
         p.a.activeDays, p.a.days,
         ...METRICS.map(m => p.a[m.key]),
@@ -737,8 +732,8 @@ function wire() {
 
 (async function main() {
     try {
-        const session = await requireAuth();
-        renderNav(session);
+        await requireAuth({ needs: 'admin' });
+        renderNav();
 
         // Garde-fou côté écran. La vraie barrière est la RLS : sans le rôle
         // admin, la base ne renverrait de toute façon que ses propres lignes.
@@ -755,6 +750,7 @@ function wire() {
 
         allProfiles = await listProfiles();
         wire();
+        onResize(() => { renderCharts(); renderDuel(); });
         await refresh();
         hideVeil();
     } catch (e) {

@@ -162,19 +162,27 @@ Une base par utilisateur voudrait dire autant de projets Supabase, autant de
 jeux de clés, autant de migrations à rejouer à chaque évolution, et surtout
 aucune requête possible entre deux personnes, donc aucune vue d'équipe.
 
-### Deux rôles
+### Deux axes, pas un rôle unique
 
-| | BDR | Administrateur |
+Administrer et prospecter sont deux questions distinctes, donc deux colonnes
+indépendantes dans `profiles` :
+
+- **`is_admin`** : administre les comptes et consulte tout le monde
+- **`is_bdr`** : saisit son activité et apparaît dans les classements
+
+| | `is_bdr` vrai | `is_bdr` faux |
 |---|---|---|
-| Ses propres données | lecture et écriture | lecture et écriture |
-| Données des autres | **rien du tout** | lecture, et correction |
-| Vue d'équipe | non | oui |
-| Gestion des comptes | non | oui |
-| Sélecteur d'utilisateur dans la barre de navigation | non | oui |
+| **`is_admin` vrai** | Manager qui prospecte aussi : accès à tout | Administrateur pur : ni saisie, ni score, ni classement |
+| **`is_admin` faux** | BDR : sa saisie et ses performances | Observateur : consulte l'équipe, n'administre rien |
 
-Le rôle est stocké dans la table `profiles`. Il n'est **pas** dans
-`user_metadata` : cette partie du jeton est modifiable par l'utilisateur
-lui-même, n'importe qui pourrait se déclarer administrateur.
+Un administrateur pur n'a donc ni « Ma journée » ni « Mes performances » dans sa
+navigation, sa page d'accueil est la vue d'équipe, et il est absent de tous les
+classements. Avant, il y figurait avec un score de zéro, ce qui n'avait aucun
+sens.
+
+Ces deux colonnes ne sont **pas** dans `user_metadata` : cette partie du jeton
+est modifiable par l'utilisateur lui-même, n'importe qui pourrait se déclarer
+administrateur.
 
 ### Mise en service
 
@@ -207,17 +215,33 @@ aucun e-mail n'est envoyé par l'application, l'adresse n'a même pas besoin
 d'exister, mais un alias reste préférable si la récupération de mot de passe est
 activée un jour.
 
-### Corriger la saisie de quelqu'un
+### Consulter et corriger quelqu'un : le contexte est dans l'URL
 
-Un administrateur choisit la personne dans le sélecteur de la barre de
-navigation, puis saisit normalement. Deux garde-fous :
+Il n'y a **pas** de sélecteur d'utilisateur permanent. Le chemin est :
 
-- un **bandeau permanent** en haut de page, orange sur la page de saisie, rappelle
-  dans quel compte on écrit ;
-- la journée modifiée porte la mention **corrigé** dans le tableau
-  d'historique, parce que la base enregistre l'auteur de chaque écriture dans
-  `updated_by`. Une correction ne peut donc pas passer pour une saisie du
-  titulaire.
+**Équipe → clic sur une personne → `dashboard.html?u=<identifiant>`**
+
+On obtient sa fiche complète, mêmes périodes et mêmes graphiques, **en lecture
+seule**. Pour corriger une journée, il faut cliquer « corriger » dans son
+historique, ce qui ouvre `index.html?u=<identifiant>&date=<jour>` et demande une
+confirmation nommée avant la première écriture.
+
+Faire porter le contexte par l'URL plutôt que par la session est un choix de
+sécurité autant que d'ergonomie : la page est rechargeable et partageable, on ne
+peut pas « rester » par inadvertance dans le compte d'un tiers, et un simple
+retour en arrière suffit à sortir. Un non-administrateur qui bricole le
+paramètre est renvoyé chez lui, et la base refuserait de toute façon de livrer
+les données.
+
+Trois garde-fous en plus :
+
+- l'en-tête de la page **prend le nom de la personne consultée**, et le titre de
+  l'onglet aussi ;
+- un bandeau permanent, **orange** en mode correction, rappelle dans quel compte
+  on écrit ;
+- la journée modifiée porte la mention **corrigé** dans l'historique, parce que
+  la base enregistre l'auteur de chaque écriture dans `updated_by`. Une
+  correction ne peut pas passer pour une saisie du titulaire.
 
 ### Ce que la vue d'équipe ajoute
 
@@ -226,6 +250,57 @@ couleur désigne une personne** et non une période, un duel de deux BDR face à
 face qui reprend le code bleu et violet, et un export CSV. Au-delà de huit
 personnes, seules les huit premières sont tracées : le classement reste complet,
 mais huit courbes est la limite de lisibilité.
+
+## L'interface sur téléphone et sur ordinateur
+
+### La barre de navigation
+
+Trois paliers, un seul jeu d'éléments, et une règle tenue partout : **aucun
+texte n'est jamais tronqué**. Les libellés raccourcissent par palier, ce qui ne
+tient pas descend dans le menu du compte, et rien ne finit par des points de
+suspension.
+
+| Largeur | Disposition |
+|---|---|
+| À partir de 1024 px | Logo, onglets avec libellé complet, menu du compte à droite |
+| 640 à 1023 px, dont le **téléphone en paysage** | Une seule barre, libellés courts, pas de barre en bas |
+| Sous 640 px | Logo et avatar en haut, barre d'onglets fixée en bas, au pouce |
+
+Le palier du milieu existe pour le mode paysage : il n'y reste qu'environ 350
+pixels de hauteur utile, une barre en haut **et** une barre en bas en
+mangeraient un tiers.
+
+La navigation n'affiche que ce qui sert au profil connecté, soit deux ou trois
+onglets au maximum. C'est ce qui règle le problème de place à la source, plutôt
+que de comprimer sept éléments sur une ligne.
+
+Le **menu du compte**, à droite, porte le nom complet, le rôle écrit en clair,
+les sections secondaires et la déconnexion. Le nom affiché dans la barre est
+volontairement raccourci en « Prénom N. », qui tient toujours, au lieu d'être
+coupé par le navigateur.
+
+### Le reste de l'interface
+
+Refaire la barre ne suffit pas, ce sont les tableaux et les boutons qui décident
+si l'outil est utilisable au téléphone :
+
+- **Les tableaux deviennent des cartes** sous 760 px. Onze à treize colonnes ne
+  se lisent pas sur un téléphone, et le défilement horizontal n'est pas une
+  réponse : on ne compare rien quand il faut faire glisser. Chaque ligne devient
+  une carte, et l'intitulé de colonne redevient une étiquette en regard de sa
+  valeur.
+- **Les graphiques se dimensionnent sur la place disponible.** Le repère était
+  figé à 760 unités de large : sur un téléphone de 375 pixels, tout était mis à
+  l'échelle 0,49 et un texte de 11 pixels s'affichait à 5. Désormais une unité
+  vaut un pixel, les tailles de texte sont respectées, le nombre d'étiquettes en
+  abscisse s'ajuste, et la hauteur est bornée par celle de la fenêtre.
+- **Les boutons de saisie passent à 48 pixels**, la taille recommandée pour être
+  touchés sans viser. C'est l'écran le plus utilisé du projet, et probablement au
+  téléphone en fin de journée.
+- **Les info-bulles s'ancrent en bas de l'écran** au doigt, au lieu de suivre le
+  toucher : une bulle qui suit le doigt est cachée par le doigt.
+- Une rotation d'écran ou un redimensionnement **redessine les graphiques**, sans
+  relancer aucune requête.
 
 ## Le survol des graphiques
 
