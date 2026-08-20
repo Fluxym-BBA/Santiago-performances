@@ -126,3 +126,7 @@ transactions annulées, ce qui est plus sûr qu'un test à l'écran.
 
 Le plan Supabase est le plan Free. La politique de sauvegarde n'a pas été
 vérifiée : ne pas promettre de retour arrière après une migration.
+
+| Écran des comptes, niveaux | ✅ En ligne | Liste déroulante à quatre niveaux, verrouillage aligné sur admin_set_level | 20/08 |
+| Création de compte, niveau | ✅ En ligne | Choix du niveau au lieu de la case administrateur ; « responsable » appliqué en second appel | 20/08 |
+| Reste à faire, rôles lot 3 | ⏳ À faire | L'Edge Function ignore le niveau du demandeur : un administrateur pourrait créer son égal en l'appelant directement | 20/08 |
