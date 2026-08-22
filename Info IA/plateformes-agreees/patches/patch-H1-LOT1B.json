@@ -1,0 +1,219 @@
+{
+ "_patch": {
+  "id": "H1-LOT1B",
+  "chantier": "H1 — poids économique et rattachement capitalistique",
+  "societe": "Lot 1B : YOOZ PDP (via YOOZ), ITESOFT (liaison), AGICAP, SPENDESK, TENOR, SYMTRAX",
+  "auteur": "RFE_WebSite",
+  "dateReleve": "2026-08-22",
+  "nbPlateformes": 6,
+  "note": "Second lot du chantier H1. DECOUVERTE PRINCIPALE : ITESOFT et YOOZ PDP, deux immatriculations du référentiel, sont domiciliées au même site du Séquoia, Parc d'Andron, 30470 Aimargues, et Didier Charpentier préside à la fois le conseil d'ITESOFT et la holding CDML qui contrôle YOOZ. La chaîne capitalistique CDML vers ITESOFT n'étant pas publiée, la liaison est qualifiée par un type nouveau, `controle_personnel_commun`, distinct d'un groupe : règle 33. NOUVELLE LECTURE DE YOOZ : le poids économique est porté par YOOZ (SIREN 808386148), 47,3 M€ de chiffre d'affaires en 2024 contre 36,9 M€ en 2023 (+28,2 %), résultat net de +2,53 M€ après −79,1 k€, 328 salariés — la plus forte croissance du lot, invisible si l'on ne lit que l'entité agréée. DEUX ANGLES MORTS COMPTABLES : AGICAP n'a aucun dépôt exploitable depuis l'exercice 2019 et SPENDESK depuis 2020, soit six et cinq exercices manquants ; les chiffres publiés le sont avec leur exercice et jamais comme données courantes (règle 34). DEUX SOCIETES EN COMPRESSION DE MARGE : TENOR voit sa marge nette passer de 7,3 % à 1,5 % en quatre ans malgré une croissance continue, et SYMTRAX voit son EBITDA s'écraser à 0,4 % du chiffre d'affaires avec un export qui tombe de 1,51 M€ à zéro. NON TROUVE : chaîne capitalistique CDML vers ITESOFT ; actionnariat d'AGICAP, de SPENDESK et de TENOR ; périmètre de la holding GSPI ; explication de la disparition de l'export chez SYMTRAX ; comptes d'AGICAP et de SPENDESK postérieurs à 2019 et 2020."
+ },
+ "plateformes": [
+  {
+   "nom": "YOOZ PDP",
+   "immatriculationsLiees": {
+    "groupe": "Sphère Charpentier — Aimargues (contrôle personnel commun, chaîne capitalistique non établie)",
+    "entrees": [
+     {
+      "nom": "ITESOFT",
+      "siren": "330265323"
+     },
+     {
+      "nom": "YOOZ PDP",
+      "siren": "949747133"
+     }
+    ],
+    "type": "controle_personnel_commun",
+    "lecture": "Trois faits établis au registre. (1) Les deux entités immatriculées sont domiciliées au même site : ITESOFT au Séquoia, chemin Parc d'Andron, 30470 Aimargues, et YOOZ PDP au Séquoia, Parc d'Andron, à la même adresse. (2) Didier Charpentier préside le conseil d'administration d'ITESOFT depuis le 28/12/2016 et préside la holding CDML (SIREN 435005756, capital 9,13 M€) depuis le 23/01/2019, elle-même domiciliée à cette adresse. (3) CDML est président de YOOZ (SIREN 808386148) depuis le 22/09/2016, YOOZ étant elle-même président de l'entité agréée YOOZ PDP. La chaîne de contrôle CDML vers ITESOFT n'est en revanche pas publiée : ITESOFT, retirée de la cote en juin 2024, ne rend pas son actionnariat opposable, et CDML ne figure pas parmi ses dirigeants. La liaison est donc qualifiée de contrôle personnel commun, et non de groupe. Lecture commerciale : deux agréments, deux segments — ITESOFT sur le grand compte, Yooz sur la TPE-PME — pilotés depuis le même site par le même homme. Face à un client, la question n'est pas laquelle des deux plateformes gagne, mais par quelle porte cette sphère entre.",
+    "source": "Fiches registre ITESOFT (330265323), CDML (435005756), YOOZ (808386148) et YOOZ PDP (949747133) ; adresses de la liste DGFiP du référentiel",
+    "dateReleve": "2026-08-22"
+   },
+   "groupeCapitalistique": "Filiale de YOOZ (SIREN 808386148, créée le 09/12/2014, capital 717 990 €), elle-même présidée depuis le 22/09/2016 par la holding CDML (SIREN 435005756, capital 9,13 M€, fonds propres 20,3 M€ aux derniers comptes déposés de 2016), présidée par Didier Charpentier. Laurent Charpentier est directeur général de YOOZ depuis le 24/02/2023. L'entité agréée YOOZ PDP (SIREN 949747133) est une SASU au capital de 10 000 €, créée le 09/03/2023, qui n'a jamais déposé de comptes : c'est une structure dédiée à l'agrément, et non la société opérationnelle. Les trois entités — ITESOFT, CDML et YOOZ PDP — sont domiciliées au même site du Séquoia, Parc d'Andron, 30470 Aimargues.",
+   "analyse360": {
+    "poidsEconomique": {
+     "caGroupe": {
+      "montantMEUR": 47.3,
+      "exercice": "2024",
+      "nature": "comptes_deposes",
+      "commentaire": "Chiffre d'affaires de la société opérationnelle YOOZ (SIREN 808386148), et non de l'entité agréée : 36,9 M€ (2023) puis 47,3 M€ (2024), soit +28,2 %. C'est la croissance la plus forte du lot. Chiffre d'affaires à l'export de 7,01 M€, soit 14,8 % du total. Comptes 2024 déposés le 19/11/2025. La lecture doit se faire ici et non sur YOOZ PDP, qui n'a aucun compte.",
+      "source": "Chiffre d'affaires de la société opérationnelle YOOZ (SIREN 808386148), et non de l'entité agréée : 36,9 M€ (2023) puis 47,3 M€ (2024), soit +28,2 %. C'est la croissance la plus forte du lot. Chiffre d'affaires à l'export de 7,01 M€, soit 14,8 % du total. Comptes 2024 déposés le 19/11/2025. La lecture doit se faire ici et non sur YOOZ PDP, qui n'a aucun compte.",
+      "dateReleve": "2026-08-22"
+     },
+     "resultatNet": "Retournement net sur la société opérationnelle YOOZ : résultat de −79,1 k€ en 2023, puis +2,53 M€ en 2024, avec un EBITDA passé de −244 k€ à +2,08 M€. Fonds propres de 4,46 M€, trésorerie de 7,1 M€ pour 1,06 M€ de dettes financières. Salaires et charges de 24,9 M€, soit 52,7 % du chiffre d'affaires. L'entité agréée YOOZ PDP, elle, n'a jamais déposé de comptes.",
+     "effectifGroupe": "328 salariés déclarés aux comptes 2024 de YOOZ, pour une tranche INSEE de 200 à 249 (donnée 2022) : l'effectif réel dépasse nettement la tranche publiée."
+    }
+   },
+   "sourcesEnrichissement": [
+    {
+     "url": "https://www.pappers.fr/entreprise/yooz-808386148",
+     "libelle": "Fiche registre et comptes sociaux déposés de YOOZ (RCS Nîmes), republiés par Pappers",
+     "dateReleve": "2026-08-22"
+    },
+    {
+     "url": "https://www.pappers.fr/entreprise/cdml-435005756",
+     "libelle": "Fiche registre de la holding CDML (RCS Nîmes), republiée par Pappers",
+     "dateReleve": "2026-08-22"
+    }
+   ]
+  },
+  {
+   "nom": "ITESOFT",
+   "immatriculationsLiees": {
+    "groupe": "Sphère Charpentier — Aimargues (contrôle personnel commun, chaîne capitalistique non établie)",
+    "entrees": [
+     {
+      "nom": "ITESOFT",
+      "siren": "330265323"
+     },
+     {
+      "nom": "YOOZ PDP",
+      "siren": "949747133"
+     }
+    ],
+    "type": "controle_personnel_commun",
+    "lecture": "Trois faits établis au registre. (1) Les deux entités immatriculées sont domiciliées au même site : ITESOFT au Séquoia, chemin Parc d'Andron, 30470 Aimargues, et YOOZ PDP au Séquoia, Parc d'Andron, à la même adresse. (2) Didier Charpentier préside le conseil d'administration d'ITESOFT depuis le 28/12/2016 et préside la holding CDML (SIREN 435005756, capital 9,13 M€) depuis le 23/01/2019, elle-même domiciliée à cette adresse. (3) CDML est président de YOOZ (SIREN 808386148) depuis le 22/09/2016, YOOZ étant elle-même président de l'entité agréée YOOZ PDP. La chaîne de contrôle CDML vers ITESOFT n'est en revanche pas publiée : ITESOFT, retirée de la cote en juin 2024, ne rend pas son actionnariat opposable, et CDML ne figure pas parmi ses dirigeants. La liaison est donc qualifiée de contrôle personnel commun, et non de groupe. Lecture commerciale : deux agréments, deux segments — ITESOFT sur le grand compte, Yooz sur la TPE-PME — pilotés depuis le même site par le même homme. Face à un client, la question n'est pas laquelle des deux plateformes gagne, mais par quelle porte cette sphère entre.",
+    "source": "Fiches registre ITESOFT (330265323), CDML (435005756), YOOZ (808386148) et YOOZ PDP (949747133) ; adresses de la liste DGFiP du référentiel",
+    "dateReleve": "2026-08-22"
+   },
+   "sourcesEnrichissement": [
+    {
+     "url": "https://www.pappers.fr/entreprise/itesoft-330265323",
+     "libelle": "Fiche registre ITESOFT (RCS Nîmes) : adresse, dirigeants et mandats, republiée par Pappers",
+     "dateReleve": "2026-08-22"
+    }
+   ]
+  },
+  {
+   "nom": "AGICAP",
+   "groupeCapitalistique": "SAS créée le 13/10/2016, siège à Lyon, capital de 24 166,70 €, présidée par Sébastien Beyet. La société est enregistrée à l'ORIAS comme mandataire d'intermédiaire en opérations de banque. Deux commissaires aux comptes titulaires figurent au registre, ce qui est cohérent avec une structure financée par levées successives. Le directeur général Clément Mauguet a quitté ses fonctions le 08/12/2025. L'actionnariat n'est pas établi au registre.",
+   "analyse360": {
+    "poidsEconomique": {
+     "caEntiteFrancaise": {
+      "montantMEUR": null,
+      "exercice": "2019",
+      "nature": "comptes_confidentiels",
+      "commentaire": "Point central du dossier : les derniers comptes exploitables remontent à l'exercice 2019, et le chiffre d'affaires n'y est pas restitué. Aucun dépôt exploitable depuis six exercices. Toute donnée financière circulant sur cette société au-delà de 2019 relève donc de l'estimation, jamais des comptes.",
+      "source": "Point central du dossier : les derniers comptes exploitables remontent à l'exercice 2019, et le chiffre d'affaires n'y est pas restitué. Aucun dépôt exploitable depuis six exercices. Toute donnée financière circulant sur cette société au-delà de 2019 relève donc de l'estimation, jamais des comptes.",
+      "dateReleve": "2026-08-22"
+     },
+     "caGroupe": {
+      "montantMEUR": null,
+      "exercice": null,
+      "nature": "non_publie",
+      "commentaire": "Aucun périmètre de groupe établi.",
+      "source": "Aucun périmètre de groupe établi.",
+      "dateReleve": "2026-08-22"
+     },
+     "resultatNet": "Seul élément disponible : un résultat net de −426 k€ sur l'exercice 2019. Six exercices sans dépôt exploitable depuis. L'écart entre la notoriété de cette société et sa transparence comptable est l'un des plus marqués du référentiel.",
+     "effectifEntite": "Tranche INSEE de 250 à 499 salariés (donnée 2022), sans confirmation par des comptes."
+    }
+   },
+   "sourcesEnrichissement": [
+    {
+     "url": "https://www.pappers.fr/entreprise/agicap-823248703",
+     "libelle": "Fiche registre AGICAP (RCS Lyon) et dépôts de comptes, republiés par Pappers",
+     "dateReleve": "2026-08-22"
+    }
+   ]
+  },
+  {
+   "nom": "SPENDESK",
+   "groupeCapitalistique": "SAS créée le 01/08/2016, siège 51 rue de Londres à Paris 8e, capital de 326 934,38 €. Axel Demazy est président depuis le 15/10/2024, le fondateur Rodolphe Ardant étant devenu administrateur. Élément notable de gouvernance : la présidence du conseil est assurée depuis le 05/02/2025 par POINT79 MANAGEMENT LIMITED, personne morale de droit étranger — signe d'une gouvernance pilotée par les investisseurs. Un directeur général n'est resté que onze mois en 2024-2025.",
+   "analyse360": {
+    "poidsEconomique": {
+     "caEntiteFrancaise": {
+      "montantMEUR": 8.21,
+      "exercice": "2020",
+      "nature": "comptes_deposes",
+      "commentaire": "Derniers comptes déposés : exercice 2020, avec un chiffre d'affaires de 8,21 M€ dont 5,54 M€ à l'export. Aucun dépôt depuis, soit cinq exercices manquants. Ce chiffre a donc une valeur historique et ne dit rien de la taille actuelle de la société : il est publié avec son exercice, et surtout pas comme une donnée courante.",
+      "source": "Derniers comptes déposés : exercice 2020, avec un chiffre d'affaires de 8,21 M€ dont 5,54 M€ à l'export. Aucun dépôt depuis, soit cinq exercices manquants. Ce chiffre a donc une valeur historique et ne dit rien de la taille actuelle de la société : il est publié avec son exercice, et surtout pas comme une donnée courante.",
+      "dateReleve": "2026-08-22"
+     },
+     "caGroupe": {
+      "montantMEUR": null,
+      "exercice": null,
+      "nature": "non_publie",
+      "commentaire": "Aucun périmètre de groupe établi ; l'actionnariat n'est pas restitué au registre.",
+      "source": "Aucun périmètre de groupe établi ; l'actionnariat n'est pas restitué au registre.",
+      "dateReleve": "2026-08-22"
+     },
+     "resultatNet": "Sur le dernier exercice déposé (2020) : perte de 18,1 M€ pour 8,21 M€ de chiffre d'affaires, avec un EBITDA de −18,1 M€ et des salaires représentant 186 % du chiffre d'affaires. La société disposait alors de 31,8 M€ de trésorerie et de 25,5 M€ de fonds propres, pour 166 salariés. Profil de croissance financée par capitaux propres, à un stade où la rentabilité n'était pas recherchée. Aucun élément postérieur à 2020 n'est opposable.",
+     "effectifEntite": "166 salariés aux comptes 2020 ; tranche INSEE de 250 à 499 salariés (donnée 2023)."
+    }
+   },
+   "sourcesEnrichissement": [
+    {
+     "url": "https://www.pappers.fr/entreprise/spendesk-821893286",
+     "libelle": "Fiche registre SPENDESK (RCS Paris) et comptes sociaux 2020, republiés par Pappers",
+     "dateReleve": "2026-08-22"
+    }
+   ]
+  },
+  {
+   "nom": "TENOR",
+   "groupeCapitalistique": "SASU créée le 01/06/1988, siège 5 rue des Anciennes Tanneries à Oullins-Pierre-Bénite, capital de 150 000 €. Le président est une personne morale : la holding GSPI (SIREN 518807532), en fonction depuis le 01/05/2018, à la suite du départ d'André Ferrari en 2018. L'actionnariat n'est pas accessible au registre.",
+   "analyse360": {
+    "poidsEconomique": {
+     "caEntiteFrancaise": {
+      "montantMEUR": 7.66,
+      "exercice": "2025",
+      "nature": "comptes_deposes",
+      "commentaire": "Trajectoire des comptes déposés : 6,21 M€ (2022), 6,92 M€ (2023), 7,51 M€ (2024), 7,66 M€ (2025). La croissance s'essouffle nettement : +11,6 %, +8,4 %, puis +2,1 % sur le dernier exercice. Particularité de cette société : un chiffre d'affaires à l'export de 2,67 M€, soit 34,9 % du total — la part export la plus élevée du lot, et le signe d'une activité qui ne dépend pas du seul mandat français.",
+      "source": "Trajectoire des comptes déposés : 6,21 M€ (2022), 6,92 M€ (2023), 7,51 M€ (2024), 7,66 M€ (2025). La croissance s'essouffle nettement : +11,6 %, +8,4 %, puis +2,1 % sur le dernier exercice. Particularité de cette société : un chiffre d'affaires à l'export de 2,67 M€, soit 34,9 % du total — la part export la plus élevée du lot, et le signe d'une activité qui ne dépend pas du seul mandat français.",
+      "dateReleve": "2026-08-22"
+     },
+     "caGroupe": {
+      "montantMEUR": null,
+      "exercice": null,
+      "nature": "non_publie",
+      "commentaire": "Périmètre de la holding GSPI (SIREN 518807532) non traité à ce relevé.",
+      "source": "Périmètre de la holding GSPI (SIREN 518807532) non traité à ce relevé.",
+      "dateReleve": "2026-08-22"
+     },
+     "resultatNet": "Érosion continue de la rentabilité alors que le chiffre d'affaires progresse : 454 k€ (2022), 180 k€ (2023), 296 k€ (2024), 117 k€ (2025). La marge nette passe de 7,3 % à 1,5 % en quatre ans. L'EBITDA reste stable autour de 870 k€, mais le résultat d'exploitation tombe à 78,8 k€ : la charge d'amortissement absorbe la performance, ce qui est cohérent avec un cycle d'investissement. Fonds propres de 3,01 M€, trésorerie de 860 k€ en repli, dettes financières ramenées de 2,36 à 1,46 M€. Salaires et charges à 66,3 % du chiffre d'affaires.",
+     "effectifEntite": "Tranche INSEE de 50 à 99 salariés (donnée 2023)."
+    }
+   },
+   "sourcesEnrichissement": [
+    {
+     "url": "https://www.pappers.fr/entreprise/tenor-345021661",
+     "libelle": "Fiche registre TENOR (RCS Lyon) et comptes sociaux déposés, republiés par Pappers",
+     "dateReleve": "2026-08-22"
+    }
+   ]
+  },
+  {
+   "nom": "SYMTRAX",
+   "groupeCapitalistique": "Dénomination légale SYMTRAX SA, société anonyme à conseil d'administration créée le 20/09/1989, siège 11 rue Raymond Marc à Nîmes, capital de 279 000 €. Société de famille : les mandats sociaux sont tenus par la famille Aldebert (Bernard, directeur général délégué depuis 2016, Caroline administratrice depuis le 29/05/2026), Pierre et Jean Aldebert ayant quitté le conseil le 11/06/2026. Karine Rabian est directrice générale depuis le 18/06/2026 : la gouvernance a donc été renouvelée en profondeur en juin 2026, à quelques mois de l'échéance de la réforme.",
+   "analyse360": {
+    "poidsEconomique": {
+     "caEntiteFrancaise": {
+      "montantMEUR": 4.19,
+      "exercice": "2025",
+      "nature": "comptes_deposes",
+      "commentaire": "Trajectoire des comptes déposés : 3,42 M€ (2022), 3,75 M€ (2023), 3,94 M€ (2024), 4,19 M€ (2025), soit une croissance régulière de 5 à 9 % par an. Fait marquant : le chiffre d'affaires à l'export tombe à zéro en 2025, alors qu'il représentait 1,51 M€ en 2023 et 1,39 M€ en 2022, soit environ 40 % de l'activité. Cette disparition d'une composante export majeure n'est pas expliquée par les comptes et constitue un point à documenter.",
+      "source": "Trajectoire des comptes déposés : 3,42 M€ (2022), 3,75 M€ (2023), 3,94 M€ (2024), 4,19 M€ (2025), soit une croissance régulière de 5 à 9 % par an. Fait marquant : le chiffre d'affaires à l'export tombe à zéro en 2025, alors qu'il représentait 1,51 M€ en 2023 et 1,39 M€ en 2022, soit environ 40 % de l'activité. Cette disparition d'une composante export majeure n'est pas expliquée par les comptes et constitue un point à documenter.",
+      "dateReleve": "2026-08-22"
+     },
+     "caGroupe": {
+      "montantMEUR": null,
+      "exercice": null,
+      "nature": "sans_objet",
+      "commentaire": "Société indépendante, sans périmètre de groupe identifié.",
+      "source": "Société indépendante, sans périmètre de groupe identifié.",
+      "dateReleve": "2026-08-22"
+     },
+     "resultatNet": "La croissance ne se transforme pas en marge, et la dégradation est brutale sur le dernier exercice : résultat net de 83,1 k€ (2022), 72,2 k€ (2023), 126 k€ (2024), puis 9,7 k€ (2025). L'EBITDA s'écrase de 108 k€ à 15,8 k€, soit 0,4 % du chiffre d'affaires, et le résultat d'exploitation tombe à 2,38 k€. La cause est lisible : les salaires et charges passent de 72,2 % à 74,9 % du chiffre d'affaires, tandis que le délai de paiement clients s'allonge de 64,9 à 99,1 jours. Fonds propres de 1,24 M€, trésorerie de 789 k€ en léger repli, aucune dette financière nette.",
+     "effectifEntite": "Tranche INSEE de 20 à 49 salariés (donnée 2022)."
+    }
+   },
+   "sourcesEnrichissement": [
+    {
+     "url": "https://www.pappers.fr/entreprise/symtrax-352073910",
+     "libelle": "Fiche registre SYMTRAX SA (RCS Nîmes) et comptes sociaux déposés, republiés par Pappers",
+     "dateReleve": "2026-08-22"
+    }
+   ]
+  }
+ ]
+}
