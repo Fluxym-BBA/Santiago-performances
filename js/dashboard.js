@@ -16,7 +16,7 @@ import {
 } from './api.js';
 import {
     num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
-    autoGran, granWord
+    autoGran, granWord, isMeasured, measuredSince, MEASURED_KEY
 } from './analytics.js';
 import {
     $, toast, fmtInt, fmtDec, delta,
@@ -143,6 +143,53 @@ const A_SHADES = ['#00A7E1', '#0369a1', '#0B2046'];
 const B_SHADES = ['#8b5cf6', '#6d28d9', '#4c1d95'];
 const A_MAIN = A_SHADES[0];
 const B_MAIN = B_SHADES[0];
+
+/* Camaïeux à quatre crans, pour tout ce dont le nombre de séries dépend de
+   METRICS ou du nombre d'étages d'un entonnoir.
+
+   Le groupe « appels » est passé de trois à quatre métriques avec l'arrivée des
+   appels avec échange : A_SHADES[3] valait undefined, donc la quatrième série,
+   les rendez-vous, était dessinée avec une couleur vide. Les trois premiers
+   crans des rampes restent volontairement proches des A_SHADES pour ne pas
+   changer la lecture des graphiques qui n'ont pas bougé. */
+const A_RAMP = ['#00A7E1', '#0284c7', '#0369a1', '#0B2046'];
+const B_RAMP = ['#a78bfa', '#8b5cf6', '#6d28d9', '#4c1d95'];
+
+/* --------------------------------------------------------------------------
+   Métrique mesurée en cours de route
+
+   Les appels avec échange ne sont comptés que depuis le 25/08/2026 : avant, le
+   compteur n'existait pas à l'écran. Un écran qui afficherait zéro raconterait
+   une progression qui n'a jamais eu lieu, et un taux calculé sur toute la
+   période diviserait un numérateur de trois semaines par un dénominateur de
+   trois mois. La frontière est la date, pas le fait d'avoir touché le compteur :
+   ne rien saisir vaut zéro, comme pour les six autres.
+
+   Règle appliquée partout dans ce fichier :
+   - un volume peut s'afficher sur la sous-période mesurée, en le disant ;
+   - un TAUX ne s'affiche que si la période est mesurée de bout en bout, sinon
+     ses deux termes ne portent pas sur le même périmètre ;
+   - un étage d'entonnoir n'apparaît que si les DEUX périodes le sont, sinon on
+     comparerait un entonnoir à quatre étages à un entonnoir à trois.
+   -------------------------------------------------------------------------- */
+
+/** Vrai si l'agrégat porte au moins une journée mesurée. */
+const hasMeasured = a => (a?.measuredDays || 0) > 0;
+
+/**
+ * Phrase courte sur la couverture de mesure, ou chaîne vide s'il n'y a rien à
+ * signaler. La référence est la date : les journées antérieures à l'ouverture
+ * du compteur sont hors calcul, celles d'après y sont toutes, qu'elles aient
+ * été renseignées ou non.
+ */
+function measureGap(a) {
+    if (!a || !a.activeDays) return '';
+    const m = a.measuredActiveDays || 0;
+    if (m === a.activeDays) return '';
+    return m === 0
+        ? 'compteur pas encore ouvert sur cette période'
+        : `${a.activeDays - m} des ${a.activeDays} journées saisies sont antérieures à l'ouverture du compteur`;
+}
 
 // granWord vient d'analytics.js
 const granWordPlural = g => ({ day: 'jours', week: 'semaines', month: 'mois' }[g || effGran()]);
@@ -271,10 +318,38 @@ const secB = (rows, ctx, head = null) => ({
 });
 
 /** Taux d'un agrégat, écrits pour une info-bulle. */
+/**
+ * Phrase d'exemple sur les poids du score, construite depuis SCORE_WEIGHTS.
+ * Écrite en dur, elle annonçait encore « un rendez-vous vaut 20 points » après
+ * le passage à 25 : un texte d'explication faux est pire que pas de texte.
+ */
+function weightPhrase() {
+    const pick = k => SCORE_WEIGHTS.find(x => x.key === k);
+    const [rdv, eng, call] = ['meetings_booked', 'calls_engaged', 'calls_made'].map(pick);
+    const bits = [];
+    if (rdv) bits.push(`un rendez-vous vaut ${rdv.w} points`);
+    if (eng) bits.push(`un appel avec échange ${eng.w}`);
+    if (call) bits.push(`un appel simple ${call.w}`);
+    return bits.join(', ');
+}
+
 function rateRows(a) {
+    const pc = v => (v == null ? '–' : `${fmtDec(v)} %`);
+    const base = [
+        { label: 'Taux d\'aboutis', sub: 'aboutis / appels', value: pc(a.connect_rate), muted: true },
+        { label: 'Taux de RDV', sub: 'RDV / aboutis', value: pc(a.meeting_rate), muted: true }
+    ];
+    /* Les deux taux d'échange n'apparaissent que si la période est mesurée de
+       bout en bout : sur une période à cheval sur le 25/08, leur numérateur et
+       leur dénominateur ne porteraient pas sur les mêmes journées. Mieux vaut
+       ne rien afficher qu'afficher un chiffre qu'il faut savoir corriger de
+       tête. */
+    if (!a.fullyMeasured) return base;
     return [
-        { label: 'Taux d\'aboutis', sub: 'aboutis / appels', value: a.connect_rate == null ? '–' : `${fmtDec(a.connect_rate)} %`, muted: true },
-        { label: 'Taux de RDV', sub: 'RDV / aboutis', value: a.meeting_rate == null ? '–' : `${fmtDec(a.meeting_rate)} %`, muted: true }
+        base[0],
+        { label: 'Taux d\'échange', sub: 'échanges / aboutis', value: pc(a.engage_rate), muted: true },
+        base[1],
+        { label: 'RDV après échange', sub: 'RDV / échanges', value: pc(a.meeting_rate_engaged), muted: true }
     ];
 }
 
@@ -350,6 +425,7 @@ const CHARTS = [
                 { v: 'meetings_booked', t: 'Rendez-vous' },
                 { v: 'calls_made', t: 'Appels' },
                 { v: 'calls_connected', t: 'Appels aboutis' },
+                { v: 'calls_engaged', t: 'Appels avec échange' },
                 { v: 'emails_sent', t: 'E-mails' },
                 { v: 'productivity_score', t: 'Score' }
             ],
@@ -368,14 +444,26 @@ const CHARTS = [
         render: (host, ctx) => {
             const key = state.cumulMetric;
             const label = { meetings_booked: 'RDV', calls_made: 'appels', calls_connected: 'aboutis',
-                emails_sent: 'e-mails', productivity_score: 'points' }[key];
-            const cum = rows => { let t = 0; return rows.map(r => (t += num(r, key))); };
+                calls_engaged: 'échanges', emails_sent: 'e-mails', productivity_score: 'points' }[key];
+            /* Sur la métrique ouverte en cours de route, la courbe ne démarre
+               qu'au premier jour compté. Sans cela, un cumul parti de zéro le
+               22 mai ferait croire à trois mois sans une seule conversation,
+               puis à un décollage soudain le 25 août. */
+            const cum = rows => {
+                let t = null;
+                return rows.map(r => {
+                    if (key === MEASURED_KEY && t === null && !isMeasured(r)) return null;
+                    t = (t || 0) + num(r, key);
+                    return t;
+                });
+            };
             const ca = cum(ctx.aRows), cb = cum(ctx.bRows);
             const n = Math.max(ca.length, cb.length);
             const pad = arr => Array.from({ length: n }, (_, i) => (i < arr.length ? arr[i] : null));
             const pa = pad(ca), pb = pad(cb);
             const metricLabel = { meetings_booked: 'Rendez-vous', calls_made: 'Appels',
-                calls_connected: 'Appels aboutis', emails_sent: 'E-mails', productivity_score: 'Score' }[key];
+                calls_connected: 'Appels aboutis', calls_engaged: 'Appels avec échange',
+                emails_sent: 'E-mails', productivity_score: 'Score' }[key];
 
             lineChart(host, {
                 labels: Array.from({ length: n }, (_, i) => `J${i + 1}`),
@@ -390,7 +478,10 @@ const CHARTS = [
                     const ra = ctx.aRows[i], rb = ctx.bRows[i];
                     const line = (row, cumv, color, per) => [
                         { color, label: `Cumul ${label}`, value: cumv == null ? '–' : fmtInt(cumv), em: true },
-                        { label: 'Ce jour-là', value: row ? fmtInt(num(row, key)) : '–', muted: true },
+                        { label: 'Ce jour-là',
+                          value: !row ? '–'
+                              : (key === MEASURED_KEY && !isMeasured(row) ? 'pas encore compté' : fmtInt(num(row, key))),
+                          muted: true },
                         { label: 'Score du jour', value: row ? fmtInt(score(row)) : '–', muted: true }
                     ];
                     const ahead = pa[i] != null && pb[i] != null ? pa[i] - pb[i] : null;
@@ -424,7 +515,7 @@ const CHARTS = [
             { color: B_MAIN, shape: 'dash', label: `Niveau moyen de la référence · ${pLab(ctx.bP)}` }
         ],
         note: () => `Le <b>score</b> résume une journée en un seul nombre : chaque action est multipliée par ` +
-            `son poids (un rendez-vous vaut 20 points, un appel 1 point) puis additionnée. Le détail du calcul ` +
+            `son poids (${weightPhrase()}) puis additionnée. Le détail du calcul ` +
             `est donné dans l'encadré bleu foncé en haut de la page.<br><br>` +
             `La <b>tendance</b> est une moyenne mobile sur 7 points : chaque point vaut la moyenne de lui-même ` +
             `et des 6 précédents. Elle efface les à-coups d'un jour isolé pour montrer le mouvement de fond. ` +
@@ -509,15 +600,16 @@ const CHARTS = [
         legend: ctx => [
             { head: 'Bleu = période analysée · Violet = période de référence' },
             ...METRICS.filter(m => m.group === 'calls').map((m, i) => ({
-                pair: [A_SHADES[i], B_SHADES[i]], label: m.short
+                pair: [A_RAMP[i], B_RAMP[i]], label: m.short
             }))
         ],
-        note: () => `Deux panneaux superposés plutôt qu'un seul graphique surchargé : six séries mélangées dans ` +
+        note: () => `Deux panneaux superposés plutôt qu'un seul graphique surchargé : ${
+            METRICS.filter(m => m.group === 'calls').length * 2} séries mélangées dans ` +
             `la même grille deviennent illisibles. L'<b>échelle verticale est volontairement identique</b> sur ` +
             `les deux panneaux, donc une barre deux fois plus haute vaut réellement deux fois plus. ` +
             `Les périodes sont alignées sur leur premier ${granWord()}, ce qui permet de comparer même si ` +
             `elles ne portent pas sur les mêmes dates.`,
-        hover: () => `les trois volumes du moment pointé sur les <b>deux</b> panneaux à la fois, les taux de conversion, le score, et l'écart pour chaque série. Il n'y a pas à descendre la souris sur le second panneau.`,
+        hover: () => `les ${METRICS.filter(m => m.group === 'calls').length} volumes du moment pointé sur les <b>deux</b> panneaux à la fois, les taux de conversion, le score, et l'écart pour chaque série. Il n'y a pas à descendre la souris sur le second panneau.`,
         render: (host, ctx) => renderPanelPair(host, ctx, METRICS.filter(m => m.group === 'calls'))
     },
     {
@@ -527,7 +619,7 @@ const CHARTS = [
         legend: ctx => [
             { head: 'Bleu = période analysée · Violet = période de référence' },
             ...METRICS.filter(m => m.group !== 'calls').map((m, i) => ({
-                pair: [A_SHADES[i], B_SHADES[i]], label: m.short
+                pair: [A_RAMP[i], B_RAMP[i]], label: m.short
             }))
         ],
         note: () => `Même principe que l'activité téléphonique : deux panneaux, une seule échelle. ` +
@@ -543,15 +635,23 @@ const CHARTS = [
         legend: ctx => [
             { color: A_SHADES[0], shape: 'line', label: 'Appels aboutis / appels passés (%)' },
             { color: A_SHADES[2], shape: 'line', label: 'RDV / appels aboutis (%)' },
+            { color: A_RAMP[1], shape: 'line', label: 'RDV / appels avec échange (%)' },
             { color: B_MAIN, shape: 'dash', label: `Niveaux de la référence · ${pLab(ctx.bP)}` }
         ],
         note: () => `Les taux sont <b>recalculés à partir des volumes</b> de chaque ${granWord()} ` +
             `(somme des aboutis ÷ somme des appels), et non obtenus en moyennant des taux quotidiens : ` +
             `sinon un jour à 2 appels pèserait autant qu'un jour à 50.<br><br>` +
-            `Les <b>traits violets horizontaux</b> donnent les deux taux de la période de référence. ` +
+            `Les <b>traits violets horizontaux</b> donnent les taux de la période de référence. ` +
             `Lecture utile : un volume d'appels en hausse avec des taux qui passent sous les traits violets ` +
-            `signale un problème de ciblage ou de discours, pas un manque d'effort.`,
-        hover: () => `les deux taux du moment pointé, les volumes qui ont servi à les calculer, les niveaux de la référence, et les écarts exprimés en points de pourcentage.`,
+            `signale un problème de ciblage ou de discours, pas un manque d'effort.<br><br>` +
+            `Le <b>RDV après échange</b> est le taux le plus proche de la réalité du métier : il ne compte au ` +
+            `dénominateur que les appels où une conversation a eu lieu, alors que « RDV / aboutis » est dilué ` +
+            `par tous les décrochés qui se sont arrêtés en trente secondes. Sa courbe ne commence qu'au premier ` +
+            `${granWord()} entièrement mesuré, et elle est interrompue partout où la mesure manque : ` +
+            `un taux dont les deux termes ne portent pas sur les mêmes journées ne veut rien dire. ` +
+            `Il peut dépasser 100 % sur un ${granWord()} isolé, parce qu'un rendez-vous se pose parfois ` +
+            `plusieurs jours après la conversation qui l'a produit, ou sans appel du tout.`,
+        hover: () => `les taux du moment pointé, les volumes qui ont servi à les calculer, les niveaux de la référence, et les écarts exprimés en points de pourcentage.`,
         render: (host, ctx) => {
             const buckets = bucketize(ctx.aRows, ctx.gran);
             const aggs = buckets.map(b => agg(b.rows));
@@ -563,11 +663,26 @@ const CHARTS = [
             if (aB.meeting_rate != null) refs.push({
                 value: aB.meeting_rate, color: B_SHADES[2], short: `${Math.round(aB.meeting_rate)}%`,
                 label: `Taux de RDV de la référence : ${fmtDec(aB.meeting_rate)} %` });
+            // Le repère « RDV après échange » de la référence n'a de sens que si
+            // la période de référence est mesurée de bout en bout.
+            if (aB.fullyMeasured && aB.meeting_rate_engaged != null) refs.push({
+                value: aB.meeting_rate_engaged, color: B_RAMP[1], short: `${Math.round(aB.meeting_rate_engaged)}%`,
+                label: `RDV après échange de la référence : ${fmtDec(aB.meeting_rate_engaged)} %` });
+
+            /* Un point n'est tracé que si le paquet est mesuré de bout en bout :
+               sur une semaine à cheval sur le 25/08, le numérateur porterait sur
+               deux jours et le dénominateur sur cinq. La courbe est donc
+               interrompue là où la mesure manque, ce qui se voit et s'explique. */
+            const engagedSeries = aggs.map(a => (a.fullyMeasured ? a.meeting_rate_engaged : null));
+            const anyEngaged = engagedSeries.some(v => v != null);
+
             lineChart(host, {
                 labels: buckets.map(b => b.label),
                 series: [
                     { name: 'Aboutis %', color: A_SHADES[0], values: aggs.map(a => a.connect_rate), fmt: v => `${fmtDec(v)} %` },
-                    { name: 'RDV %', color: A_SHADES[2], values: aggs.map(a => a.meeting_rate), fmt: v => `${fmtDec(v)} %` }
+                    { name: 'RDV %', color: A_SHADES[2], values: aggs.map(a => a.meeting_rate), fmt: v => `${fmtDec(v)} %` },
+                    ...(anyEngaged ? [{ name: 'RDV / échange %', color: A_RAMP[1],
+                        values: engagedSeries, fmt: v => `${fmtDec(v)} %` }] : [])
                 ],
                 refLines: refs,
                 height: ctx.big ? 440 : 250,
@@ -586,28 +701,43 @@ const CHARTS = [
                                 { color: A_SHADES[0], label: 'Appels aboutis', sub: 'sur appels passés',
                                   value: pc(a.connect_rate), em: true },
                                 { color: A_SHADES[2], label: 'Rendez-vous', sub: 'sur appels aboutis',
-                                  value: pc(a.meeting_rate), em: true }
+                                  value: pc(a.meeting_rate), em: true },
+                                ...(a.fullyMeasured ? [{ color: A_RAMP[1], label: 'RDV après échange',
+                                    sub: 'sur appels avec échange', value: pc(a.meeting_rate_engaged), em: true }] : [])
                             ], ctx),
                             {
                                 accent: 'a', head: 'Volumes de ce ' + granWord(ctx.gran),
                                 rows: [
                                     { label: 'Appels passés', value: fmtInt(a.calls_made) },
                                     { label: 'Appels aboutis', value: fmtInt(a.calls_connected) },
+                                    { label: 'dont avec échange',
+                                      value: hasMeasured(a) ? fmtInt(a.calls_engaged) : 'pas encore compté',
+                                      muted: !hasMeasured(a) },
+                                    { label: 'dont sans échange',
+                                      value: a.calls_unengaged == null ? 'pas encore compté' : fmtInt(a.calls_unengaged),
+                                      muted: a.calls_unengaged == null },
                                     { label: 'Rendez-vous', value: fmtInt(a.meetings_booked) },
                                     { label: 'Appels par RDV', value: a.calls_per_meeting == null ? '–' : fmtDec(a.calls_per_meeting), muted: true }
                                 ]
                             },
                             secB([
                                 { color: B_SHADES[0], shape: 'dash', label: 'Appels aboutis', value: pc(aB.connect_rate) },
-                                { color: B_SHADES[2], shape: 'dash', label: 'Rendez-vous', value: pc(aB.meeting_rate) }
+                                { color: B_SHADES[2], shape: 'dash', label: 'Rendez-vous', value: pc(aB.meeting_rate) },
+                                ...(aB.fullyMeasured ? [{ color: B_RAMP[1], shape: 'dash',
+                                    label: 'RDV après échange', value: pc(aB.meeting_rate_engaged) }] : [])
                             ], ctx)
                         ],
                         deltas: [
                             { label: 'Aboutis vs réf.', html: ppl(a.connect_rate, aB.connect_rate) },
-                            { label: 'RDV vs réf.', html: ppl(a.meeting_rate, aB.meeting_rate) }
+                            { label: 'RDV vs réf.', html: ppl(a.meeting_rate, aB.meeting_rate) },
+                            ...(a.fullyMeasured && aB.fullyMeasured
+                                ? [{ label: 'RDV / échange vs réf.',
+                                     html: ppl(a.meeting_rate_engaged, aB.meeting_rate_engaged) }] : [])
                         ],
                         foot: a.calls_made < 10
                             ? '<b>Peu d\u2019appels</b> sur ce ' + granWord(ctx.gran) + ' : le taux est très sensible, à lire avec prudence.'
+                            : !a.fullyMeasured && a.activeDays > 0
+                            ? escapeHtml(measureGap(a)) + ' : le taux de RDV après échange n\u2019est pas calculé sur ce ' + granWord(ctx.gran) + '.'
                             : 'Écarts en <b>points</b> de pourcentage, pas en pourcentage d\u2019un pourcentage.'
                     };
                 }
@@ -617,22 +747,51 @@ const CHARTS = [
     {
         key: 'funnels', icon: '🔻',
         title: 'Entonnoirs comparés',
-        sub: () => 'De l\'appel passé au rendez-vous obtenu, sur chacune des deux périodes.',
+        sub: ctx => {
+            const a = agg(ctx.aRows), b = agg(ctx.bRows);
+            return (a.fullyMeasured && b.fullyMeasured)
+                ? 'De l\'appel passé au rendez-vous obtenu, en passant par la conversation, sur chacune des deux périodes.'
+                : 'De l\'appel passé au rendez-vous obtenu, sur chacune des deux périodes.';
+        },
         legend: ctx => [
             { periodStyle: 'a', color: A_MAIN, label: `Analysée · ${pLab(ctx.aP)}` },
             { periodStyle: 'b', color: B_MAIN, label: `Référence · ${pLab(ctx.bP)}` }
         ],
-        note: () => `Le pourcentage à droite de chaque barre est le <b>taux de passage depuis l'étape ` +
-            `précédente</b>, pas depuis le total. Comparer les deux entonnoirs montre où se situe l'écart : ` +
-            `un même nombre de rendez-vous peut venir de plus d'appels (effort) ou d'un meilleur taux (efficacité).`,
+        note: ctx => {
+            const a = agg(ctx.aRows), b = agg(ctx.bRows);
+            const full = a.fullyMeasured && b.fullyMeasured;
+            return `Le pourcentage à droite de chaque barre est le <b>taux de passage depuis l'étape ` +
+                `précédente</b>, pas depuis le total. Comparer les deux entonnoirs montre où se situe l'écart : ` +
+                `un même nombre de rendez-vous peut venir de plus d'appels (effort) ou d'un meilleur taux (efficacité).` +
+                (full
+                    ? `<br><br>L'étage <b>Avec échange</b> isole les appels où une conversation a eu lieu. ` +
+                      `Les quatre étages s'emboîtent strictement, donc les taux de passage se multiplient : ` +
+                      `le dernier, <b>Avec échange → Rendez-vous</b>, répond à « une fois que je le fais parler, ` +
+                      `quelle chance ai-je d'obtenir un rendez-vous ». C'est le seul taux dont le dénominateur ` +
+                      `est proche de la cause réelle du rendez-vous. Il peut dépasser 100 % sur une période ` +
+                      `courte : le modèle est journalier et ne relie pas un appel précis à un rendez-vous précis, ` +
+                      `un créneau confirmé par e-mail le mercredi vient parfois d'une conversation du lundi, ` +
+                      `et certains rendez-vous n'ont demandé aucun appel.`
+                    : `<br><br>L'étage <b>Avec échange</b> n'apparaît pas : ${escapeHtml(measureGap(a) || measureGap(b) || 'le compteur d\'échanges n\'était pas ouvert sur toute la période')}. ` +
+                      `Un entonnoir dont un étage porte sur trois semaines et les autres sur trois mois n'est pas ` +
+                      `un entonnoir incomplet, c'est un entonnoir faux. Il apparaîtra de lui-même quand les deux ` +
+                      `périodes seront mesurées de bout en bout.`);
+        },
         hover: () => `le volume de l'étape pointée sur les deux périodes, le taux de passage depuis l'étape précédente, la part depuis les appels passés, le nombre perdu à cette étape, et les écarts.`,
         render: (host, ctx) => {
+            /* L'étage « avec échange » n'apparaît que si les DEUX périodes sont
+               mesurées de bout en bout : deux entonnoirs qui n'ont pas le même
+               nombre d'étages ne se comparent pas, et un étage calculé sur un
+               sous-ensemble de journées donnerait un taux de passage faux. */
+            const withEngaged = agg(ctx.aRows).fullyMeasured && agg(ctx.bRows).fullyMeasured;
             const build = (rows, shades) => {
                 const a = agg(rows);
                 return [
                     { label: 'Appels passés', value: a.calls_made, color: shades[0] },
                     { label: 'Appels aboutis', value: a.calls_connected, color: shades[1] },
-                    { label: 'Rendez-vous', value: a.meetings_booked, color: shades[2] }
+                    ...(withEngaged
+                        ? [{ label: 'Avec échange', value: a.calls_engaged, color: shades[2] }] : []),
+                    { label: 'Rendez-vous', value: a.meetings_booked, color: shades[withEngaged ? 3 : 2] }
                 ];
             };
             host.innerHTML = `
@@ -648,8 +807,8 @@ const CHARTS = [
                         <div class="funnel" data-f="b"></div>
                     </div>
                 </div>`;
-            const stepsA = build(ctx.aRows, A_SHADES);
-            const stepsB = build(ctx.bRows, B_SHADES);
+            const stepsA = build(ctx.aRows, A_RAMP);
+            const stepsB = build(ctx.bRows, B_RAMP);
 
             // Une seule info-bulle pour les deux entonnoirs : survoler une étape
             // dans l'un montre immédiatement la même étape dans l'autre.
@@ -677,13 +836,17 @@ const CHARTS = [
                 return {
                     title: stepsA[i].label,
                     meta: 'Cumul de chaque période',
-                    sections: [secA(side(stepsA, A_SHADES[i]), ctx), secB(side(stepsB, B_SHADES[i]), ctx)],
+                    sections: [secA(side(stepsA, A_RAMP[i]), ctx), secB(side(stepsB, B_RAMP[i]), ctx)],
                     deltas: [
                         { label: 'Volume', html: dl(va, vb).html },
                         ...(i > 0 ? [{ label: 'Taux de passage', html: ppl(rate(stepsA), rate(stepsB)) }] : [])
                     ],
                     foot: i === 0
                         ? 'L\u2019étape de départ : tout le reste en dépend.'
+                        : stepsA[i].label === 'Avec échange'
+                        ? 'Les <b>perdus à cette étape</b> sont les appels décrochés sans conversation, ceux qui se sont arrêtés dans les trente premières secondes.'
+                        : withEngaged && stepsA[i].label === 'Rendez-vous'
+                        ? 'Le taux de passage depuis les échanges est le plus révélateur : il mesure la conversion à partir du moment où le prospect parle.'
                         : 'Un volume identique peut venir de plus d\u2019efforts ou d\u2019un meilleur taux : le delta de taux tranche.'
                 };
             };
@@ -766,7 +929,9 @@ function renderPanelPair(host, ctx, metrics) {
         const gB = bB ? agg(bB.rows) : null;
         const rows = (g, shades) => metrics.map((m, k) => ({
             color: shades[k], label: m.short,
-            value: g ? fmtInt(g[m.key]) : '–', em: true
+            value: !g ? '–'
+                : (m.key === MEASURED_KEY && !hasMeasured(g) ? 'pas encore compté' : fmtInt(g[m.key])),
+            em: true
         }));
         const extra = g => (!g ? [] : [
             { label: 'Total du groupe',
@@ -778,9 +943,9 @@ function renderPanelPair(host, ctx, metrics) {
             title: bucketTitle(bA, ctx.gran),
             meta: `${granWord(ctx.gran).charAt(0).toUpperCase()}${granWord(ctx.gran).slice(1)} n° ${i + 1} de chaque période`,
             sections: [
-                secA([...rows(gA, A_SHADES), ...extra(gA)], ctx,
+                secA([...rows(gA, A_RAMP), ...extra(gA)], ctx,
                     bA ? `Analysée · ${bucketTitle(bA, ctx.gran)}` : 'Analysée · hors période'),
-                secB([...rows(gB, B_SHADES), ...extra(gB)], ctx,
+                secB([...rows(gB, B_RAMP), ...extra(gB)], ctx,
                     bB ? `Référence · ${bucketTitle(bB, ctx.gran)}` : 'Référence · hors période')
             ],
             deltas: metrics.map((m, k) => ({
@@ -796,14 +961,21 @@ function renderPanelPair(host, ctx, metrics) {
         labels: buckets.map(b => b.label),
         series: metrics.map((m, i) => ({
             name: m.short, color: shades[i],
-            values: buckets.map(b => agg(b.rows)[m.key])
+            /* Sur la métrique mesurée en cours de route, un paquet non mesuré
+               vaut null et non zéro : barChart ne dessine alors aucune barre,
+               au lieu d'une barre à zéro qui affirmerait qu'il n'y a eu aucune
+               conversation ce jour-là. */
+            values: buckets.map(b => {
+                const g = agg(b.rows);
+                return (m.key === MEASURED_KEY && !hasMeasured(g)) ? null : g[m.key];
+            })
         })),
         yMax: shared,
         height: ctx.big ? 300 : 210,
         tip
     });
-    draw('[data-p="a"]', bucketsA, A_SHADES);
-    draw('[data-p="b"]', bucketsB, B_SHADES);
+    draw('[data-p="a"]', bucketsA, A_RAMP);
+    draw('[data-p="b"]', bucketsB, B_RAMP);
 }
 
 /* --------------------------------------------------------------------------
@@ -875,6 +1047,20 @@ function renderSummary(aA, aB) {
             byDate.size} jour(s) existent dans l'historique</span>`);
     }
 
+    /* Un seul avertissement pour toute la page sur la couverture de mesure des
+       échanges. Sans lui, un lecteur qui voit « 0 échange » sur juillet en
+       conclurait que personne ne parlait à personne, alors que la question
+       n'était pas posée. */
+    const gapA = measureGap(aA), gapB = measureGap(aB);
+    if (gapA || gapB) {
+        const since = measuredSince();
+        warn.push(`<span class="pill pill--warn">⚠ Appels avec échange comptés depuis le ${
+            since ? escapeHtml(formatLong(since).replace(/^\S+ /, '')) : 'déploiement'} : ${
+            escapeHtml([gapA && `période analysée, ${gapA}`, gapB && `référence, ${gapB}`]
+                .filter(Boolean).join(' · '))
+        }. Les volumes portent sur les journées comptées, les taux d'échange ne sont pas calculés.</span>`);
+    }
+
     $('#control-summary').innerHTML = `
         <div class="summary-sentence">
             Vous analysez <b>${escapeHtml(periodLabel(state.a.from, state.a.to))}</b>
@@ -898,7 +1084,15 @@ function renderKpis(aA, aB) {
         { label: '⚡ Score de productivité', key: 'productivity_score', hero: true },
         { label: '🤝 Rendez-vous', key: 'meetings_booked' },
         { label: '📞 Appels', key: 'calls_made' },
-        { label: '✅ Appels aboutis', key: 'calls_connected' },
+        { label: '✅ Appels aboutis', key: 'calls_connected',
+          /* La dichotomie que réclame le terrain, sans ajouter une carte de
+             plus : le total reste la valeur affichée, le partage tient sur la
+             ligne du dessous. */
+          extra: !hasMeasured(aA)
+              ? 'échanges pas encore comptés'
+              : `dont ${fmtInt(aA.calls_engaged)} avec échange${
+                  aA.engage_rate == null ? '' : ` (${fmtDec(aA.engage_rate)} %)`}${
+                  aA.fullyMeasured ? '' : `, sur ${aA.measuredActiveDays} j comptée(s)`}` },
         { label: '✉️ E-mails', key: 'emails_sent' },
         { label: '🗂️ Fiches CRM', key: 'crm' }
     ];
@@ -910,7 +1104,7 @@ function renderKpis(aA, aB) {
             <div class="kpi-label">${it.label}</div>
             <div class="kpi-value">${show(v)}${unit ? ` <small>${unit}</small>` : ''}</div>
             ${delta(Math.round(v * 10) / 10, Math.round(r * 10) / 10).html}
-            <div class="kpi-sub">Référence : ${show(r)} ${unit}</div>
+            <div class="kpi-sub">${it.extra ? `${escapeHtml(it.extra)}<br>` : ''}Référence : ${show(r)} ${unit}</div>
         </div>`;
     }).join('');
 
@@ -927,6 +1121,16 @@ function renderKpis(aA, aB) {
 
     html += rate('🎯 Taux d\'appels aboutis', 'connect_rate', `sur ${fmtInt(aA.calls_made)} appels`);
     html += rate('🏁 Taux de RDV', 'meeting_rate', `sur ${fmtInt(aA.calls_connected)} aboutis`);
+
+    /* Le taux que réclame le terrain : à partir du moment où le prospect parle,
+       quelle chance d'obtenir un rendez-vous. Son dénominateur est le seul
+       proche de la cause réelle du rendez-vous. Il n'apparaît que si la période
+       analysée est mesurée de bout en bout : sinon ses deux termes ne portent
+       pas sur les mêmes journées. */
+    if (aA.fullyMeasured) {
+        html += rate('💬 RDV après échange', 'meeting_rate_engaged',
+            `sur ${fmtInt(aA.calls_engaged)} échange(s)`);
+    }
 
     html += `
         <div class="kpi-tile">
@@ -947,6 +1151,8 @@ function renderScorePanel(aA) {
     const parts = SCORE_WEIGHTS.map(w => ({ ...w, n: aA[w.key] || 0, pts: (aA[w.key] || 0) * w.w }));
     const total = parts.reduce((t, p) => t + p.pts, 0);
     const top = parts.slice().sort((x, y) => y.pts - x.pts)[0];
+    const gap = measureGap(aA);
+    const engW = SCORE_WEIGHTS.find(w => w.key === MEASURED_KEY)?.w || 0;
 
     $('#score-panel').innerHTML = `
         <h2>⚡ Comment se calcule le score de productivité</h2>
@@ -977,7 +1183,12 @@ function renderScorePanel(aA) {
             Le score n'a pas de valeur absolue : il ne vaut que comparé à une autre période, ce que fait
             le reste de cette page. Ces poids sont définis dans la vue SQL <code>v_daily_kpi</code> et peuvent
             être ajustés en une requête si la réalité du métier l'exige.
-        </div>`;
+        </div>
+        ${gap ? `<div class="score-why">⚠ <b>Comparaison avec le passé.</b> ${escapeHtml(gap)}.
+            Ces journées ne rapportent aucun point au titre des appels avec échange, alors qu'il y a
+            évidemment eu des conversations : leur score est mécaniquement sous-estimé de
+            ${fmtInt(engW)} point(s) par échange qui n'a pas pu être compté. Un écart avec une période
+            d'avant l'ouverture du compteur se lit donc avec cette réserve.</div>` : ''}`;
 }
 
 /* --------------------------------------------------------------------------
@@ -1143,7 +1354,7 @@ function renderTable(aRows) {
 
     if (!act.length) {
         $('#history-body').innerHTML =
-            `<tr><td colspan="11" class="td-muted" style="text-align:center;padding:32px">
+            `<tr><td colspan="12" class="td-muted" style="text-align:center;padding:32px">
              Aucune saisie sur la période analysée.</td></tr>`;
         return;
     }
@@ -1154,7 +1365,7 @@ function renderTable(aRows) {
         if (score(r) === best) cls.push('is-best');
         // data-th porte l'intitulé de colonne : sous 760 pixels le tableau se
         // transforme en cartes empilées et c'est cet attribut qui sert
-        // d'étiquette. Onze colonnes ne se lisent pas sur un téléphone, et
+        // d'étiquette. Douze colonnes ne se lisent pas sur un téléphone, et
         // aucun défilement horizontal n'y changerait rien.
         return `
         <tr class="${cls.join(' ')}">
@@ -1163,6 +1374,8 @@ function renderTable(aRows) {
                 ${r.is_correction ? '<b class="tag tag--fix" title="Dernière écriture faite par un administrateur, pas par le titulaire du compte">corrigé</b>' : ''}</td>
             <td data-th="Appels">${fmtInt(num(r, 'calls_made'))}</td>
             <td data-th="Aboutis">${fmtInt(num(r, 'calls_connected'))}</td>
+            <td data-th="Échanges" class="${isMeasured(r) ? '' : 'td-muted'}">${
+                isMeasured(r) ? fmtInt(num(r, MEASURED_KEY)) : '–'}</td>
             <td data-th="RDV"><b>${fmtInt(num(r, 'meetings_booked'))}</b></td>
             <td data-th="E-mails">${fmtInt(num(r, 'emails_sent'))}</td>
             <td data-th="Entreprises">${fmtInt(num(r, 'companies_created'))}</td>
@@ -1179,14 +1392,24 @@ function exportCsv() {
     const rows = rowsFor(state.a).filter(isActive);
     if (!rows.length) { toast('Rien à exporter sur cette période.', 'error'); return; }
 
-    const head = ['Date', 'Appels', 'Appels aboutis', 'RDV', 'E-mails',
-        'Entreprises', 'Contacts', 'Taux aboutis %', 'Taux RDV %', 'Score', 'Note'];
+    /* Dans un fichier, la largeur ne coûte rien : on sort les trois colonnes
+       d'échange en entier. Une cellule vide signifie « non mesuré » et non
+       zéro, ce qui permet à un tableur de l'exclure d'une moyenne au lieu de
+       la tirer vers le bas. */
+    const head = ['Date', 'Appels', 'Appels aboutis', 'Appels avec échange',
+        'Appels sans échange', 'RDV', 'E-mails', 'Entreprises', 'Contacts',
+        'Taux aboutis %', 'Taux échange %', 'Taux RDV %', 'Taux RDV après échange %',
+        'Score', 'Note'];
     const body = rows.map(r => [
         r.activity_date, num(r, 'calls_made'), num(r, 'calls_connected'),
+        isMeasured(r) ? num(r, MEASURED_KEY) : '',
+        isMeasured(r) ? Math.max(0, num(r, 'calls_connected') - num(r, MEASURED_KEY)) : '',
         num(r, 'meetings_booked'), num(r, 'emails_sent'),
         num(r, 'companies_created'), num(r, 'contacts_created'),
         r.connect_rate == null ? '' : fmtDec(r.connect_rate),
+        !isMeasured(r) || r.engage_rate == null ? '' : fmtDec(r.engage_rate),
         r.meeting_rate == null ? '' : fmtDec(r.meeting_rate),
+        !isMeasured(r) || r.meeting_rate_engaged == null ? '' : fmtDec(r.meeting_rate_engaged),
         score(r), (r.notes || '').replace(/[;\r\n]/g, ' ')
     ]);
 
