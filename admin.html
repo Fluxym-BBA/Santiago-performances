@@ -199,6 +199,44 @@
         </div>
 
         <!-- ============================================================
+             BARÈME DU SCORE DE PRODUCTIVITÉ
+             Réservé au propriétaire. Le formulaire est rempli par admin.js
+             depuis SCORE_WEIGHTS, jamais écrit en dur ici : une valeur en dur
+             dans le HTML serait une troisième définition du barème.
+             ============================================================ -->
+        <div class="section-head">
+            <div>
+                <h2>Barème du score</h2>
+                <p>Le score de productivité n'est stocké nulle part : il est recalculé à chaque
+                   lecture. Changer un poids renote donc immédiatement tout l'historique, pour
+                   toute l'équipe. L'aperçu ci-dessous montre l'effet avant d'enregistrer.</p>
+            </div>
+            <div class="section-head-actions">
+                <button class="btn btn--ghost" id="w-reset" type="button">↺ Barème enregistré</button>
+            </div>
+        </div>
+
+        <section class="info-panel" id="weights-block">
+            <div class="info-panel-head">
+                <span class="info-panel-icon">⚖️</span>
+                <h2>Points attribués à chaque action</h2>
+            </div>
+            <div class="info-panel-body">
+                <form id="weights-form" autocomplete="off" novalidate>
+                    <div class="form-grid" id="w-grid"></div>
+                    <div class="form-actions">
+                        <button class="btn btn--primary" id="w-submit" type="submit">Enregistrer ce barème</button>
+                        <span class="form-status" id="w-status" role="status"></span>
+                    </div>
+                </form>
+
+                <div id="w-preview"></div>
+
+                <p class="info-panel-note" id="w-note"></p>
+            </div>
+        </section>
+
+        <!-- ============================================================
              EXPLICATIONS
              ============================================================ -->
         <section class="info-panel info-panel--soft">

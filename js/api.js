@@ -98,6 +98,18 @@ export const EMPTY_DAY = Object.fromEntries(METRICS.map(m => [m.key, 0]));
    dépendrait du jour.
    -------------------------------------------------------------------------- */
 
+/* Ces valeurs ne sont plus la définition du barème : elles sont un REPLI.
+   La définition vit dans la table score_weights depuis la migration v8, et
+   loadScoreWeights() vient écraser les poids ci-dessous au démarrage.
+
+   Le tableau est muté sur place et jamais remplacé. dashboard.js, team.js et
+   scoreOf() l'ont importé et lisent `w` au moment de calculer : modifier les
+   objets suffit, réaffecter la variable ne changerait rien pour eux. C'est la
+   raison pour laquelle ceci reste un `const`.
+
+   Elles servent aussi de filet : si la table est injoignable ou invisible, une
+   page s'affiche avec le barème historique plutôt qu'avec des scores nuls. La
+   vue SQL applique exactement le même repli, avec les mêmes nombres. */
 export const SCORE_WEIGHTS = [
     { key: 'calls_made', w: 1, icon: '📞', label: 'Appel passé', plural: 'appels passés' },
     { key: 'calls_connected', w: 2, icon: '✅', label: 'Appel abouti', plural: 'appels aboutis' },
@@ -111,6 +123,109 @@ export const SCORE_WEIGHTS = [
 /** Score d'une ligne (ou d'un agrégat) à partir des pondérations ci-dessus. */
 export const scoreOf = row =>
     SCORE_WEIGHTS.reduce((t, x) => t + (Number(row?.[x.key]) || 0) * x.w, 0);
+
+/**
+ * Score d'une ligne avec un barème arbitraire, sans toucher au barème courant.
+ * Sert à l'aperçu de l'écran d'administration : on montre l'effet d'un barème
+ * AVANT de l'enregistrer, sinon on calibre en enregistrant puis en allant voir,
+ * et on recommence. Le barème est un objet { clé: poids }.
+ */
+export const scoreWith = (row, weights) =>
+    SCORE_WEIGHTS.reduce((t, x) => {
+        const w = Number(weights?.[x.key]);
+        return t + (Number(row?.[x.key]) || 0) * (Number.isFinite(w) ? w : x.w);
+    }, 0);
+
+/* --------------------------------------------------------------------------
+   Chargement et écriture du barème
+
+   Un seul endroit lit la table, un seul endroit l'écrit. Toute page passant par
+   requireAuth() a les bons poids avant son premier rendu.
+
+   updated_by vaut null tant qu'aucun humain n'a touché au barème : la ligne
+   posée par la migration n'a pas d'auteur. C'est ce qui permet à l'écran de se
+   taire au lieu d'afficher « barème modifié le 25 août » à des gens qui n'y ont
+   jamais touché.
+   -------------------------------------------------------------------------- */
+
+const WEIGHT_KEYS = SCORE_WEIGHTS.map(x => x.key);
+let scoreMeta = { loaded: false, changed: false, updatedAt: null, updatedBy: null };
+
+/** Métadonnées du barème courant : chargé ou non, modifié par qui et quand. */
+export const scoreWeightsMeta = () => ({ ...scoreMeta });
+
+/** Barème courant sous forme d'objet simple { clé: poids }. */
+export const currentWeights = () =>
+    Object.fromEntries(SCORE_WEIGHTS.map(x => [x.key, x.w]));
+
+function applyWeights(row) {
+    if (!row) return;
+    SCORE_WEIGHTS.forEach(x => {
+        const v = Number(row[x.key]);
+        // Une valeur absurde venue de la base ne doit pas casser l'affichage :
+        // on garde le repli plutôt que d'écrire NaN dans un poids.
+        if (Number.isFinite(v) && v >= 0) x.w = v;
+    });
+    scoreMeta = {
+        loaded: true,
+        changed: !!row.updated_by,
+        updatedAt: row.updated_at || null,
+        updatedBy: row.updated_by || null
+    };
+}
+
+/**
+ * Charge le barème depuis la base. Ne lève jamais : un barème indisponible
+ * dégrade l'affichage, il ne doit pas empêcher quelqu'un de saisir sa journée.
+ */
+export async function loadScoreWeights() {
+    try {
+        const { data, error } = await supabase
+            .from('score_weights')
+            .select('*')
+            .limit(1)
+            .maybeSingle();
+        if (error) throw error;
+        applyWeights(data);
+    } catch (e) {
+        scoreMeta = { ...scoreMeta, loaded: false };
+        console.warn('Barème du score : lecture impossible, repli sur les valeurs historiques.', e);
+    }
+    return scoreWeightsMeta();
+}
+
+/**
+ * Enregistre un barème. Réservé au propriétaire par la RLS : inutile de le
+ * vérifier ici, la base est la seule barrière qui compte. L'horodatage et
+ * l'auteur sont posés par un trigger, jamais envoyés par cet appel.
+ */
+export async function saveScoreWeights(weights) {
+    const patch = {};
+    WEIGHT_KEYS.forEach(k => {
+        const v = Math.round(Number(weights?.[k]));
+        if (!Number.isFinite(v) || v < 0 || v > 1000) {
+            throw new Error(`Poids invalide pour « ${k} » : attendu un entier entre 0 et 1000.`);
+        }
+        patch[k] = v;
+    });
+    if (WEIGHT_KEYS.reduce((t, k) => t + patch[k], 0) === 0) {
+        throw new Error('Tous les poids à zéro donneraient un score nul pour tout le monde.');
+    }
+    const { data, error } = await supabase
+        .from('score_weights')
+        .update(patch)
+        .eq('id', true)
+        .select('*')
+        .maybeSingle();
+    if (error) throw error;
+    if (!data) {
+        // La RLS filtre silencieusement : aucune ligne renvoyée veut dire
+        // « pas le droit », et non « rien à changer ».
+        throw new Error('Modification refusée : seul le propriétaire peut changer le barème.');
+    }
+    applyWeights(data);
+    return scoreWeightsMeta();
+}
 
 /* --------------------------------------------------------------------------
    Dates — tout est manipulé en heure locale, jamais en UTC, pour éviter
@@ -214,6 +329,10 @@ export async function requireAuth({ needs = null } = {}) {
     // Le profil est chargé ici, une fois, avant tout accès aux données : le rôle
     // et le contexte consulté doivent être connus avant la première requête.
     await loadProfile(session);
+    /* Le barème aussi, et pour la même raison : la page Performances décompose
+       le score dès son premier rendu. Le charger plus tard afficherait un
+       instant les poids de repli, donc un score qui change sous les yeux. */
+    await loadScoreWeights();
     if (myProfile() && myProfile().is_active === false) {
         await signOut();
         throw new Error('Compte désactivé');

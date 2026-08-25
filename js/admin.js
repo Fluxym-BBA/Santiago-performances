@@ -24,7 +24,9 @@ import {
     adminWipeActivity, fetchTeamRange, humanError, todayISO, addDaysISO, formatLong,
     adminFnStatus, adminAuthInfo, adminCreateAccount, adminSetPassword,
     adminDeleteAccount, adminDeletePreview, linkFor,
-    LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank
+    LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank,
+    SCORE_WEIGHTS, currentWeights, saveScoreWeights, scoreWeightsMeta,
+    scoreWith, canWriteAny
 } from './api.js';
 import { renderNav } from './nav.js';
 import { escapeHtml, fmtInt, toast, hideVeil } from './ui.js';
@@ -41,6 +43,7 @@ const LEVEL_HINT = {
 const labelOf = key => (LEVELS.find(l => l.key === key) || {}).label || key;
 
 let profiles = [];
+let actRows = [];         // activité brute, réutilisée par l'aperçu du barème
 let stats = new Map();    // user_id -> { days, last }
 let auth = new Map();     // user_id -> { last_sign_in_at, created_at, ... }
 let fn = { ok: false };   // état de l'Edge Function
@@ -61,6 +64,7 @@ async function load() {
         // conduirait à supprimer un compte en croyant qu'il est vide.
         const rows = await fetchTeamRange(addDaysISO(todayISO(), -730), todayISO(),
             { includeDemo: true, includeInactive: true, onlyBdr: false });
+        actRows = rows;
         rows.forEach(r => {
             const s = stats.get(r.user_id) || { days: 0, last: null };
             if (Number(r.total_actions) > 0) {
@@ -79,6 +83,225 @@ async function load() {
     if (fn.ok) {
         try { auth = await adminAuthInfo(); } catch { /* colonne laissée vide */ }
     }
+}
+
+/* ==========================================================================
+   BARÈME DU SCORE
+
+   Deux idées gouvernent cet écran.
+
+   La première : ne rien écrire en dur. Les champs sont construits depuis
+   SCORE_WEIGHTS, donc l'ajout d'une huitième métrique fera apparaître un
+   huitième champ sans qu'on touche à ce fichier. Une valeur recopiée ici
+   serait une troisième définition du barème, après la vue SQL et api.js.
+
+   La seconde : montrer avant d'enregistrer. Le score n'étant pas stocké,
+   valider un barème renote instantanément trois mois d'historique pour tout le
+   monde. Sans aperçu, on calibre en enregistrant puis en allant voir l'effet,
+   et on recommence, en faisant bouger le score de l'équipe à chaque essai.
+   L'aperçu recalcule tout dans le navigateur, sans rien écrire.
+
+   Aucun contrôle de droit ici n'est une protection : la RLS refuse l'écriture à
+   quiconque n'est pas propriétaire. Ce qui est fait ici, c'est ne pas promettre
+   un bouton qui sera refusé.
+   ========================================================================== */
+
+const PREVIEW_DAYS = 30;
+
+/** Le barème saisi à l'écran, borné, avec repli sur le barème courant. */
+function formWeights() {
+    const out = {};
+    SCORE_WEIGHTS.forEach(x => {
+        const el = document.getElementById(`w-${x.key}`);
+        const v = Math.round(Number(el ? el.value : NaN));
+        out[x.key] = Number.isFinite(v) && v >= 0 && v <= 1000 ? v : x.w;
+    });
+    return out;
+}
+
+/** Construit les champs depuis SCORE_WEIGHTS et remplit avec le barème courant. */
+function renderWeights() {
+    const grid = document.getElementById('w-grid');
+    const note = document.getElementById('w-note');
+    if (!grid) return;
+    const cur = currentWeights();
+    const allowed = canWriteAny(myProfile());
+
+    grid.innerHTML = SCORE_WEIGHTS.map(x => `
+        <div class="field">
+            <label for="w-${x.key}">${x.icon} ${escapeHtml(x.label)}</label>
+            <input type="number" id="w-${x.key}" min="0" max="1000" step="1"
+                   inputmode="numeric" value="${cur[x.key]}" ${allowed ? '' : 'disabled'}>
+            <p class="field-note">points par ${escapeHtml(x.label.toLowerCase())}</p>
+        </div>`).join('');
+
+    const submit = document.getElementById('w-submit');
+    const reset = document.getElementById('w-reset');
+    if (submit) submit.disabled = !allowed;
+    if (reset) reset.disabled = !allowed;
+
+    const meta = scoreWeightsMeta();
+    const parts = [];
+    if (!allowed) {
+        parts.push('Seul le <b>propriétaire</b> peut modifier le barème. ' +
+            'Un barème propre à chacun rendrait les scores incomparables entre deux personnes, ' +
+            "ce qui est précisément l'usage de la vue d'équipe.");
+    }
+    if (!meta.loaded) {
+        parts.push('⚠ Le barème n\'a pas pu être lu en base : les valeurs affichées sont celles ' +
+            'du repli inscrit dans le code. Enregistrer depuis cet écran resterait sans effet visible ' +
+            'tant que la lecture échoue.');
+    } else if (meta.changed) {
+        const w = whenLabel(meta.updatedAt);
+        parts.push(`Dernière modification ${w ? `le ${escapeHtml(w.date)} (${escapeHtml(w.ago)})` : ''} ` +
+            `par ${escapeHtml(nameOf(meta.updatedBy))}.`);
+    } else {
+        parts.push('Barème d\'origine, jamais modifié depuis la mise en service.');
+    }
+    parts.push('Le score n\'est stocké nulle part : il est recalculé à chaque affichage. ' +
+        'Un barème enregistré s\'applique donc à <b>tout l\'historique</b> et pour <b>tout le monde</b>, ' +
+        'y compris au meilleur jour de tous les temps.');
+    if (note) note.innerHTML = parts.join(' ');
+}
+
+/**
+ * Aperçu : effet du barème saisi sur les PREVIEW_DAYS derniers jours.
+ * Tout est calculé ici, rien n'est écrit. Les comptes de démonstration et
+ * désactivés sont exclus : un classement qui les contient ne veut rien dire.
+ */
+function renderPreview() {
+    const host = document.getElementById('w-preview');
+    if (!host) return;
+
+    const next = formWeights();
+    const cur = currentWeights();
+    const changed = SCORE_WEIGHTS.filter(x => next[x.key] !== cur[x.key]);
+
+    const from = addDaysISO(todayISO(), -(PREVIEW_DAYS - 1));
+    // user_id et non id : c'est la clé que porte un profil, et celle qui joint
+    // sur l'activité. Se tromper ici vide silencieusement l'aperçu.
+    const keep = new Set(profiles
+        .filter(p => p.is_active !== false && !p.is_demo && p.is_bdr)
+        .map(p => p.user_id));
+    const rows = actRows.filter(r =>
+        r.activity_date >= from && Number(r.total_actions) > 0 && keep.has(r.user_id));
+
+    if (!rows.length) {
+        host.innerHTML = `<p class="field-note">Aucune journée saisie sur les ${PREVIEW_DAYS} derniers
+            jours par un compte réel : il n'y a rien à prévisualiser. Le barème reste enregistrable.</p>`;
+        return;
+    }
+
+    const per = new Map();
+    rows.forEach(r => {
+        const e = per.get(r.user_id) || { days: 0, before: 0, after: 0 };
+        e.days++;
+        e.before += scoreWith(r, cur);
+        e.after += scoreWith(r, next);
+        per.set(r.user_id, e);
+    });
+
+    const avg = (t, d) => (d > 0 ? t / d : 0);
+    const list = [...per.entries()]
+        .map(([id, e]) => ({ id, days: e.days, before: avg(e.before, e.days), after: avg(e.after, e.days) }));
+    const rank = (arr, key) => {
+        const sorted = arr.slice().sort((a, b) => b[key] - a[key]);
+        return new Map(sorted.map((x, i) => [x.id, i + 1]));
+    };
+    const rB = rank(list, 'before'), rA = rank(list, 'after');
+    list.sort((a, b) => b.after - a.after);
+
+    const tot = list.reduce((t, x) => ({ b: t.b + x.before, a: t.a + x.after }), { b: 0, a: 0 });
+    const mB = avg(tot.b, list.length), mA = avg(tot.a, list.length);
+    const pct = mB > 0 ? ((mA - mB) / mB) * 100 : 0;
+    const moved = list.filter(x => rB.get(x.id) !== rA.get(x.id)).length;
+
+    const arrow = (b, a) => {
+        const d = a - b;
+        if (!d) return '<span class="td-muted">inchangé</span>';
+        return `<b style="color:${d > 0 ? '#059669' : '#dc2626'}">${d > 0 ? '+' : ''}${fmtInt(Math.round(d))}</b>`;
+    };
+    const rankCell = (b, a) => (b === a
+        ? `${a}<sup class="td-muted"> =</sup>`
+        : `${a} <span style="color:${a < b ? '#059669' : '#dc2626'}">(${a < b ? '↑' : '↓'} ${b})</span>`);
+
+    host.innerHTML = `
+        <div class="section-head" style="margin-top:24px">
+            <div>
+                <h2 style="font-size:16px">Aperçu sur les ${PREVIEW_DAYS} derniers jours</h2>
+                <p>${changed.length === 0
+                    ? 'Barème identique à celui enregistré : rien ne bougerait.'
+                    : `${changed.length} poids modifié(s) : ${
+                        changed.map(x => `${escapeHtml(x.label.toLowerCase())} ${x.w} → ${next[x.key]}`).join(', ')}.
+                       Score moyen par journée saisie : <b>${fmtInt(Math.round(mB))}</b> →
+                       <b>${fmtInt(Math.round(mA))}</b> (${pct >= 0 ? '+' : ''}${pct.toFixed(1)} %),
+                       ${moved === 0 ? 'classement inchangé' : `<b>${moved}</b> personne(s) changent de rang`}.`}</p>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr>
+                    <th>Compte</th><th>Journées</th><th>Score moyen actuel</th>
+                    <th>Avec ce barème</th><th>Écart</th><th>Rang</th>
+                </tr></thead>
+                <tbody>${list.map(x => `
+                    <tr>
+                        <td>${escapeHtml(nameOf(x.id))}</td>
+                        <td>${fmtInt(x.days)}</td>
+                        <td>${fmtInt(Math.round(x.before))}</td>
+                        <td><b>${fmtInt(Math.round(x.after))}</b></td>
+                        <td>${arrow(x.before, x.after)}</td>
+                        <td>${rankCell(rB.get(x.id), rA.get(x.id))}</td>
+                    </tr>`).join('')}</tbody>
+            </table>
+        </div>`;
+}
+
+/** Branche le formulaire. Appelé une seule fois, après le premier rendu. */
+function wireWeights() {
+    const form = document.getElementById('weights-form');
+    const reset = document.getElementById('w-reset');
+    const status = document.getElementById('w-status');
+    if (!form) return;
+
+    // L'aperçu se recalcule à la frappe : tout est local, rien n'est écrit.
+    form.addEventListener('input', renderPreview);
+
+    reset?.addEventListener('click', () => {
+        renderWeights();
+        renderPreview();
+        if (status) status.textContent = '';
+    });
+
+    form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const next = formWeights();
+        const cur = currentWeights();
+        const changed = SCORE_WEIGHTS.filter(x => next[x.key] !== cur[x.key]);
+        if (!changed.length) { toast('Ce barème est déjà celui enregistré'); return; }
+
+        const detail = changed
+            .map(x => `  • ${x.label} : ${x.w} → ${next[x.key]}`).join('\n');
+        if (!confirm('Enregistrer ce barème ?\n\n' + detail +
+            '\n\nLe score n\'étant pas stocké, tout l\'historique de toute l\'équipe sera renoté ' +
+            'immédiatement, y compris les journées déjà passées et le meilleur jour de tous les temps.')) return;
+
+        const submit = document.getElementById('w-submit');
+        if (submit) submit.disabled = true;
+        if (status) status.textContent = 'Enregistrement…';
+        try {
+            await saveScoreWeights(next);
+            renderWeights();
+            renderPreview();
+            if (status) status.textContent = '';
+            toast('Barème enregistré. Les scores sont renotés.');
+        } catch (e) {
+            if (status) status.textContent = '';
+            toast(humanError(e), 'error');
+        } finally {
+            if (submit) submit.disabled = !canWriteAny(myProfile());
+        }
+    });
 }
 
 /* --------------------------------------------------------------------------
@@ -714,11 +937,16 @@ function showManual(fnState) {
             fn = await adminFnStatus({ force: true });
             await load();
             render();
+            renderWeights();
+            renderPreview();
             toast('Comptes rechargés');
         });
 
         await load();
         render();
+        renderWeights();
+        renderPreview();
+        wireWeights();
         hideVeil();
     } catch (e) {
         if (String(e.message || e).includes('Non authentifié')) return;

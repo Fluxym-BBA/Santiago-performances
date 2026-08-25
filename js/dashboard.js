@@ -12,7 +12,7 @@ import {
     endOfMonth, addMonthsISO, startOfQuarter, endOfQuarter, periodLength,
     previousPeriod, samePeriodLastYear, periodLabel, periodLabelShort, minISO,
     maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS,
-    isViewingOther, viewedProfile, isAdmin, linkFor
+    isViewingOther, viewedProfile, isAdmin, linkFor, scoreWeightsMeta
 } from './api.js';
 import {
     num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
@@ -1154,6 +1154,16 @@ function renderScorePanel(aA) {
     const gap = measureGap(aA);
     const engW = SCORE_WEIGHTS.find(w => w.key === MEASURED_KEY)?.w || 0;
 
+    /* Le barème est réglable depuis l'administration depuis la v8, et le score
+       n'est stocké nulle part : une modification renote instantanément tout
+       l'historique. Quelqu'un qui a noté son score de la semaine dernière doit
+       pouvoir comprendre pourquoi il a changé, sinon c'est l'outil qui perd sa
+       crédibilité, et avec elle la saisie quotidienne. On ne dit rien tant que
+       personne n'y a touché : updated_by est vide sur le barème d'origine. */
+    const wMeta = scoreWeightsMeta();
+    const changedOn = wMeta.changed && wMeta.updatedAt ? String(wMeta.updatedAt).slice(0, 10) : null;
+    const spans = changedOn && (state.a.from < changedOn || state.b.from < changedOn);
+
     $('#score-panel').innerHTML = `
         <h2>⚡ Comment se calcule le score de productivité</h2>
         <p>Le score résume une journée en un seul nombre comparable. Chaque action est multipliée par un poids,
@@ -1184,6 +1194,13 @@ function renderScorePanel(aA) {
             le reste de cette page. Ces poids sont définis dans la vue SQL <code>v_daily_kpi</code> et peuvent
             être ajustés en une requête si la réalité du métier l'exige.
         </div>
+        ${changedOn ? `<div class="score-why">⚖️ <b>Barème modifié le ${
+            escapeHtml(formatLong(changedOn).replace(/^\S+ /, ''))}.</b>
+            Le score n'est pas figé au moment de la saisie, il est recalculé à chaque affichage :
+            les journées d'avant cette date sont donc notées avec le barème actuel, pas avec celui
+            qui était en vigueur ce jour-là.${spans
+                ? ' Au moins une des deux périodes comparées commence avant ce changement : un écart entre elles reflète en partie le nouveau barème, pas seulement l\'activité.'
+                : ''}</div>` : ''}
         ${gap ? `<div class="score-why">⚠ <b>Comparaison avec le passé.</b> ${escapeHtml(gap)}.
             Ces journées ne rapportent aucun point au titre des appels avec échange, alors qu'il y a
             évidemment eu des conversations : leur score est mécaniquement sous-estimé de
