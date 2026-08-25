@@ -47,6 +47,18 @@ export const METRICS = [
         hint: 'Interlocuteur réellement joint', color: '#0ea5e9'
     },
     {
+        key: 'calls_engaged', target: 'engaged_target', group: 'calls',
+        label: 'Appels avec échange', short: 'Échanges',
+        hint: 'Conversation réelle, au-delà des 30 premières secondes', color: '#0284c7',
+        /* Première journée mesurable. Avant cette date la colonne vaut NULL en
+           base : personne ne comptait. Tout graphique, moyenne ou taux portant
+           sur cette métrique doit exclure les journées antérieures plutôt que
+           de les afficher à zéro, sinon la courbe racontera une progression
+           qui n'a jamais eu lieu. En base, la même information se lit
+           select min(activity_date) from daily_activity where calls_engaged is not null. */
+        since: '2026-08-25'
+    },
+    {
         key: 'meetings_booked', target: 'meetings_target', group: 'calls',
         label: 'Rendez-vous obtenus', short: 'RDV',
         hint: 'Le seul chiffre qui compte vraiment', color: '#10b981'
@@ -60,6 +72,11 @@ export const METRICS = [
 
 export const METRIC_BY_KEY = Object.fromEntries(METRICS.map(m => [m.key, m]));
 
+/* Journée vierge : tout à zéro. calls_engaged y vaut zéro comme les autres,
+   alors que la colonne accepte NULL en base. Le NULL n'existe que sur les
+   journées saisies avant le 25/08/2026, où l'échange n'était pas compté :
+   la page de saisie les affiche champ vide plutôt que zéro, pour ne pas faire
+   dire à l'écran qu'il n'y a eu aucun échange ce jour-là. */
 export const EMPTY_DAY = Object.fromEntries(METRICS.map(m => [m.key, 0]));
 
 /* --------------------------------------------------------------------------
@@ -68,12 +85,24 @@ export const EMPTY_DAY = Object.fromEntries(METRICS.map(m => [m.key, 0]));
    explications affichées lisent toutes cette constante.
    Elle doit rester identique à la définition de la vue SQL v_daily_kpi,
    qui reste la source de vérité côté base.
+
+   Révision du 25/08/2026, en même temps que l'arrivée des appels avec
+   échange : abouti 3 → 2, RDV 20 → 25, échange 4. Mesuré sur les 164
+   journées réelles, le rendez-vous n'était que quatrième contributeur du
+   score (19,0 %), derrière l'e-mail (22,1 %), alors que l'écran l'annonce
+   comme « le seul chiffre qui compte vraiment ». Ajouter l'échange sans
+   toucher aux poids l'aurait fait tomber cinquième ; il est maintenant
+   deuxième (20,7 %). Coût assumé : la moyenne des journées passées descend
+   de 140,7 à 137,1, et 8 journées sur 164 bougent de plus de 10 points.
+   Une seule formule, valable à toutes les dates, plutôt qu'une règle qui
+   dépendrait du jour.
    -------------------------------------------------------------------------- */
 
 export const SCORE_WEIGHTS = [
     { key: 'calls_made', w: 1, icon: '📞', label: 'Appel passé', plural: 'appels passés' },
-    { key: 'calls_connected', w: 3, icon: '✅', label: 'Appel abouti', plural: 'appels aboutis' },
-    { key: 'meetings_booked', w: 20, icon: '🤝', label: 'Rendez-vous', plural: 'rendez-vous' },
+    { key: 'calls_connected', w: 2, icon: '✅', label: 'Appel abouti', plural: 'appels aboutis' },
+    { key: 'calls_engaged', w: 4, icon: '💬', label: 'Appel avec échange', plural: 'appels avec échange' },
+    { key: 'meetings_booked', w: 25, icon: '🤝', label: 'Rendez-vous', plural: 'rendez-vous' },
     { key: 'emails_sent', w: 1, icon: '✉️', label: 'E-mail envoyé', plural: 'e-mails envoyés' },
     { key: 'companies_created', w: 2, icon: '🏢', label: 'Entreprise créée', plural: 'entreprises créées' },
     { key: 'contacts_created', w: 2, icon: '👤', label: 'Contact créé', plural: 'contacts créés' }
@@ -758,7 +787,7 @@ export async function fetchTeamRange(fromIso, toIso,
 
 export const DEFAULT_TARGETS = {
     companies_target: 5, contacts_target: 10, calls_made_target: 40,
-    calls_connected_target: 10, meetings_target: 2, emails_target: 30
+    calls_connected_target: 10, engaged_target: 8, meetings_target: 2, emails_target: 30
 };
 
 export async function fetchTargets() {

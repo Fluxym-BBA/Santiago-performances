@@ -153,23 +153,40 @@ function settle() {
     status('✓ Enregistré', 'saved');
 }
 
+/* Chaîne des appels, du plus large au plus étroit. La base impose
+   appels ⊇ aboutis ⊇ échanges, et c'est voulu. */
+const CALL_CHAIN = [
+    { key: 'calls_made', label: 'appels passés' },
+    { key: 'calls_connected', label: 'appels aboutis' },
+    { key: 'calls_engaged', label: 'appels avec échange' }
+];
+
 /**
- * La base impose calls_connected <= calls_made, et c'est voulu. Plutôt que
- * d'envoyer une écriture qui sera refusée, on dit tout de suite ce qui bloque
- * et ce qu'il faut faire. Le contrôle porte sur ce qui est à l'écran, frappe
- * en attente comprise, pas sur ce que la base contient déjà.
+ * Plutôt que d'envoyer une écriture qui sera refusée par la base, on dit tout
+ * de suite ce qui bloque et ce qu'il faut faire. Le contrôle porte sur ce qui
+ * est à l'écran, frappe en attente comprise, pas sur ce que la base contient.
+ * Renvoie null si la valeur est acceptable, sinon le message à afficher.
  */
 function incoherence(key, v) {
-    if (key !== 'calls_made' && key !== 'calls_connected') return null;
-    const calls = key === 'calls_made' ? v : Number(row.calls_made) || 0;
-    const conn = key === 'calls_connected' ? v : Number(row.calls_connected) || 0;
-    if (conn <= calls) return null;
-    if (key === 'calls_connected') {
-        return `${fmtInt(conn)} appels aboutis pour ${fmtInt(calls)} appels passés : saisissez `
-             + `d'abord le nombre d'appels passés, la valeur sera enregistrée juste après.`;
+    const rang = CALL_CHAIN.findIndex(s => s.key === key);
+    if (rang < 0) return null;
+    const val = i => (CALL_CHAIN[i].key === key ? v : Number(row[CALL_CHAIN[i].key]) || 0);
+
+    for (let i = 1; i < CALL_CHAIN.length; i++) {
+        const haut = val(i - 1);
+        const bas = val(i);
+        if (bas <= haut) continue;
+        const nomHaut = CALL_CHAIN[i - 1].label;
+        const nomBas = CALL_CHAIN[i].label;
+        // Le champ que l'on est en train de saisir est-il celui du bas ?
+        if (i === rang) {
+            return `${fmtInt(bas)} ${nomBas} pour ${fmtInt(haut)} ${nomHaut} : saisissez d'abord `
+                 + `le nombre d'${nomHaut}, la valeur sera enregistrée juste après.`;
+        }
+        return `${fmtInt(bas)} ${nomBas} sont déjà saisis : le nombre d'${nomHaut} ne peut pas `
+             + `descendre à ${fmtInt(haut)}. Corrigez les ${nomBas} d'abord.`;
     }
-    return `${fmtInt(conn)} appels aboutis sont déjà saisis : le nombre d'appels passés ne peut `
-         + `pas descendre à ${fmtInt(v)}. Corrigez les appels aboutis d'abord.`;
+    return null;
 }
 
 /** Vrai si la base a refusé au nom de la cohérence appels / aboutis. */
@@ -357,9 +374,14 @@ function onType(input) {
  * intention explicite : si le champ gardait l'ancien nombre, l'écran et la base
  * afficheraient deux chiffres différents.
  */
+/** Valeur à afficher dans un champ : vide quand la journée n'a pas été mesurée. */
+function inputValue(key) {
+    return row[key] == null ? '' : String(Number(row[key]) || 0);
+}
+
 function showValue(key) {
     const el = document.getElementById(`in-${key}`);
-    if (el) el.value = Number(row[key]) || 0;
+    if (el) el.value = inputValue(key);
 }
 
 function flash(key) {
@@ -376,15 +398,18 @@ function flash(key) {
 
 function paintGauge(m) {
     const t = Number(targets[m.target]) || 0;
+    const mesure = row[m.key] != null;
     const v = Number(row[m.key]) || 0;
-    const pct = t > 0 ? Math.min(100, (v / t) * 100) : 0;
+    const pct = mesure && t > 0 ? Math.min(100, (v / t) * 100) : 0;
     const fill = document.getElementById(`gauge-${m.key}`);
     if (!fill) return;
     fill.style.width = `${pct}%`;
-    fill.classList.toggle('gauge-fill--done', t > 0 && v >= t);
+    fill.classList.toggle('gauge-fill--done', mesure && t > 0 && v >= t);
     document.getElementById(`target-${m.key}`).textContent = t > 0 ? fmtInt(t) : 'non défini';
+    // Journée non mesurée : ni pourcentage ni barre, sinon l'écran affirmerait
+    // un zéro que personne n'a déclaré.
     document.getElementById(`gauge-pct-${m.key}`).textContent =
-        t > 0 ? `${Math.round((v / t) * 100)} %` : '—';
+        !mesure ? 'non mesuré' : t > 0 ? `${Math.round((v / t) * 100)} %` : '—';
 }
 
 function paintDerived() {
@@ -393,6 +418,13 @@ function paintDerived() {
     const rdv = Number(row.meetings_booked) || 0;
 
     $('#kpi-connect').textContent = calls > 0 ? `${fmtDec((conn / calls) * 100)} %` : '–';
+    // Non mesuré et zéro ne s'affichent pas pareil : le premier est une absence
+    // de donnée, le second un résultat.
+    const eng = $('#kpi-engage');
+    if (eng) {
+        eng.textContent = row.calls_engaged == null ? 'non mesuré'
+            : conn > 0 ? `${fmtDec(((Number(row.calls_engaged) || 0) / conn) * 100)} %` : '–';
+    }
     $('#kpi-meeting').textContent = conn > 0 ? `${fmtDec((rdv / conn) * 100)} %` : '–';
     $('#kpi-effort').textContent = rdv > 0 ? `${fmtDec(calls / rdv)} appels` : '–';
 
@@ -411,7 +443,7 @@ function paintDerived() {
 function paint() {
     METRICS.forEach(m => {
         const input = document.getElementById(`in-${m.key}`);
-        if (input && document.activeElement !== input) input.value = Number(row[m.key]) || 0;
+        if (input && document.activeElement !== input) input.value = inputValue(m.key);
         paintGauge(m);
     });
     const notes = $('#day-notes');
