@@ -670,7 +670,22 @@ export async function fetchBestDay() {
     return data;
 }
 
-/** Écrit une valeur exacte (ou plusieurs) sur un jour, en créant la ligne si besoin. */
+/**
+ * Écrit une valeur exacte (ou plusieurs) sur un jour, en créant la ligne si besoin.
+ *
+ * PIÈGE À CONNAÎTRE AVANT DE S'EN SERVIR POUR UN COMPTEUR.
+ * PostgreSQL évalue les contraintes CHECK sur la ligne PROPOSÉE, avant de
+ * constater le conflit et de basculer sur le UPDATE. Un upsert qui ne porte
+ * qu'une colonne est donc contrôlé avec toutes les autres à leur valeur par
+ * défaut : écrire calls_connected = 10 était refusé par
+ * daily_activity_calls_coherent parce que la ligne proposée annonçait
+ * calls_made = 0, alors que la ligne réelle en comptait 13.
+ * Vérifié sur PostgreSQL 17 le 25/08/2026.
+ *
+ * Cette fonction ne convient donc qu'aux colonnes qu'aucune contrainte ne relie
+ * à une autre (les notes, par exemple). Pour les métriques, passer par
+ * setMetric() ou bump(), qui créent la ligne avant de la modifier.
+ */
 export async function saveDay(iso, patch, session) {
     const payload = { user_id: target(), activity_date: iso, ...patch };
     const { data, error } = await supabase
@@ -686,6 +701,23 @@ export async function saveDay(iso, patch, session) {
 export async function bump(metricKey, delta, iso) {
     const { data, error } = await supabase.rpc('bump_metric', {
         p_metric: metricKey, p_delta: delta, p_date: iso,
+        // Nul quand on saisit pour soi : la base retombe alors sur auth.uid().
+        p_user_id: isViewingOther() ? target() : null
+    });
+    if (error) throw error;
+    return Array.isArray(data) ? data[0] : data;
+}
+
+/**
+ * Écrit une valeur exacte sur une métrique (frappe directe au clavier).
+ * Même mécanique que bump_metric, en absolu plutôt qu'en relatif : la base crée
+ * la journée à zéro si elle manque, puis met à jour la seule colonne visée.
+ * C'est ce qui évite la ligne proposée incohérente décrite au-dessus de
+ * saveDay(). Demande sql/set-metric-migration-v5.sql.
+ */
+export async function setMetric(metricKey, value, iso) {
+    const { data, error } = await supabase.rpc('set_metric', {
+        p_metric: metricKey, p_value: value, p_date: iso,
         // Nul quand on saisit pour soi : la base retombe alors sur auth.uid().
         p_user_id: isViewingOther() ? target() : null
     });
@@ -789,6 +821,10 @@ export function humanError(error) {
     }
     if (error.fnError && error.status === 401) {
         return 'Session expirée. Rechargez la page et reconnectez-vous.';
+    }
+    if (msg.includes('set_metric') && (error.code === 'PGRST202' || error.code === '42883')) {
+        return "La base n'a pas encore la fonction set_metric : exécutez "
+             + 'sql/set-metric-migration-v5.sql. Les boutons + et − continuent de fonctionner.';
     }
     if (error.code === '42883' && msg.includes('admin_delete_preview')) {
         return "La base n'a pas encore la fonction admin_delete_preview : exécutez accounts-migration-v3.sql.";

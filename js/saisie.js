@@ -1,14 +1,28 @@
 /* ==========================================================================
    SAISIE.JS — Page de saisie quotidienne.
-   Principe : aucune action de validation. Chaque clic ou frappe est
-   persistée (incrément atomique côté base pour les boutons, upsert
-   débattu de 600 ms pour la frappe directe).
+   Principe : aucune action de validation. Chaque clic ou frappe est persistée.
+
+   Trois chemins d'écriture, et un seul upsert :
+     - boutons + / −  : bump_metric, incrément atomique côté base ;
+     - frappe directe : set_metric, valeur exacte, anti-rebond de 600 ms ;
+     - note du jour   : upsert classique, aucune contrainte ne la relie à rien.
+
+   La frappe directe passait par le même upsert que la note. C'était le bogue
+   du 24/08/2026 : PostgreSQL contrôle les contraintes CHECK sur la ligne
+   proposée avant de résoudre le ON CONFLICT, donc un upsert ne portant que
+   calls_connected était contrôlé avec calls_made à zéro, et la base refusait
+   « plus d'aboutis que d'appels » sur une journée pourtant cohérente.
+
+   Les écritures partent une par une, dans l'ordre où elles ont été
+   programmées : deux écritures concurrentes sur les appels et les aboutis
+   peuvent arriver dans le mauvais ordre et faire refuser une journée qui est
+   cohérente à l'écran.
    ========================================================================== */
 
 import {
     requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY, todayISO,
     addDaysISO, formatLong, relativeLabel, diffDays, fetchDay,
-    saveDay, bump, fetchTargets, saveTargets, humanError,
+    saveDay, bump, setMetric, fetchTargets, saveTargets, humanError,
     SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
@@ -19,7 +33,20 @@ let day = todayISO();       // date en cours de saisie
 let row = { ...EMPTY_DAY };  // valeurs affichées
 let prevRow = null;          // veille, pour la comparaison
 let targets = {};
-const timers = {};           // debounce par champ
+
+/* Trois états à distinguer, sans quoi l'écran et la base finissent par
+   raconter deux histoires différentes :
+     - timers  : frappe programmée, pas encore envoyée (anti-rebond) ;
+     - pending : valeur tapée et affichée, pas encore confirmée par la base.
+       La ligne renvoyée par la base est fusionnée AVEC elle, sinon la réponse
+       d'un champ écrase la frappe en cours d'un autre champ ;
+     - blocked : valeur refusée faute de cohérence. Elle reste à l'écran et
+       elle est rejouée dès que la journée redevient cohérente, plutôt que
+       d'être perdue en silence. */
+const timers = {};
+const pending = {};
+const blocked = {};
+let inflight = 0;
 
 /* Le score est calculé côté client pour un affichage instantané, à partir de
    SCORE_WEIGHTS (source unique partagée avec le dashboard). La vue SQL
@@ -76,8 +103,10 @@ function buildCards() {
     });
 
     $('#day-notes').addEventListener('input', e => {
-        row.notes = e.target.value;
-        schedule('notes', () => persist({ notes: e.target.value }), 900);
+        const v = e.target.value;
+        const iso = day;   // journée figée ici : voir onType()
+        row.notes = v;
+        schedule('notes', () => enqueue(() => persist({ notes: v }, iso)), 900);
     });
 }
 
@@ -91,9 +120,79 @@ function status(text, kind = '') {
     el.textContent = text;
 }
 
-function schedule(key, fn, ms = 600) {
-    clearTimeout(timers[key]);
-    timers[key] = setTimeout(fn, ms);
+/** Une écriture à la fois, dans l'ordre de programmation. */
+let chain = Promise.resolve();
+function enqueue(job) {
+    chain = chain.then(job, job);
+    return chain;
+}
+
+function schedule(key, run, ms = 600) {
+    cancel(key);
+    timers[key] = { run, id: setTimeout(() => { timers[key] = null; run(); }, ms) };
+}
+
+function cancel(key) {
+    const t = timers[key];
+    if (t) { clearTimeout(t.id); timers[key] = null; }
+}
+
+/** Envoie sans attendre la fin de l'anti-rebond. */
+function flush(key) {
+    const t = timers[key];
+    if (!t) return;
+    clearTimeout(t.id);
+    timers[key] = null;
+    t.run();
+}
+
+/** État de sauvegarde affiché, une fois la file vidée. */
+function settle() {
+    if (inflight > 0) { status('Enregistrement…', 'saving'); return; }
+    if (Object.keys(blocked).length) { status('⚠ Non enregistré', 'error'); return; }
+    status('✓ Enregistré', 'saved');
+}
+
+/**
+ * La base impose calls_connected <= calls_made, et c'est voulu. Plutôt que
+ * d'envoyer une écriture qui sera refusée, on dit tout de suite ce qui bloque
+ * et ce qu'il faut faire. Le contrôle porte sur ce qui est à l'écran, frappe
+ * en attente comprise, pas sur ce que la base contient déjà.
+ */
+function incoherence(key, v) {
+    if (key !== 'calls_made' && key !== 'calls_connected') return null;
+    const calls = key === 'calls_made' ? v : Number(row.calls_made) || 0;
+    const conn = key === 'calls_connected' ? v : Number(row.calls_connected) || 0;
+    if (conn <= calls) return null;
+    if (key === 'calls_connected') {
+        return `${fmtInt(conn)} appels aboutis pour ${fmtInt(calls)} appels passés : saisissez `
+             + `d'abord le nombre d'appels passés, la valeur sera enregistrée juste après.`;
+    }
+    return `${fmtInt(conn)} appels aboutis sont déjà saisis : le nombre d'appels passés ne peut `
+         + `pas descendre à ${fmtInt(v)}. Corrigez les appels aboutis d'abord.`;
+}
+
+/** Vrai si la base a refusé au nom de la cohérence appels / aboutis. */
+function isCoherence(e) {
+    return !!e && (e.code === '23514' || /calls_coherent/.test(e.message || ''));
+}
+
+/** La base a répondu : ses valeurs font foi, sauf celles encore en attente. */
+function applyRow(saved, iso) {
+    if (!saved || iso !== day) return;   // la journée affichée a changé entre-temps
+    row = { ...saved, ...pending };
+    paint();
+}
+
+/** Rejoue les valeurs refusées qui sont redevenues possibles. */
+function retryBlocked() {
+    Object.entries(blocked).forEach(([key, v]) => {
+        if (incoherence(key, v)) return;
+        delete blocked[key];
+        pending[key] = v;
+        const iso = day;
+        schedule(key, () => enqueue(() => setOne(key, v, iso)), 150);
+    });
 }
 
 /* --------------------------------------------------------------------------
@@ -142,53 +241,125 @@ function renderIdentity() {
     document.title = `Corriger ${name} | Cockpit BDR — Fluxym`;
 }
 
-async function persist(patch) {
+/** Écriture de la note du jour. Réservée aux colonnes libres de contrainte. */
+async function persist(patch, iso) {
     if (!allowWrite()) return;
+    inflight++;
     status('Enregistrement…', 'saving');
+    let resync = false;
     try {
-        const saved = await saveDay(day, patch, session);
-        row = saved;
-        paint();
-        status('✓ Enregistré', 'saved');
+        applyRow(await saveDay(iso, patch, session), iso);
     } catch (e) {
-        status('⚠ Non enregistré', 'error');
         toast(humanError(e), 'error', 5000);
-        await load(day);   // on resynchronise sur la vérité de la base
+        resync = true;
     }
+    inflight--;
+    settle();
+    if (resync) await load(day);   // on resynchronise sur la vérité de la base
 }
 
-async function onBump(key, d) {
+/** Écriture d'une valeur exacte sur une métrique. */
+async function setOne(key, v, iso) {
+    if (!allowWrite()) return;
+    inflight++;
+    status('Enregistrement…', 'saving');
+    let ok = false;
+    let resync = false;
+    try {
+        const saved = await setMetric(key, v, iso);
+        if (pending[key] === v) delete pending[key];
+        delete blocked[key];
+        applyRow(saved, iso);
+        ok = true;
+    } catch (e) {
+        toast(humanError(e), 'error', 6000);
+        // Refus de cohérence : la valeur reste à l'écran et sera rejouée dès
+        // que la journée le permettra. Toute autre erreur veut dire que l'on
+        // ne sait plus ce que contient la base : on relit.
+        if (isCoherence(e)) blocked[key] = v;
+        else resync = true;
+    }
+    inflight--;
+    settle();
+    if (resync) { await load(day); return; }
+    if (ok) retryBlocked();
+}
+
+function onBump(key, d) {
     const before = Number(row[key]) || 0;
     if (d < 0 && before === 0) return;
+    const next = Math.max(0, before + d);
+
+    const refus = incoherence(key, next);
+    if (refus) { toast(refus, 'error', 7000); return; }
     if (!allowWrite()) return;
 
+    const iso = day;
+    // Une frappe encore en attente sur ce champ part avant l'incrément, sinon
+    // la base incrémenterait une valeur que l'écran a déjà oubliée.
+    flush(key);
+    delete pending[key];
+    delete blocked[key];
+
     // Retour visuel immédiat, correction si la base refuse.
-    row[key] = Math.max(0, before + d);
+    row[key] = next;
     paint();
+    showValue(key);
     flash(key);
+    inflight++;
     status('Enregistrement…', 'saving');
 
-    try {
-        row = await bump(key, d, day);
-        paint();
-        status('✓ Enregistré', 'saved');
-    } catch (e) {
-        row[key] = before;
-        paint();
-        status('⚠ Non enregistré', 'error');
-        toast(humanError(e), 'error', 5000);
-    }
+    enqueue(async () => {
+        try {
+            applyRow(await bump(key, d, iso), iso);
+            if (iso === day) showValue(key);
+            inflight--;
+            settle();
+            retryBlocked();
+        } catch (e) {
+            inflight--;
+            if (iso === day) { row[key] = before; paint(); showValue(key); }
+            settle();
+            toast(humanError(e), 'error', 5000);
+        }
+    });
 }
 
 function onType(input) {
     const key = input.dataset.key;
+    // La journée visée est figée ici. Sans cela, changer de jour pendant
+    // l'anti-rebond écrivait la valeur sur la mauvaise date.
+    const iso = day;
     let v = parseInt(input.value, 10);
     if (Number.isNaN(v) || v < 0) v = 0;
     if (v > 9999) v = 9999;
+
+    pending[key] = v;
     row[key] = v;
     paintDerived();
     paintGauge(METRIC_BY_KEY[key]);
-    schedule(key, () => persist({ [key]: v }));
+
+    const refus = incoherence(key, v);
+    if (refus) {
+        cancel(key);
+        blocked[key] = v;
+        status('⚠ Non enregistré', 'error');
+        toast(refus, 'error', 7000);
+        return;
+    }
+    delete blocked[key];
+    schedule(key, () => enqueue(() => setOne(key, v, iso)));
+}
+
+/**
+ * Écrit la valeur dans le champ, focus ou pas. paint() épargne le champ actif
+ * pour ne pas écraser une frappe en cours, mais un clic sur + ou − est une
+ * intention explicite : si le champ gardait l'ancien nombre, l'écran et la base
+ * afficheraient deux chiffres différents.
+ */
+function showValue(key) {
+    const el = document.getElementById(`in-${key}`);
+    if (el) el.value = Number(row[key]) || 0;
 }
 
 function flash(key) {
@@ -273,6 +444,13 @@ function paintDateBar() {
    -------------------------------------------------------------------------- */
 
 async function load(iso) {
+    // Ce qui attendait part maintenant, avec sa propre date : une frappe
+    // programmée sur la journée que l'on quitte ne doit pas être perdue, et
+    // encore moins atterrir sur la journée suivante.
+    Object.keys(timers).forEach(flush);
+    Object.keys(pending).forEach(k => delete pending[k]);
+    Object.keys(blocked).forEach(k => delete blocked[k]);
+
     day = iso;
     paintDateBar();
     status('Chargement…');
