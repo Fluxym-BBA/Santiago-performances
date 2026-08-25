@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Barème du score | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<div class="loading-veil">Chargement du barème…</div>
+
+<nav id="main-nav"></nav>
+
+<header class="page-hero">
+    <div class="page-container">
+        <span class="hero-badge">Réglage</span>
+        <h1>Le barème, <em>et ce qu'il change</em></h1>
+        <p>Le score n'est stocké nulle part : il se recalcule à chaque affichage. Modifier un poids
+           renote donc tout l'historique de toute l'équipe, immédiatement. L'aperçu montre l'effet
+           sur de vraies journées avant d'enregistrer quoi que ce soit.</p>
+    </div>
+</header>
+
+<main class="page-main page-main--pulled">
+    <div class="page-container">
+
+        <div class="charts-grid">
+
+        <!-- ============================================================
+             LE BARÈME
+             Les sept champs sont construits par le script depuis
+             SCORE_WEIGHTS : aucune valeur n'est écrite ici, faute de quoi
+             une huitième métrique n'apparaîtrait jamais dans cet écran.
+             ============================================================ -->
+
+        <section class="chart-card chart-card--wide">
+            <div class="section-head">
+                <div>
+                    <h2>⚖️ Points attribués à chaque action</h2>
+                    <p>Ce que vaut une action dans le score d'une journée. Le total d'une journée est
+                       la somme de ses actions, chacune multipliée par son poids.</p>
+                </div>
+                <div class="section-head-actions">
+                    <button class="btn btn--ghost" id="w-reset" type="button">Revenir au barème enregistré</button>
+                </div>
+            </div>
+
+            <form id="weights-form" autocomplete="off" novalidate>
+                <div class="form-grid" id="w-grid"></div>
+                <div class="form-actions">
+                    <button class="btn btn--primary" id="w-submit" type="submit">Enregistrer ce barème</button>
+                    <span class="form-status" id="w-status" role="status"></span>
+                </div>
+            </form>
+
+            <p class="field-note" id="w-note"></p>
+        </section>
+
+        <!-- ============================================================
+             APERÇU
+             Le tableau et les boutons de fenêtre sont réécrits à chaque
+             frappe : les écouteurs sont posés une fois pour toutes sur
+             #win-seg et #preview, qui ne sont jamais remplacés.
+             ============================================================ -->
+
+        <section class="chart-card chart-card--wide">
+            <div class="section-head">
+                <div>
+                    <h2>📊 Effet sur de vraies journées</h2>
+                    <p>Rien n'est écrit ici : tout est recalculé dans le navigateur, à partir des
+                       journées déjà saisies. Vous pouvez essayer dix barèmes de suite sans faire
+                       bouger le score de personne.</p>
+                </div>
+                <div class="section-head-actions">
+                    <div class="seg" id="win-seg"></div>
+                    <button class="btn btn--ghost" id="btn-reload" type="button">Recharger</button>
+                </div>
+            </div>
+
+            <p class="seg-label">Qui entre dans le calcul</p>
+            <div class="act-row">
+                <button class="chip chip--sm" id="pick-all" type="button">Tout le monde</button>
+                <button class="chip chip--sm" id="pick-real" type="button">Comptes réels seulement</button>
+                <button class="chip chip--sm" id="pick-demo" type="button">Comptes de démonstration seulement</button>
+            </div>
+
+            <div id="preview"></div>
+        </section>
+
+        </div><!-- /.charts-grid -->
+
+        <!-- ============================================================
+             EXPLICATIONS
+             ============================================================ -->
+        <section class="info-panel info-panel--soft">
+            <div class="info-panel-head">
+                <span class="info-panel-icon">🛡️</span>
+                <h2>Ce qu'un changement de barème implique vraiment</h2>
+            </div>
+            <div class="info-panel-body">
+                <dl class="def-list">
+                    <dt>Un seul barème, pour tout le monde et pour toujours</dt>
+                    <dd>Le score n'existe pas en base : c'est un calcul fait à l'affichage. Enregistrer
+                        un barème ne déclenche donc aucun recalcul et ne peut pas échouer à mi-chemin,
+                        mais il renote <b>tout l'historique de toute l'équipe</b> à la seconde suivante,
+                        y compris le meilleur jour de tous les temps et les scores que chacun a pu
+                        noter la semaine dernière.</dd>
+                    <dd>Il n'y a volontairement pas de barème par personne ni de barème daté : deux
+                        personnes notées différemment ne se comparent plus, et c'est la comparaison qui
+                        fait tenir la vue d'équipe. La page Performances signale la date du dernier
+                        changement quand la période affichée le précède, pour que personne ne croie à
+                        une erreur.</dd>
+                    <dt>Ce que l'aperçu montre, et ce qu'il ne montre pas</dt>
+                    <dd>Il montre le score moyen d'une journée saisie, recalculé depuis les volumes :
+                        la somme des scores divisée par la somme des journées. Ce n'est pas la moyenne
+                        des moyennes, sans quoi une personne ayant saisi deux journées pèserait autant
+                        qu'une autre en ayant saisi cinquante.</dd>
+                    <dd>Il ne touche pas aux <b>objectifs</b>, qui sont des volumes d'actions et ne
+                        dépendent pas du barème. Il ne dit rien non plus des taux de conversion : eux
+                        se calculent sur des actions réelles, et aucun réglage ne les fera bouger.</dd>
+                    <dt>Les comptes de démonstration comptent ici, pas ailleurs</dt>
+                    <dd>Cet écran propose tous les comptes, y compris les comptes de démonstration :
+                        ils portent aujourd'hui l'essentiel des journées saisies et sont donc la seule
+                        matière abondante pour calibrer. La vue d'équipe, elle, continue de les exclure
+                        de ses classements. Un écart entre les deux écrans est normal et voulu.</dd>
+                    <dd>Le choix des comptes n'est pas mémorisé d'une visite à l'autre : au retour sur
+                        la page, tout le monde est de nouveau compté. C'est un écran de calibrage, pas
+                        un tableau de bord.</dd>
+                    <dt>Calibrer sans user la confiance</dt>
+                    <dd>Groupez vos ajustements : tranchez en une fois avec l'aperçu, enregistrez une
+                        fois, et prévenez l'équipe. Un score qui bouge trois fois dans la semaine sans
+                        explication est un score auquel plus personne ne fait attention, et l'outil ne
+                        tient que par une chose, la saisie quotidienne.</dd>
+                </dl>
+            </div>
+        </section>
+
+    </div>
+</main>
+
+<footer class="app-footer">
+    Cockpit BDR · Fluxym — réglage réservé au propriétaire.
+</footer>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/bareme.js"></script>
+</body>
+</html>

@@ -19,7 +19,7 @@
 
 import {
     signOut, isAdmin, isBdr, myProfile, viewedProfile, isViewingOther, roleLabel,
-    levelLabel, canReadAll, canManageAccounts
+    levelLabel, canReadAll, canManageAccounts, canWriteAny
 } from './api.js';
 
 /* --------------------------------------------------------------------------
@@ -57,6 +57,10 @@ const MENU = [
     // onglets vaut plus que la visibilité d'un réglage.
     { href: './compte.html', label: 'Mon compte', icon: '🔑', when: () => true },
     { href: './admin.html', label: 'Gérer les comptes', icon: '⚙️', when: p => canManageAccounts(p) },
+    // Réservée au propriétaire, et non aux administrateurs : le barème est
+    // global et rétroactif, il ne se règle pas à plusieurs mains. La page
+    // refuserait de toute façon le formulaire, et la base l'écriture.
+    { href: './bareme.html', label: 'Barème du score', icon: '⚖️', when: p => canWriteAny(p) },
     { href: './team.html', label: 'Vue d\'équipe', icon: '👥', when: p => canReadAll(p), onlyCollapsed: true },
     { href: './dashboard.html', label: 'Mes performances', icon: '📊', when: p => p.is_bdr, onlyCollapsed: true },
     { href: './index.html', label: 'Ma journée', icon: '✍️', when: p => p.is_bdr, onlyCollapsed: true }
