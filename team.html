@@ -115,22 +115,22 @@
         <div class="section-head">
             <div>
                 <h2>Classement sur la période</h2>
-                <p>Trié par score de productivité. Le bouton « ouvrir » bascule le tableau de bord
-                   individuel sur la personne choisie, sans quitter votre session.</p>
+                <p>Trié par score de productivité, <b>séparément pour chaque métier</b> : le score
+                   d'un BDR et celui d'un commercial ne se composent pas des mêmes actions et ne se
+                   comparent donc pas. Les colonnes de compteurs, elles, restent lisibles d'un métier
+                   à l'autre. Le bouton « ouvrir » bascule le tableau de bord individuel sur la
+                   personne choisie, sans quitter votre session.</p>
             </div>
             <div class="section-head-actions">
                 <button class="btn btn--ghost" id="btn-export" type="button">⬇ Exporter en CSV</button>
             </div>
         </div>
         <div class="table-wrap">
+            <!-- Les colonnes sont écrites par le script, pas ici : elles dépendent
+                 des métiers présents dans la période affichée. Une équipe sans
+                 commercial retrouve exactement les colonnes d'avant. -->
             <table>
-                <thead>
-                    <tr>
-                        <th>#</th><th>BDR</th><th>Appels</th><th>Aboutis</th><th>RDV</th><th>E-mails</th>
-                        <th>Entrep.</th><th>Contacts</th><th>Abouti %</th><th>RDV %</th>
-                        <th>Jours</th><th>Score</th><th></th>
-                    </tr>
-                </thead>
+                <thead id="ranking-head"></thead>
                 <tbody id="ranking-body"></tbody>
             </table>
         </div>
@@ -170,32 +170,5 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div class="modal-head">
             <div>
-                <h3 id="modal-title">…</h3>
-                <p id="modal-sub">…</p>
-            </div>
-            <button class="modal-close" id="modal-close" type="button" aria-label="Fermer">×</button>
-        </div>
-        <div class="modal-local-bar">
-            <span class="date-bar-label">Dates de ce graphique</span>
-            <div class="date-range">
-                <label class="sr-only" for="modal-from">Début de la période de ce graphique</label>
-                <input type="date" id="modal-from">
-                <span>→</span>
-                <label class="sr-only" for="modal-to">Fin de la période de ce graphique</label>
-                <input type="date" id="modal-to">
-            </div>
-            <button class="chip chip--sm" id="modal-reset" type="button">↺ Revenir à la période globale</button>
-            <span class="pill pill--info" id="modal-scope">suit la période globale</span>
-        </div>
-        <div class="modal-body" id="modal-body"></div>
-    </div>
-</div>
-
-<footer class="app-footer">
-    Cockpit BDR · Fluxym — vue réservée aux administrateurs (vue <code>v_team_daily</code>).
-</footer>
-
-<script src="./js/config.js"></script>
-<script type="module" src="./js/team.js"></script>
-</body>
-</html>
+                <h3 id=... (truncated)
+[Full content archived at conversation-w6HTiCbP77/.tool_outputs/1787740670942_equipe_cockpit_bdr_fluxym.md]

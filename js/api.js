@@ -204,6 +204,20 @@ export const SCORE_WEIGHTS = [
     { key: 'deals_lost', w: 0, icon: '❌', label: 'Affaire perdue', plural: 'affaires perdues' }
 ];
 
+/**
+ * Métiers concernés par un poids. Dérivé de METRICS et non redéclaré : la clé
+ * d'un poids est toujours celle d'une métrique, et écrire la liste deux fois
+ * garantirait qu'un jour les deux ne disent plus la même chose. Sert à l'écran
+ * Barème pour ranger les poids par métier.
+ *
+ * Repli sur les deux métiers si la clé est inconnue : un poids orphelin doit
+ * rester visible et réglable, pas disparaître de l'écran sans un mot.
+ */
+export function weightJobs(key) {
+    const m = METRICS.find(x => x.key === key);
+    return m ? m.jobs.slice() : ['bdr', 'sales'];
+}
+
 /** Score d'une ligne (ou d'un agrégat) à partir des pondérations ci-dessus. */
 export const scoreOf = row =>
     SCORE_WEIGHTS.reduce((t, x) => t + (Number(row?.[x.key]) || 0) * x.w, 0);

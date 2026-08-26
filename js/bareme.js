@@ -29,6 +29,16 @@
       par personne, elle, reste une moyenne par personne, ce qui est la seule
       lecture juste pour comparer deux individus.
 
+   4. UN SEUL BARÈME, DEUX MÉTIERS. Le sélecteur de métier ne crée pas un
+      barème par métier : il choisit ce qu'on regarde. Les douze champs restent
+      dans le DOM, cachés en display:none, et l'enregistrement porte toujours
+      sur les douze poids. Deux raisons de tenir ce choix : une valeur tapée
+      puis masquée n'est pas perdue au changement de vue, et les huit poids
+      propres à un métier n'ont de toute façon aucun effet sur l'autre, qui ne
+      saisit jamais ces actions. Ce qui n'est pas comparable, c'est le score
+      d'un BDR et celui d'un commercial ; c'est la vue d'équipe qui règle ce
+      problème en classant chaque métier séparément, pas cet écran.
+
    Aucun contrôle de droit ici n'est une protection : la RLS refuse l'écriture
    du barème à quiconque n'est pas propriétaire. Ce qui est fait ici, c'est ne
    pas promettre un bouton qui sera refusé.
@@ -37,7 +47,8 @@
 import {
     requireAuth, myProfile, listProfiles, fetchTeamRange, humanError,
     todayISO, addDaysISO, levelLabel, canWriteAny,
-    SCORE_WEIGHTS, currentWeights, saveScoreWeights, scoreWeightsMeta, scoreWith
+    SCORE_WEIGHTS, currentWeights, saveScoreWeights, scoreWeightsMeta, scoreWith,
+    weightJobs, jobsOf, jobLabel, isContributor
 } from './api.js';
 import { renderNav } from './nav.js';
 import { escapeHtml, fmtInt, toast, hideVeil, delta } from './ui.js';
@@ -54,9 +65,40 @@ const WINDOWS = [
     { key: 'all', days: HISTORY_DAYS, label: 'Tout' }
 ];
 
+/* Les trois vues de l'écran. `jobs` dit quels métiers entrent dans l'aperçu,
+   null valant « tout le monde », y compris les comptes sans métier. */
+const JOB_VIEWS = [
+    { key: 'all',   label: 'Les deux métiers', jobs: null },
+    { key: 'bdr',   label: 'BDR',              jobs: ['bdr'] },
+    { key: 'sales', label: 'Commercial',       jobs: ['sales'] }
+];
+
+/* Les groupes de poids, dans l'ordre d'affichage. L'appartenance n'est pas
+   écrite ici : elle est demandée à weightJobs(), qui la lit dans METRICS. Un
+   poids dont les deux métiers se servent est « commun », les autres sont
+   propres à leur métier. */
+const WEIGHT_GROUPS = [
+    {
+        key: 'both', title: 'Communs aux deux métiers',
+        note: 'Ces poids comptent pour tout le monde. Les toucher déplace les deux classements à la fois.',
+        match: j => j.includes('bdr') && j.includes('sales')
+    },
+    {
+        key: 'bdr', title: 'Propres au BDR',
+        note: 'Sans effet sur le score d\'un commercial, qui ne saisit jamais ces actions.',
+        match: j => j.includes('bdr') && !j.includes('sales')
+    },
+    {
+        key: 'sales', title: 'Propres au commercial',
+        note: 'Sans effet sur le score d\'un BDR, qui ne saisit jamais ces actions.',
+        match: j => j.includes('sales') && !j.includes('bdr')
+    }
+];
+
 let profiles = [];
 let rows = [];
 let winKey = '30';
+let jobKey = 'all';
 
 /* Qui est retiré de l'aperçu. On mémorise les exclusions et non les inclusions :
    un compte créé après coup entre ainsi dans le calcul par défaut, au lieu
@@ -65,6 +107,14 @@ let winKey = '30';
 const excluded = new Set();
 
 const winOf = () => WINDOWS.find(w => w.key === winKey) || WINDOWS[0];
+const jobOf = () => JOB_VIEWS.find(j => j.key === jobKey) || JOB_VIEWS[0];
+
+/** Vrai si ce profil entre dans la vue métier courante. */
+function inJobView(p) {
+    const want = jobOf().jobs;
+    if (!want) return true;
+    return jobsOf(p).some(j => want.includes(j));
+}
 
 /* --------------------------------------------------------------------------
    Chargement
@@ -95,7 +145,26 @@ function formWeights() {
     return out;
 }
 
-/** Construit les champs depuis SCORE_WEIGHTS et remplit avec le barème courant. */
+/** Les poids d'un groupe, dans l'ordre de SCORE_WEIGHTS. */
+const weightsOfGroup = g => SCORE_WEIGHTS.filter(x => g.match(weightJobs(x.key)));
+
+/** Vrai si ce groupe de poids est visible dans la vue métier courante. */
+function groupVisible(g) {
+    const want = jobOf().jobs;
+    if (!want) return true;
+    if (g.key === 'both') return true;
+    return want.includes(g.key);
+}
+
+/**
+ * Construit les champs depuis SCORE_WEIGHTS, groupés par métier.
+ *
+ * Les douze champs sont écrits à chaque fois, y compris ceux d'un métier qu'on
+ * ne regarde pas : c'est ce qui permet à formWeights() de lire une valeur tapée
+ * avant un changement de vue au lieu de la remplacer par le poids enregistré.
+ * Le masquage est fait en display:none inline, sans classe nouvelle dans
+ * app.css, pour ne pas toucher un fichier que d'autres écrans partagent.
+ */
 function renderWeights() {
     const grid = document.getElementById('w-grid');
     const note = document.getElementById('w-note');
@@ -103,13 +172,24 @@ function renderWeights() {
     const cur = currentWeights();
     const allowed = canWriteAny(myProfile());
 
-    grid.innerHTML = SCORE_WEIGHTS.map(x => `
+    const fieldHtml = x => `
         <div class="field">
             <label for="w-${x.key}">${x.icon} ${escapeHtml(x.label)}</label>
             <input type="number" id="w-${x.key}" min="0" max="1000" step="1"
                    inputmode="numeric" value="${cur[x.key]}" ${allowed ? '' : 'disabled'}>
             <p class="field-note">points par ${escapeHtml(x.label.toLowerCase())}</p>
-        </div>`).join('');
+        </div>`;
+
+    grid.innerHTML = WEIGHT_GROUPS.map(g => {
+        const list = weightsOfGroup(g);
+        if (!list.length) return '';
+        return `
+        <div data-wgroup="${g.key}"${groupVisible(g) ? '' : ' style="display:none"'}>
+            <p class="seg-label">${escapeHtml(g.title)}
+                <span class="td-muted">· ${escapeHtml(g.note)}</span></p>
+            <div class="form-grid">${list.map(fieldHtml).join('')}</div>
+        </div>`;
+    }).join('');
 
     const submit = document.getElementById('w-submit');
     const reset = document.getElementById('w-reset');
@@ -137,6 +217,10 @@ function renderWeights() {
     parts.push('Le score n\'est stocké nulle part : il est recalculé à chaque affichage. ' +
         'Un barème enregistré s\'applique donc à <b>tout l\'historique</b> et pour <b>tout le monde</b>, ' +
         'y compris au meilleur jour de tous les temps.');
+    parts.push('Le sélecteur de métier ne masque que l\'affichage : <b>enregistrer envoie toujours ' +
+        'les douze poids</b>, y compris ceux d\'un métier que vous ne regardez pas. Une valeur ' +
+        'modifiée puis masquée reste donc prise en compte, et la liste des changements avant ' +
+        'confirmation la nommera.');
     if (note) note.innerHTML = parts.join(' ');
 }
 
@@ -166,25 +250,37 @@ function buildRows() {
         // compter tirerait toutes les moyennes vers le bas sans rien dire du
         // barème, qui est le seul sujet de cet écran.
         if (Number(r.total_actions) <= 0) return;
-        const e = per.get(r.user_id) || { days: 0, before: 0, after: 0, meetings: 0 };
+        const e = per.get(r.user_id) || { days: 0, before: 0, after: 0, meetings: 0, firsts: 0 };
         e.days++;
         e.before += scoreWith(r, cur);
         e.after += scoreWith(r, next);
+        // Deux compteurs de rendez-vous, jamais additionnés : meetings_booked est
+        // le RDV décroché par la prospection, first_meetings le premier rendez-vous
+        // tenu par le commercial. Les cumuler compterait deux fois la même
+        // rencontre, ce que la colonne d'aperçu doit se garder de faire.
         e.meetings += Number(r.meetings_booked) || 0;
+        e.firsts += Number(r.first_meetings) || 0;
         per.set(r.user_id, e);
     });
 
-    return profiles.map(p => {
-        const e = per.get(p.user_id) || { days: 0, before: 0, after: 0, meetings: 0 };
+    // La vue métier filtre la population : régler le poids du RDV1 en voyant
+    // la moyenne de cinq BDR qui n'en saisissent aucun ne dit rien d'utile.
+    return profiles.filter(inJobView).map(p => {
+        const e = per.get(p.user_id) || { days: 0, before: 0, after: 0, meetings: 0, firsts: 0 };
         return {
             id: p.user_id,
             name: p.display_name || p.email || 'compte sans nom',
             demo: !!p.is_demo,
             active: p.is_active !== false,
-            bdr: !!p.is_bdr,
+            // Le badge doit dire « ne saisit rien », pas « ne prospecte pas » :
+            // un commercial ne prospecte pas au sens du BDR et saisit pourtant
+            // tous les jours. isContributor répond à la bonne question.
+            contributor: isContributor(p),
+            job: jobLabel(p),
             level: levelLabel(p),
             days: e.days,
             meetings: e.meetings,
+            firsts: e.firsts,
             sumBefore: e.before,
             sumAfter: e.after,
             before: e.days ? e.before / e.days : 0,
@@ -232,31 +328,52 @@ function renderPreview() {
     const moved = kept.filter(x => rB.get(x.id) !== rA.get(x.id)).length;
 
     const w = winOf();
+    const jv = jobOf();
+    const who = jv.jobs ? `des comptes « ${jv.label.toLowerCase()} »` : 'de tous les comptes';
+
+    /* Un poids modifié dans un groupe masqué compte quand même : le dire ici
+       évite le pire malentendu possible sur cet écran, croire n'avoir touché
+       que le métier affiché. */
+    const hidden = changed.filter(x => {
+        const g = WEIGHT_GROUPS.find(gr => gr.match(weightJobs(x.key)));
+        return g && !groupVisible(g);
+    });
+    const hiddenNote = hidden.length
+        ? ` <b>Attention :</b> ${fmtInt(hidden.length)} poids modifié(s) hors de la vue affichée
+            (${hidden.map(x => escapeHtml(x.label.toLowerCase())).join(', ')}) et
+            ${hidden.length > 1 ? 'ils seront enregistrés' : 'il sera enregistré'} aussi.`
+        : '';
+
     let head;
     if (!kept.length) {
         head = `<p class="field-note">Aucun compte retenu, ou aucune journée saisie sur
-            ${escapeHtml(w.label.toLowerCase())} par les comptes retenus. Choisissez une fenêtre plus
-            large ou remettez des comptes dans l'aperçu. Le barème reste enregistrable.</p>`;
+            ${escapeHtml(w.label.toLowerCase())} par les comptes retenus ${escapeHtml(who)}.
+            Choisissez une fenêtre plus large, une autre vue métier, ou remettez des comptes dans
+            l'aperçu. Le barème reste enregistrable.${hiddenNote}</p>`;
     } else if (!changed.length) {
         head = `<p class="field-note">Barème identique à celui enregistré : rien ne bougerait.
             Modifiez un champ ci-dessus pour voir l'effet sur
             <b>${fmtInt(kept.length)}</b> compte(s) et <b>${fmtInt(totDays)}</b> journée(s) saisie(s)
-            sur ${escapeHtml(w.label.toLowerCase())}.</p>`;
+            sur ${escapeHtml(w.label.toLowerCase())}, ${escapeHtml(who)}.</p>`;
     } else {
         head = `<p class="field-note">
             ${changed.map(x => `<b>${escapeHtml(x.label.toLowerCase())}</b> ${x.w} → ${next[x.key]}`).join(', ')}.
-            Sur <b>${fmtInt(kept.length)}</b> compte(s) et <b>${fmtInt(totDays)}</b> journée(s) saisie(s),
+            Sur <b>${fmtInt(kept.length)}</b> compte(s) ${escapeHtml(who)} et
+            <b>${fmtInt(totDays)}</b> journée(s) saisie(s),
             le score moyen d'une journée passerait de <b>${fmtInt(Math.round(perDayB))}</b> à
             <b>${fmtInt(Math.round(perDayA))}</b> (${pct >= 0 ? '+' : ''}${pct.toFixed(1)} %).
             ${moved === 0
                 ? 'Le classement ne change pas.'
-                : `<b>${fmtInt(moved)}</b> personne(s) changent de rang.`}</p>`;
+                : `<b>${fmtInt(moved)}</b> personne(s) changent de rang.`}${hiddenNote}</p>`;
     }
 
     const badges = x => [
         x.demo ? '<b class="badge badge--demo">Démo</b>' : '',
         !x.active ? '<b class="badge">Désactivé</b>' : '',
-        !x.bdr ? '<b class="badge">Ne prospecte pas</b>' : ''
+        // En vue « les deux métiers » le métier est une information ; dans une
+        // vue filtrée il est déjà dit par le sélecteur, le répéter est du bruit.
+        x.job && jobKey === 'all' ? `<b class="badge">${escapeHtml(x.job)}</b>` : '',
+        !x.contributor ? '<b class="badge">Ne saisit rien</b>' : ''
     ].filter(Boolean).join(' ');
 
     const rankCell = x => {
@@ -270,12 +387,22 @@ function renderPreview() {
 
     const cell = (x, v) => (x.on ? v : `<span class="td-muted">${v}</span>`);
 
+    /* Colonnes de résultat selon la vue. Jamais additionnées : le RDV obtenu et
+       le RDV1 sont deux événements distincts, portés par deux personnes. En vue
+       « les deux métiers » on montre donc deux colonnes plutôt qu'une somme qui
+       n'aurait aucun sens. */
+    const resultCols = jobKey === 'bdr'
+        ? [{ th: 'RDV', get: x => x.meetings }]
+        : jobKey === 'sales'
+        ? [{ th: 'RDV1', get: x => x.firsts }]
+        : [{ th: 'RDV', get: x => x.meetings }, { th: 'RDV1', get: x => x.firsts }];
+
     host.innerHTML = `
         ${head}
         <div class="table-wrap">
             <table>
                 <thead><tr>
-                    <th>Compte</th><th>Journées</th><th>RDV</th>
+                    <th>Compte</th><th>Journées</th>${resultCols.map(c => `<th>${c.th}</th>`).join('')}
                     <th>Score moyen actuel</th><th>Avec ce barème</th><th>Écart</th><th>Rang</th>
                     <th>Dans l'aperçu</th>
                 </tr></thead>
@@ -283,7 +410,9 @@ function renderPreview() {
                     <tr>
                         <td data-th="Compte">${escapeHtml(x.name)} ${badges(x)}</td>
                         <td data-th="Journées">${x.days ? cell(x, fmtInt(x.days)) : '<span class="td-muted">aucune</span>'}</td>
-                        <td data-th="RDV">${x.days ? cell(x, fmtInt(x.meetings)) : '<span class="td-muted">—</span>'}</td>
+                        ${resultCols.map(c => `<td data-th="${c.th}">${x.days
+                            ? cell(x, fmtInt(c.get(x)))
+                            : '<span class="td-muted">—</span>'}</td>`).join('')}
                         <td data-th="Score moyen actuel">${x.days ? cell(x, fmtInt(Math.round(x.before))) : '<span class="td-muted">—</span>'}</td>
                         <td data-th="Avec ce barème" class="td-score">${x.days
                             ? (x.on ? `<b>${fmtInt(Math.round(x.after))}</b>` : `<span class="td-muted">${fmtInt(Math.round(x.after))}</span>`)
@@ -300,6 +429,18 @@ function renderPreview() {
                     </tr>`).join('')}</tbody>
             </table>
         </div>`;
+}
+
+/**
+ * Le métier regardé. Rendu en JS comme la fenêtre, pour la même raison : il
+ * porte un état sélectionné que le HTML ne peut pas connaître au chargement.
+ */
+function renderJobs() {
+    const seg = document.getElementById('job-seg');
+    if (!seg) return;
+    seg.innerHTML = JOB_VIEWS.map(j => `
+        <button type="button" data-job="${j.key}" class="${j.key === jobKey ? 'is-on' : ''}"
+                aria-pressed="${j.key === jobKey ? 'true' : 'false'}">${escapeHtml(j.label)}</button>`).join('');
 }
 
 /** La fenêtre d'observation. Rendue en JS pour porter l'état sélectionné. */
@@ -361,6 +502,23 @@ function wire() {
         if (!b) return;
         winKey = b.dataset.win;
         renderWindow();
+        renderPreview();
+    });
+
+    /* Changer de métier ne réécrit PAS le formulaire : les champs gardent les
+       valeurs en cours de saisie, seuls les groupes concernés apparaissent ou
+       disparaissent. Appeler renderWeights() ici effacerait un poids tapé et
+       non encore enregistré, ce qui est exactement ce qu'un écran de calibrage
+       ne doit jamais faire. */
+    document.getElementById('job-seg')?.addEventListener('click', ev => {
+        const b = ev.target.closest('button[data-job]');
+        if (!b) return;
+        jobKey = b.dataset.job;
+        renderJobs();
+        WEIGHT_GROUPS.forEach(g => {
+            const el = document.querySelector(`[data-wgroup="${g.key}"]`);
+            if (el) el.style.display = groupVisible(g) ? '' : 'none';
+        });
         renderPreview();
     });
 
@@ -456,6 +614,7 @@ function wire() {
         }
 
         await load();
+        renderJobs();
         renderWeights();
         renderWindow();
         renderPreview();

@@ -34,9 +34,15 @@
 
         <!-- ============================================================
              LE BARÈME
-             Les sept champs sont construits par le script depuis
-             SCORE_WEIGHTS : aucune valeur n'est écrite ici, faute de quoi
-             une huitième métrique n'apparaîtrait jamais dans cet écran.
+             Les champs sont construits par le script depuis SCORE_WEIGHTS :
+             aucune valeur n'est écrite ici, faute de quoi une métrique
+             supplémentaire n'apparaîtrait jamais dans cet écran.
+
+             Le sélecteur de métier ne masque QUE l'affichage. Les douze
+             champs restent tous dans le DOM, cachés en display:none, pour
+             deux raisons : une valeur tapée puis masquée n'est pas perdue au
+             changement de vue, et l'enregistrement porte toujours sur les
+             douze poids, puisqu'il n'existe qu'un seul barème.
              ============================================================ -->
 
         <section class="chart-card chart-card--wide">
@@ -44,15 +50,18 @@
                 <div>
                     <h2>⚖️ Points attribués à chaque action</h2>
                     <p>Ce que vaut une action dans le score d'une journée. Le total d'une journée est
-                       la somme de ses actions, chacune multipliée par son poids.</p>
+                       la somme de ses actions, chacune multipliée par son poids. Il y a
+                       <b>un seul barème</b> : le sélecteur choisit les poids que vous regardez, pas
+                       un barème séparé par métier.</p>
                 </div>
                 <div class="section-head-actions">
+                    <div class="seg" id="job-seg"></div>
                     <button class="btn btn--ghost" id="w-reset" type="button">Revenir au barème enregistré</button>
                 </div>
             </div>
 
             <form id="weights-form" autocomplete="off" novalidate>
-                <div class="form-grid" id="w-grid"></div>
+                <div id="w-grid"></div>
                 <div class="form-actions">
                     <button class="btn btn--primary" id="w-submit" type="submit">Enregistrer ce barème</button>
                     <span class="form-status" id="w-status" role="status"></span>
@@ -116,6 +125,21 @@
                         fait tenir la vue d'équipe. La page Performances signale la date du dernier
                         changement quand la période affichée le précède, pour que personne ne croie à
                         une erreur.</dd>
+                    <dt>Deux métiers, un seul barème</dt>
+                    <dd>Le BDR et le commercial ne partagent que quatre compteurs sur douze : contacts
+                        créés, appels, aboutis, échanges. Les huit autres sont propres à un métier, donc
+                        leur poids ne change rien au score de l'autre : régler le RDV1 à 40 points ne
+                        touche aucun BDR, qui n'en saisit jamais. C'est ce qui permet de garder
+                        <b>un seul barème</b> pour les deux métiers.</dd>
+                    <dd>Ce qui n'est pas comparable, en revanche, c'est le <b>score</b> d'un BDR et
+                        celui d'un commercial : ils ne se composent pas des mêmes actions. La vue
+                        d'équipe classe donc chaque métier séparément, et ne compare entre métiers que
+                        les compteurs réellement communs. Le sélecteur ci-dessus sert à voir l'effet
+                        d'un changement sur la bonne population, pas à enregistrer deux barèmes.</dd>
+                    <dd>Attention aussi à un piège : le métier est une propriété du <b>compte</b>, pas
+                        de la journée. Passer quelqu'un de BDR à commercial ne réécrit pas son
+                        historique, ses anciennes journées de prospection restent comptées et notées
+                        comme telles. L'aperçu les montre, c'est voulu.</dd>
                     <dt>Ce que l'aperçu montre, et ce qu'il ne montre pas</dt>
                     <dd>Il montre le score moyen d'une journée saisie, recalculé depuis les volumes :
                         la somme des scores divisée par la somme des journées. Ce n'est pas la moyenne
@@ -145,10 +169,5 @@
 </main>
 
 <footer class="app-footer">
-    Cockpit BDR · Fluxym — réglage réservé au propriétaire.
-</footer>
-
-<script src="./js/config.js"></script>
-<script type="module" src="./js/bareme.js"></script>
-</body>
-</html>
+    Cockpit BDR · Fluxym — réglage ... (truncated)
+[Full content archived at conversation-w6HTiCbP77/.tool_outputs/1787739834096_bareme_du_score_cockpit_bdr_fluxym.md]
