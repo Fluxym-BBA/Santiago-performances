@@ -153,6 +153,29 @@ export const METRIC_BY_KEY = Object.fromEntries(METRICS.map(m => [m.key, m]));
 export const EMPTY_DAY = Object.fromEntries(METRICS.map(m => [m.key, 0]));
 
 /* --------------------------------------------------------------------------
+   Les cinq compteurs qui ne se saisissent plus
+
+   Depuis la migration v10, first_meetings, proposals_sent, no_go,
+   deals_dropped et deals_lost ne sont plus des nombres que l'on tape : ils sont
+   le DÉCOMPTE des lignes de sales_events, imposé par un trigger BEFORE sur
+   daily_activity. Écrire dans ces colonnes, par set_metric, par bump_metric ou
+   par un upsert, n'a plus aucun effet : la base remplace la valeur proposée par
+   le nombre réel d'événements du jour.
+
+   La liste est écrite en clair et non dérivée des groupes 'pipeline' et
+   'outcome' de METRICS. Un groupe est un choix de mise en page ; le contrat,
+   lui, est la contrainte sales_events_kind_known en base. Déplacer une métrique
+   d'un groupe à l'autre ne doit pas transformer un compteur saisissable en
+   compteur dérivé sans que personne ne l'ait décidé.
+   -------------------------------------------------------------------------- */
+export const SALES_EVENT_KINDS = [
+    'first_meetings', 'proposals_sent', 'no_go', 'deals_dropped', 'deals_lost'
+];
+
+/** Vrai si ce compteur est tenu par la liste d'événements, donc non saisissable. */
+export const isEventMetric = key => SALES_EVENT_KINDS.includes(key);
+
+/* --------------------------------------------------------------------------
    Pondérations du score de productivité.
    SOURCE UNIQUE côté application : la page de saisie, le dashboard et les
    explications affichées lisent toutes cette constante.
@@ -1055,6 +1078,243 @@ export async function setMetric(metricKey, value, iso) {
 }
 
 /* --------------------------------------------------------------------------
+   Données — entreprises et événements du cycle de vente (v10)
+
+   Deux idées, et une seule vérité.
+
+   1. `accounts` est le carnet d'entreprises du Cockpit, saisi à la main. Ce
+      n'est PAS un référentiel client : le référentiel est Salesforce, les deux
+      divergeront, et rien ici ne prétend les rapprocher.
+
+   2. `sales_events` porte une ligne par événement déclaré. Les cinq compteurs
+      correspondants de daily_activity en sont le décompte, tenu par la base.
+      Le navigateur n'a donc jamais à écrire ces compteurs : il crée ou supprime
+      des lignes, et le nombre suit.
+
+   LE CACHE, ET POURQUOI IL EST LOCAL
+
+   La liste complète des entreprises est chargée une fois par page, puis filtrée
+   dans le navigateur. À l'échelle annoncée par Bruno, quatre cents noms sur un
+   ou deux ans, cela représente une vingtaine de kilo-octets : moins qu'une
+   requête par frappe, et l'autocomplétion répond sans latence, ce qui est la
+   seule chose qui décide si le commercial nomme ses clients ou pas.
+
+   Deux limites, assumées et à connaître :
+     - une entreprise créée par un collègue APRÈS le chargement de la page
+       n'apparaît pas dans les suggestions. Elle n'est pas perdue pour autant :
+       en la retapant à l'identique, ensureAccount() récupère la ligne existante
+       au lieu d'en créer une seconde, parce que la base refuse le doublon ;
+     - PostgREST plafonne une réponse à 1000 lignes par défaut. Au-delà, il
+       faudra passer à une recherche côté serveur (`ilike`), ce qui tient en dix
+       lignes ici mais n'a aucun intérêt tant qu'on est à quelques centaines.
+   -------------------------------------------------------------------------- */
+
+/**
+ * Miroir JavaScript de la colonne générée `accounts.name_key`, dont la
+ * définition en base est lower(regexp_replace(btrim(name), '\s+', ' ', 'g')).
+ *
+ * Ce miroir ne sert qu'à chercher dans le cache et à reconnaître qu'un nom tapé
+ * est déjà connu. Il ne fait pas autorité : la base tranche, et elle seule.
+ * `toLowerCase()` de JavaScript et `lower()` de PostgreSQL peuvent différer sur
+ * des cas exotiques ; le prix d'une divergence est un aller-retour de plus, pas
+ * un doublon, puisque l'index unique est en base.
+ */
+export const accountKey = name =>
+    String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/** Nom propre : espaces réduits, bords coupés. La casse tapée est conservée. */
+export const cleanAccountName = name =>
+    String(name || '').trim().replace(/\s+/g, ' ');
+
+let _accounts = null;   // tableau trié par nom, ou null si jamais chargé
+
+function cacheAccount(a) {
+    if (!a || !_accounts) return a;
+    const i = _accounts.findIndex(x => x.id === a.id);
+    if (i >= 0) _accounts[i] = a;
+    else _accounts.push(a);
+    _accounts.sort((x, y) => x.name.localeCompare(y.name, 'fr'));
+    return a;
+}
+
+/**
+ * Charge le carnet d'entreprises. Idempotent : le second appel ne coûte rien.
+ * `force` sert après un renommage fait ailleurs.
+ */
+export async function loadAccounts({ force = false } = {}) {
+    if (_accounts && !force) return _accounts;
+    const { data, error } = await supabase
+        .from('accounts')
+        .select('id,name,name_key')
+        .order('name', { ascending: true });
+    if (error) throw error;
+    _accounts = data || [];
+    return _accounts;
+}
+
+/**
+ * Suggestions pour un début de nom. Deux règles d'ordre, dans cet ordre :
+ * ce qui COMMENCE par ce qui est tapé passe avant ce qui le contient. « air »
+ * doit proposer Airbus avant Corsair, sinon la liste paraît aléatoire.
+ */
+export function searchAccounts(term, limit = 8) {
+    const q = accountKey(term);
+    if (!q) return (_accounts || []).slice(0, limit);
+    const debut = [];
+    const dedans = [];
+    (_accounts || []).forEach(a => {
+        const i = a.name_key.indexOf(q);
+        if (i === 0) debut.push(a);
+        else if (i > 0) dedans.push(a);
+    });
+    return debut.concat(dedans).slice(0, limit);
+}
+
+/** Entreprise du cache dont le nom normalisé est exactement celui-ci. */
+export const accountByName = name =>
+    (_accounts || []).find(a => a.name_key === accountKey(name)) || null;
+
+/** Entreprise du cache par identifiant. */
+export const accountById = id =>
+    (_accounts || []).find(a => a.id === id) || null;
+
+/**
+ * Trouve l'entreprise ou la crée. Renvoie toujours une ligne, jamais un doublon.
+ *
+ * Le cas du 23505 n'est pas théorique : le cache peut avoir été chargé avant
+ * qu'un collègue crée le même nom, et deux onglets de la même personne suffisent
+ * à le produire. On relit alors la ligne gagnante plutôt que de renvoyer une
+ * erreur à quelqu'un qui n'a rien fait de mal.
+ */
+export async function ensureAccount(name) {
+    const propre = cleanAccountName(name);
+    if (!propre) return null;
+    if (propre.length > 120) {
+        throw new Error("Nom d'entreprise trop long : 120 caractères au maximum.");
+    }
+    await loadAccounts();
+    const connu = accountByName(propre);
+    if (connu) return connu;
+
+    const { data, error } = await supabase
+        .from('accounts')
+        .insert({ name: propre })
+        .select('id,name,name_key')
+        .single();
+    if (!error) return cacheAccount(data);
+
+    if (error.code === '23505') {
+        const { data: gagnante, error: e2 } = await supabase
+            .from('accounts')
+            .select('id,name,name_key')
+            .eq('name_key', accountKey(propre))
+            .maybeSingle();
+        if (e2) throw e2;
+        if (gagnante) return cacheAccount(gagnante);
+    }
+    throw error;
+}
+
+/**
+ * Événements d'une journée, du plus ancien au plus récent, nom d'entreprise
+ * résolu.
+ *
+ * La résolution se fait depuis le cache, et les identifiants absents du cache
+ * sont demandés en une seule requête complémentaire. Une jointure PostgREST
+ * ferait la même chose en un aller-retour, mais elle suppose un nom de relation
+ * imbriquée que rien ici ne permet de tester avant déploiement ; deux requêtes
+ * simples valent mieux qu'une requête élégante dont on découvre la syntaxe en
+ * production.
+ */
+export async function fetchDayEvents(iso) {
+    const { data, error } = await supabase
+        .from('sales_events')
+        .select('id,kind,account_id,activity_date,created_at')
+        .eq('user_id', target())
+        .eq('activity_date', iso)
+        .order('created_at', { ascending: true });
+    if (error) throw error;
+    const lignes = data || [];
+
+    const manquants = [...new Set(lignes
+        .map(l => l.account_id)
+        .filter(id => id && !accountById(id)))];
+    if (manquants.length) {
+        const { data: comptes } = await supabase
+            .from('accounts')
+            .select('id,name,name_key')
+            .in('id', manquants);
+        (comptes || []).forEach(cacheAccount);
+    }
+
+    return lignes.map(l => ({
+        ...l,
+        account_name: l.account_id ? (accountById(l.account_id)?.name || null) : null
+    }));
+}
+
+/**
+ * Déclare un événement. `accountId` nul est un choix offert au commercial :
+ * la contrainte n'est pas de tout documenter, elle est de saisir tous les jours.
+ * Un événement sans nom compte dans le compteur et dans le score comme les
+ * autres.
+ *
+ * L'identifiant de l'utilisateur est envoyé explicitement, et non laissé au
+ * défaut auth.uid() de la colonne : c'est ce qui permet à un administrateur de
+ * corriger la journée de quelqu'un d'autre, exactement comme le fait bump().
+ */
+export async function addSalesEvent(kind, iso, accountId = null) {
+    if (!isEventMetric(kind)) throw new Error(`Type d'événement inconnu : ${kind}`);
+    const { data, error } = await supabase
+        .from('sales_events')
+        .insert({
+            user_id: target(),
+            activity_date: iso,
+            kind,
+            account_id: accountId || null
+        })
+        .select('id,kind,account_id,activity_date,created_at')
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+/**
+ * Supprime un événement. Le filtre sur user_id est redondant avec la RLS et
+ * avec la clé primaire : il est là parce que la règle du projet est qu'aucune
+ * écriture ne se repose sur la seule RLS pour désigner sa cible.
+ */
+export async function deleteSalesEvent(id) {
+    const { error } = await supabase
+        .from('sales_events')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', target());
+    if (error) throw error;
+}
+
+/**
+ * Historique d'une entreprise, tous commerciaux confondus : type d'événement,
+ * date, prénom, et si c'est moi. C'est la matière de l'avertissement « une
+ * proposition est déjà partie chez ce client », livré au lot suivant.
+ *
+ * Elle est écrite maintenant, avant son écran, pour une raison de coordination
+ * et non de confort : api.js est réécrit en entier par chaque livraison, et
+ * plusieurs chantiers y touchent. Une fonction de plus ici évite une seconde
+ * réécriture du même fichier la semaine prochaine.
+ *
+ * Passe par une fonction SECURITY DEFINER et non par une lecture de
+ * sales_events : ouvrir cette table en lecture à toute l'équipe pour obtenir
+ * trois colonnes exposerait au passage l'activité complète de chacun.
+ */
+export async function accountHistory(accountId) {
+    if (!accountId) return [];
+    const { data, error } = await supabase.rpc('account_history', { p_account: accountId });
+    if (error) throw error;
+    return data || [];
+}
+
+/* --------------------------------------------------------------------------
    Données — équipe (administrateurs)
    -------------------------------------------------------------------------- */
 
@@ -1124,6 +1384,26 @@ export async function saveTargets(patch, session) {
 export function humanError(error) {
     if (!error) return 'Erreur inconnue';
     const msg = error.message || String(error);
+
+    /* Ces trois cas passent AVANT les tests génériques sur 23514 et 23505 qui
+       suivent : le premier d'entre eux attrape tous les 23514 et répondrait
+       « plus d'appels aboutis que d'appels passés » à un nom d'entreprise vide. */
+    if (error.code === '23505' && msg.includes('accounts_name_key_uq')) {
+        return 'Cette entreprise existe déjà sous une orthographe équivalente. '
+             + 'Choisissez-la dans la liste proposée.';
+    }
+    if (error.code === '23514' && msg.includes('accounts_name')) {
+        return "Nom d'entreprise refusé : il ne peut pas être vide et fait 120 caractères au maximum.";
+    }
+    if (msg.includes('sales_events') && (error.code === '42P01' || error.code === 'PGRST205')) {
+        return "La base n'a pas encore les tables du cycle de vente : exécutez "
+             + 'sql/accounts-events-migration-v10.sql.';
+    }
+    if (msg.includes('account_history') && (error.code === 'PGRST202' || error.code === '42883')) {
+        return "La base n'a pas encore la fonction account_history : exécutez "
+             + "sql/accounts-events-migration-v10.sql. La saisie fonctionne, seul l'avertissement "
+             + 'de doublon est indisponible.';
+    }
     if (error.code === '23514' || msg.includes('daily_activity_calls_coherent')) {
         return "Impossible : il y aurait plus d'appels aboutis que d'appels passés.";
     }

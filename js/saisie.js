@@ -2,10 +2,16 @@
    SAISIE.JS — Page de saisie quotidienne.
    Principe : aucune action de validation. Chaque clic ou frappe est persistée.
 
-   Trois chemins d'écriture, et un seul upsert :
+   Quatre chemins d'écriture :
      - boutons + / −  : bump_metric, incrément atomique côté base ;
      - frappe directe : set_metric, valeur exacte, anti-rebond de 600 ms ;
-     - note du jour   : upsert classique, aucune contrainte ne la relie à rien.
+     - note du jour   : upsert classique, aucune contrainte ne la relie à rien ;
+     - cycle de vente : insertion ou suppression d'une ligne dans sales_events.
+       Aucun compteur n'est écrit sur ce chemin : depuis la migration v10, les
+       cinq compteurs du cycle de vente sont le DÉCOMPTE de ces lignes, tenu par
+       un trigger. La liste dit la vérité, le nombre en découle. C'est pourquoi
+       ces cinq métriques n'ont ni bouton + / − ni champ numérique : ils
+       laisseraient croire à un enregistrement que la base ignore.
 
    La frappe directe passait par le même upsert que la note. C'était le bogue
    du 24/08/2026 : PostgreSQL contrôle les contraintes CHECK sur la ligne
@@ -23,7 +29,10 @@ import {
     requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY, todayISO,
     addDaysISO, formatLong, relativeLabel, diffDays, fetchDay,
     saveDay, bump, setMetric, fetchTargets, saveTargets, humanError,
-    SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor
+    SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor,
+    SALES_EVENT_KINDS, isEventMetric, cleanAccountName, accountKey,
+    loadAccounts, searchAccounts, ensureAccount,
+    fetchDayEvents, addSalesEvent, deleteSalesEvent
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -54,6 +63,20 @@ const pending = {};
 const blocked = {};
 let inflight = 0;
 
+/* Cycle de vente. `events` porte les lignes de la journée AFFICHÉE, du plus
+   ancien au plus récent, telles qu'elles sont en base — sauf celles qui
+   attendent leur confirmation, marquées `pending` et identifiées « tmp-n ».
+   `hasEvents` évite deux requêtes et un carnet d'entreprises inutiles à un BDR,
+   qui ne saisit aucun de ces cinq compteurs. */
+let events = [];
+let hasEvents = false;
+let tmpSeq = 0;
+
+/* État de la liste d'autocomplétion, une entrée par champ. `index` vaut -1
+   quand aucune suggestion n'est sélectionnée, ce qui est l'état de départ et le
+   plus important : voir onEventKey(). */
+const sugg = {};
+
 /* Le score est calculé côté client pour un affichage instantané, à partir de
    SCORE_WEIGHTS (source unique partagée avec le dashboard). La vue SQL
    v_daily_kpi reste la référence côté base. */
@@ -63,7 +86,24 @@ let inflight = 0;
    -------------------------------------------------------------------------- */
 
 /* Un compteur sans objectif n'a pas de jauge : afficher une barre vide et
-   « non défini » sous un NO GO laisserait croire qu'on attend un chiffre. */
+   « non défini » sous un NO GO laisserait croire qu'on attend un chiffre.
+
+   Écrite une fois et partagée par les deux sortes de lignes : les identifiants
+   gauge-*, target-* et gauge-pct-* sont lus par paintGauge(), et deux gabarits
+   qui les composent chacun de leur côté finiraient par ne plus les écrire
+   pareil. */
+function gaugeHtml(m) {
+    if (!m.target) return '';
+    return `
+        <div class="gauge">
+            <div class="gauge-track"><div class="gauge-fill" id="gauge-${m.key}" style="width:0%"></div></div>
+            <div class="gauge-legend">
+                <span>Objectif : <b id="target-${m.key}">–</b></span>
+                <span id="gauge-pct-${m.key}">0 %</span>
+            </div>
+        </div>`;
+}
+
 function metricRowHtml(m) {
     return `
     <div class="metric" data-metric="${m.key}">
@@ -82,14 +122,45 @@ function metricRowHtml(m) {
                         data-act="inc" data-key="${m.key}" aria-label="Ajouter 1 ${escapeHtml(m.label)}">+</button>
             </div>
         </div>
-        ${m.target ? `
-        <div class="gauge">
-            <div class="gauge-track"><div class="gauge-fill" id="gauge-${m.key}" style="width:0%"></div></div>
-            <div class="gauge-legend">
-                <span>Objectif : <b id="target-${m.key}">–</b></span>
-                <span id="gauge-pct-${m.key}">0 %</span>
+        ${gaugeHtml(m)}
+    </div>`;
+}
+
+/**
+ * Ligne d'un compteur du cycle de vente : une liste de ce qui a été déclaré, et
+ * un seul champ pour en ajouter.
+ *
+ * Pas de bouton +, pas de champ numérique. Ce n'est pas un choix de style :
+ * depuis la v10, écrire dans ces cinq colonnes n'a plus aucun effet, la base
+ * les recalcule à partir des lignes. Un bouton + afficherait 3 pendant une
+ * seconde puis retomberait à 2, ce qui est pire que pas de bouton du tout.
+ *
+ * Le champ reste UN champ par type, et non un champ unique avec un sélecteur de
+ * type : la question « qu'est-ce que j'ajoute » se répond en regardant où l'on
+ * tape, pas en manipulant une liste déroulante de plus.
+ */
+function eventRowHtml(m) {
+    return `
+    <div class="metric metric--events" data-metric="${m.key}">
+        <div class="metric-top">
+            <div class="metric-label">
+                <b>${escapeHtml(m.label)}</b>
+                <span>${escapeHtml(m.hint)}</span>
             </div>
-        </div>` : ''}
+            <div class="event-count"><b id="count-${m.key}">0</b></div>
+        </div>
+        <ul class="event-list" id="list-${m.key}"></ul>
+        <div class="event-add">
+            <label class="sr-only" for="ev-${m.key}">Ajouter : ${escapeHtml(m.label)}</label>
+            <input class="event-input" type="text" id="ev-${m.key}" data-key="${m.key}"
+                   autocomplete="off" spellcheck="false" maxlength="120"
+                   enterkeyhint="done" role="combobox" aria-expanded="false"
+                   aria-autocomplete="list" aria-controls="sugg-${m.key}"
+                   placeholder="Nom du client, puis Entrée">
+            <div class="event-sugg" id="sugg-${m.key}" role="listbox" hidden></div>
+        </div>
+        <p class="event-help"><b>Entrée</b> ajoute la ligne. Sans nom, elle compte quand même.</p>
+        ${gaugeHtml(m)}
     </div>`;
 }
 
@@ -104,7 +175,7 @@ function buildCards() {
         const host = document.querySelector(`[data-metrics="${group}"]`);
         if (!host) return;
         const list = myMetrics.filter(m => m.group === group);
-        host.innerHTML = list.map(metricRowHtml).join('');
+        host.innerHTML = list.map(m => isEventMetric(m.key) ? eventRowHtml(m) : metricRowHtml(m)).join('');
         const titre = document.querySelector(`[data-sub-for="${group}"]`);
         if (titre) titre.style.display = list.length ? '' : 'none';
     });
@@ -123,6 +194,30 @@ function buildCards() {
         input.addEventListener('input', () => onType(input));
         input.addEventListener('focus', () => input.select());
         input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur(); });
+    });
+
+    // Cycle de vente : un champ, une liste de suggestions, et la touche Entrée.
+    document.querySelectorAll('.event-input').forEach(inp => {
+        const key = inp.dataset.key;
+        inp.addEventListener('input', () => openSugg(key, inp.value));
+        inp.addEventListener('keydown', e => onEventKey(inp, e));
+        // Le délai laisse passer un clic sur une suggestion en tactile, où
+        // l'ordre des événements n'est pas celui de la souris.
+        inp.addEventListener('blur', () => setTimeout(() => closeSugg(key), 140));
+        const box = document.getElementById(`sugg-${key}`);
+        if (!box) return;
+        // mousedown et non click : le click arrive après le blur du champ, donc
+        // après la fermeture de la liste, et ne trouverait plus sa cible.
+        box.addEventListener('mousedown', ev => {
+            const item = ev.target.closest('[data-i]');
+            if (!item) return;
+            ev.preventDefault();          // garde le focus dans le champ
+            const choisie = suggState(key).list[Number(item.dataset.i)];
+            closeSugg(key);
+            inp.value = '';
+            if (choisie) pushEvent(key, choisie.name);
+            inp.focus();
+        });
     });
 
     $('#day-notes').addEventListener('input', e => {
@@ -326,6 +421,10 @@ async function setOne(key, v, iso) {
 }
 
 function onBump(key, d) {
+    /* Les cinq compteurs du cycle de vente n'ont plus de bouton + / − : ce
+       garde-fou n'existe que pour qu'un câblage fait par erreur ne parte pas
+       vers une base qui ignorerait l'écriture en silence. */
+    if (isEventMetric(key)) return;
     const before = Number(row[key]) || 0;
     if (d < 0 && before === 0) return;
     const next = Math.max(0, before + d);
@@ -367,6 +466,7 @@ function onBump(key, d) {
 
 function onType(input) {
     const key = input.dataset.key;
+    if (isEventMetric(key)) return;   // même raison que dans onBump()
     // La journée visée est figée ici. Sans cela, changer de jour pendant
     // l'anti-rebond écrivait la valeur sur la mauvaise date.
     const iso = day;
@@ -413,6 +513,255 @@ function flash(key) {
     el.classList.remove('metric-input--flash');
     void el.offsetWidth;
     el.classList.add('metric-input--flash');
+}
+
+/* --------------------------------------------------------------------------
+   Cycle de vente : des lignes nommées plutôt qu'un compteur
+
+   Le principe, décidé avec Bruno le 26/08/2026 : la liste dit la vérité, le
+   nombre en découle. Nommer l'entreprise n'est pas obligatoire — la contrainte
+   du Cockpit n'a jamais été de tout documenter, elle est de saisir tous les
+   jours — mais c'est ce qui rendra les statistiques par client possibles, et
+   c'est ce qui permettra d'avertir qu'une proposition est déjà partie chez le
+   même client.
+
+   L'affichage est optimiste : la ligne apparaît avant la réponse de la base,
+   grisée, puis se fige ou disparaît. Sans cela, chaque ajout attendrait un
+   aller-retour, et la saisie d'une journée de commercial deviendrait pénible.
+   -------------------------------------------------------------------------- */
+
+function eventItemHtml(e) {
+    const id = escapeHtml(String(e.id));
+    const nom = e.account_name
+        ? `<span class="event-name">${escapeHtml(e.account_name)}</span>`
+        : '<span class="event-name event-name--anon">client non nommé</span>';
+    return `
+    <li class="event-item${e.pending ? ' event-item--pending' : ''}" data-id="${id}">
+        ${nom}
+        <button class="event-del" type="button" data-del="${id}"${e.pending ? ' disabled' : ''}
+                title="Supprimer cette ligne" aria-label="Supprimer cette ligne">×</button>
+    </li>`;
+}
+
+/**
+ * Repeint les cinq listes, puis réaligne `row` sur elles.
+ *
+ * L'ordre compte : c'est la LISTE qui met à jour row, jamais l'inverse. C'est
+ * exactement la règle que le trigger applique en base, et c'est la seule façon
+ * que le compteur affiché, le total de la carte et le score du jour racontent
+ * la même histoire.
+ *
+ * Cette fonction ne touche jamais au champ de saisie ni à la liste de
+ * suggestions : ils sont construits une fois par buildCards() et jamais
+ * reconstruits, sinon un repeint pendant la frappe ferait perdre le focus et
+ * les caractères en cours.
+ */
+function paintEventLists() {
+    if (!hasEvents) return;
+    SALES_EVENT_KINDS.forEach(key => {
+        const host = document.getElementById(`list-${key}`);
+        if (!host) return;
+        const lignes = events.filter(e => e.kind === key);
+        host.innerHTML = lignes.map(eventItemHtml).join('');
+        row[key] = lignes.length;
+        const m = METRIC_BY_KEY[key];
+        if (m) paintGauge(m);
+    });
+    // Les boutons viennent d'être recréés en bloc : aucun risque de double écoute.
+    document.querySelectorAll('.event-del').forEach(b => {
+        b.addEventListener('click', () => removeEvent(b.dataset.del));
+    });
+    paintDerived();
+}
+
+/**
+ * Ajoute une ligne. `saisi` vide est un cas normal et non une erreur : Entrée
+ * sur un champ vide déclare un événement sans nommer le client.
+ *
+ * Le nom finalement retenu peut différer de ce qui a été tapé, parce que
+ * ensureAccount() rattache « airbus » à « Airbus » déjà connu. C'est tout
+ * l'intérêt du dispositif, donc on le DIT : un rattachement silencieux
+ * laisserait croire à une faute de frappe de l'application.
+ */
+function pushEvent(key, saisi) {
+    if (!allowWrite()) return;
+    const nom = cleanAccountName(saisi);
+    const iso = day;
+    const tmp = {
+        id: `tmp-${++tmpSeq}`, kind: key, account_id: null,
+        account_name: nom || null, pending: true
+    };
+    events.push(tmp);
+    paintEventLists();
+    inflight++;
+    status('Enregistrement…', 'saving');
+
+    enqueue(async () => {
+        try {
+            const compte = nom ? await ensureAccount(nom) : null;
+            const ligne = await addSalesEvent(key, iso, compte ? compte.id : null);
+            inflight--;
+            if (iso !== day) { settle(); return; }   // la journée affichée a changé
+            const i = events.indexOf(tmp);
+            const finale = { ...ligne, account_name: compte ? compte.name : null };
+            if (i >= 0) events[i] = finale; else events.push(finale);
+            paintEventLists();
+            settle();
+            if (compte && nom && compte.name !== nom) {
+                toast(`Rattaché à « ${compte.name} », déjà connu sous cette orthographe.`,
+                      'success', 5000);
+            }
+        } catch (e) {
+            inflight--;
+            if (iso === day) {
+                const i = events.indexOf(tmp);
+                if (i >= 0) events.splice(i, 1);
+                paintEventLists();
+            }
+            settle();
+            toast(humanError(e), 'error', 7000);
+        }
+    });
+}
+
+/**
+ * Retire une ligne. Pas de confirmation : la retaper coûte trois secondes, et
+ * une boîte de dialogue à chaque suppression rendrait la correction d'une
+ * journée pénible. En cas de refus de la base, la ligne revient à sa place.
+ */
+function removeEvent(id) {
+    // Ligne encore en vol : elle n'a pas d'identifiant en base, rien à supprimer.
+    if (!id || String(id).startsWith('tmp-')) return;
+    if (!allowWrite()) return;
+    const i = events.findIndex(e => String(e.id) === String(id));
+    if (i < 0) return;
+
+    const iso = day;
+    const [otee] = events.splice(i, 1);
+    paintEventLists();
+    inflight++;
+    status('Enregistrement…', 'saving');
+
+    enqueue(async () => {
+        try {
+            await deleteSalesEvent(id);
+            inflight--;
+            settle();
+        } catch (e) {
+            inflight--;
+            if (iso === day) { events.splice(i, 0, otee); paintEventLists(); }
+            settle();
+            toast(humanError(e), 'error', 6000);
+        }
+    });
+}
+
+/* --- Autocomplétion ---------------------------------------------------------
+
+   Liste maison plutôt qu'un <datalist> natif, pour une raison et une seule :
+   elle doit pouvoir distinguer « choisir Airbus, déjà connu » de « créer
+   Airbus Defence ». Un datalist affiche des options sans jamais dire laquelle
+   existe déjà, ce qui est précisément l'information qui empêche le doublon.
+
+   Elle est en flux normal et non en position absolue : .card porte
+   overflow: hidden dans app.css, une liste flottante serait coupée dès que le
+   champ est en bas de carte. Le contenu descend d'une centaine de pixels
+   pendant la frappe, ce qui est le prix à payer, et il n'y a rien à recalculer
+   au redimensionnement.
+   -------------------------------------------------------------------------- */
+
+function suggState(key) {
+    if (!sugg[key]) sugg[key] = { list: [], index: -1, open: false };
+    return sugg[key];
+}
+
+function closeSugg(key) {
+    const st = suggState(key);
+    st.open = false; st.index = -1; st.list = [];
+    const box = document.getElementById(`sugg-${key}`);
+    const inp = document.getElementById(`ev-${key}`);
+    if (box) { box.hidden = true; box.innerHTML = ''; }
+    if (inp) {
+        inp.setAttribute('aria-expanded', 'false');
+        inp.removeAttribute('aria-activedescendant');
+    }
+}
+
+function paintSugg(key) {
+    const st = suggState(key);
+    const box = document.getElementById(`sugg-${key}`);
+    const inp = document.getElementById(`ev-${key}`);
+    if (!box || !inp) return;
+    if (!st.list.length) { closeSugg(key); return; }
+
+    box.innerHTML = st.list.map((x, i) => `
+        <div class="event-sugg-item${i === st.index ? ' event-sugg-item--on' : ''}"
+             id="sugg-${key}-${i}" role="option" aria-selected="${i === st.index}" data-i="${i}">
+            ${x.id
+                ? escapeHtml(x.name)
+                : `<span class="event-sugg-new">Nouveau</span> ${escapeHtml(x.name)}`}
+        </div>`).join('');
+    box.hidden = false;
+    st.open = true;
+    inp.setAttribute('aria-expanded', 'true');
+    if (st.index >= 0) inp.setAttribute('aria-activedescendant', `sugg-${key}-${st.index}`);
+    else inp.removeAttribute('aria-activedescendant');
+}
+
+/**
+ * Construit la liste des suggestions.
+ *
+ * `index` reste à -1 : AUCUNE suggestion n'est présélectionnée. C'est
+ * volontaire et important. Présélectionner la première ferait qu'en tapant
+ * « Airbus Defence » puis Entrée, la ligne partirait chez « Airbus », déjà
+ * connu et proposé en tête. Une erreur silencieuse sur le nom du client est
+ * exactement ce qu'on cherche à éviter. Entrée prend donc toujours ce qui est
+ * tapé, et il faut une flèche ou un clic pour choisir une suggestion.
+ *
+ * La ligne « Nouveau » ferme la liste plutôt que de la laisser vide : sans
+ * elle, taper un nom inconnu n'afficherait rien, et l'écran ressemblerait à une
+ * autocomplétion en panne.
+ */
+function openSugg(key, texte) {
+    const st = suggState(key);
+    const q = cleanAccountName(texte);
+    if (!q) { closeSugg(key); return; }
+    const trouves = searchAccounts(q, 7);
+    const cle = accountKey(q);
+    st.list = trouves.map(a => ({ id: a.id, name: a.name }));
+    if (!trouves.some(a => a.name_key === cle)) st.list.push({ id: null, name: q });
+    st.index = -1;
+    paintSugg(key);
+}
+
+function onEventKey(inp, e) {
+    const key = inp.dataset.key;
+    const st = suggState(key);
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!st.open) openSugg(key, inp.value);
+        if (!st.list.length) return;
+        e.preventDefault();
+        const n = st.list.length;
+        st.index = e.key === 'ArrowDown'
+            ? (st.index + 1 >= n ? 0 : st.index + 1)
+            : (st.index - 1 < 0 ? n - 1 : st.index - 1);
+        paintSugg(key);
+        return;
+    }
+    if (e.key === 'Escape') {
+        if (st.open) { e.preventDefault(); closeSugg(key); }
+        return;
+    }
+    if (e.key !== 'Enter') return;
+
+    e.preventDefault();
+    const choisie = st.open && st.index >= 0 ? st.list[st.index] : null;
+    const nom = choisie ? choisie.name : inp.value;
+    closeSugg(key);
+    inp.value = '';
+    pushEvent(key, nom);
+    inp.focus();
 }
 
 /* --------------------------------------------------------------------------
@@ -465,6 +814,15 @@ function paintDerived() {
     total('prospection', calls + num('emails_sent'));
     total('pipeline', num('first_meetings') + num('proposals_sent'));
     total('outcome', num('no_go') + num('deals_dropped') + num('deals_lost'));
+
+    /* Compteurs du cycle de vente : lus dans row comme tous les autres. row a
+       été réaligné sur les listes par paintEventLists(), donc le nombre affiché,
+       le total de la carte et le score viennent bien du même endroit. */
+    SALES_EVENT_KINDS.forEach(k => {
+        const el = document.getElementById(`count-${k}`);
+        if (el) el.textContent = fmtInt(num(k));
+    });
+
     $('#day-score').textContent = fmtInt(scoreOf(row));
 
     const prevScore = prevRow ? scoreOf(prevRow) : 0;
@@ -527,10 +885,18 @@ async function load(iso) {
     history.replaceState({}, '', url);
 
     try {
-        const [current, previous] = await Promise.all([fetchDay(iso), fetchDay(addDaysISO(iso, -1))]);
+        // La troisième requête n'est envoyée que si la personne saisit un
+        // compteur du cycle de vente : un BDR ne paie rien pour cette v10.
+        const [current, previous, evts] = await Promise.all([
+            fetchDay(iso),
+            fetchDay(addDaysISO(iso, -1)),
+            hasEvents ? fetchDayEvents(iso) : Promise.resolve([])
+        ]);
         row = current || { ...EMPTY_DAY, activity_date: iso, notes: '' };
         prevRow = previous;
+        events = evts;
         paint();
+        paintEventLists();
         status(current ? '✓ À jour' : 'Aucune saisie pour ce jour', current ? 'saved' : '');
     } catch (e) {
         status('⚠ Lecture impossible', 'error');
@@ -619,15 +985,27 @@ function buildTargets() {
 (async function init() {
     session = await requireAuth({ needs: 'bdr' });
     myMetrics = metricsFor(viewedProfile());
+    hasEvents = myMetrics.some(m => isEventMetric(m.key));
     renderNav();
     renderIdentity();
     buildCards();
     buildScoreExplain();
 
-    try {
-        targets = await fetchTargets();
-    } catch (e) {
-        toast(humanError(e), 'error');
+    /* Les deux lectures partent ensemble : le carnet d'entreprises n'a aucune
+       raison d'attendre les objectifs. allSettled et non all, parce que l'échec
+       de l'un ne doit pas emporter l'autre. */
+    const [resTargets, resAccounts] = await Promise.allSettled([
+        fetchTargets(),
+        hasEvents ? loadAccounts() : Promise.resolve([])
+    ]);
+    if (resTargets.status === 'fulfilled') targets = resTargets.value;
+    else toast(humanError(resTargets.reason), 'error');
+    /* Le carnet est un confort, pas une condition : sans lui l'autocomplétion
+       ne propose rien, mais on peut toujours taper un nom et la base le créera,
+       en refusant le doublon comme d'habitude. On ne bloque donc pas la page. */
+    if (resAccounts.status === 'rejected') {
+        toast("Le carnet d'entreprises n'a pas pu être chargé : les suggestions sont "
+            + 'indisponibles, la saisie fonctionne normalement.', 'error', 7000);
     }
     buildTargets();
 

@@ -10,6 +10,12 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./css/app.css">
+    <!-- Styles des listes du cycle de vente. Fichier à part, et non ajout à
+         app.css : ce dernier est retouché par plusieurs chantiers en parallèle,
+         et deux livraisons qui le réécrivent en entier s'effacent l'une l'autre.
+         Il n'utilise que les variables de :root définies dans app.css et pourra
+         y être fondu quand le sujet sera clos. -->
+    <link rel="stylesheet" href="./css/saisie-events.css">
 </head>
 <body>
 
@@ -94,7 +100,7 @@
                     <div class="card-icon card-icon--success">🤝</div>
                     <div>
                         <div class="card-title">Cycle de vente</div>
-                        <div class="card-subtitle">Ce que j'ai fait avancer aujourd'hui</div>
+                        <div class="card-subtitle">Une ligne par événement, le client nommé si vous le connaissez</div>
                     </div>
                     <div class="card-total"><span data-total="pipeline">0</span><small>actions</small></div>
                 </div>
@@ -110,7 +116,7 @@
                     <div class="card-icon card-icon--purple">📉</div>
                     <div>
                         <div class="card-title">Sorties de pipeline</div>
-                        <div class="card-subtitle">Aucun point : ces compteurs servent à comprendre le pipeline, pas à noter la personne</div>
+                        <div class="card-subtitle">Aucun point : ces lignes servent à comprendre le pipeline, pas à noter la personne</div>
                     </div>
                     <div class="card-total"><span data-total="outcome">0</span><small>sorties</small></div>
                 </div>
