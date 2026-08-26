@@ -222,6 +222,14 @@
 
                 <div id="obj-grid"></div>
 
+                <!-- Qui échappe à ce défaut, et le bouton qui règle la question.
+                     Le bloc est toujours présent : quand personne n'a d'exception
+                     il le dit, ce qui est une information utile. -->
+                <div class="obj-apply" id="obj-apply-box" hidden>
+                    <p class="obj-apply-txt" id="obj-apply-txt"></p>
+                    <button class="btn btn--ghost" id="obj-apply" type="button" hidden></button>
+                </div>
+
                 <div class="obj-actions">
                     <button class="btn btn--primary" id="obj-save" type="button">
                         Enregistrer les objectifs du métier
@@ -253,6 +261,9 @@
                 <div class="obj-actions">
                     <button class="btn btn--primary" id="obj-user-save" type="button">
                         Enregistrer cet objectif personnel
+                    </button>
+                    <button class="btn btn--ghost" id="obj-user-follow" type="button">
+                        Revenir au défaut du métier
                     </button>
                     <span class="form-status" id="obj-user-status" role="status" aria-live="polite"></span>
                 </div>

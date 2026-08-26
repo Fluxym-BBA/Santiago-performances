@@ -49,8 +49,34 @@
             <input type="date" id="day-picker">
             <button class="chip" id="chip-today" type="button">Aujourd'hui</button>
             <button class="chip" id="chip-yesterday" type="button">Hier</button>
+
+            <!-- ÉCHELLE DE LECTURE DES JAUGES (v13)
+                 Le libellé dit « Jauges » et non « Période » : ce sélecteur ne
+                 change QUE ce qui est lu. La saisie reste celle du jour affiché
+                 à gauche, quelle que soit l'échelle choisie ici, et la phrase
+                 sous la barre le répète en clair.
+
+                 Trois échelles, pas de plage libre : il n'existe pas d'objectif
+                 « du 3 au 17 », donc rien à comparer sur une plage quelconque.
+                 Les plages libres vivent sur l'écran Performances, où l'on
+                 compare des périodes entre elles.
+
+                 Les boutons sont écrits ici et non construits en JavaScript :
+                 trois valeurs qui ne bougeront pas, et un sélecteur présent dès
+                 le premier rendu ne saute pas à l'écran une fois la page prête. -->
+            <div class="scale-pick">
+                <span class="date-bar-label">Jauges</span>
+                <div class="seg" id="scale-seg">
+                    <button type="button" data-scale="day">Jour</button>
+                    <button type="button" data-scale="week">Semaine</button>
+                    <button type="button" data-scale="month">Mois</button>
+                </div>
+            </div>
+
             <div class="date-status" id="save-status"></div>
         </section>
+
+        <div class="period-hint" id="period-hint" hidden></div>
 
         <div id="past-warning"></div>
 
@@ -193,7 +219,9 @@
              objectifs sont fixés par le propriétaire du Cockpit. Le détail du
              pourquoi est dans buildTargets(), js/saisie.js. -->
         <details class="panel" id="targets-panel">
-            <summary>🎚️ Mes objectifs journaliers</summary>
+            <!-- Le libellé suit l'échelle de lecture (v13) : « journaliers » en
+                 dur mentait dès qu'on passait la barre au mois. -->
+            <summary id="targets-summary">🎚️ Mes objectifs journaliers</summary>
             <div class="panel-body">
                 <div class="targets-read" id="targets-grid"></div>
                 <p class="targets-note" id="targets-note"></p>

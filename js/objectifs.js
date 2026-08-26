@@ -36,12 +36,23 @@
 
    4. LES CHAMPS SONT CONSTRUITS DEPUIS METRICS, jamais écrits dans le HTML. Une
       treizième métrique apparaîtra ici toute seule le jour où elle existera.
+
+   5. LE DÉFAUT DU MÉTIER EST DÉJÀ RÉTROACTIF, MAIS PAS VISIBLEMENT (ajouté le
+      27/08). Il s'applique à qui n'a pas d'exception personnelle, donc à
+      Santiago et Dominique dès sa première écriture. Ce qui trompait, c'est que
+      la migration v12 a converti les anciens réglages individuels de Christophe,
+      Damien et des trois comptes de démonstration en exceptions : sept valeurs
+      posées à leur nom qui l'emportent sur tout défaut, sans que l'écran du
+      métier le dise. Le bloc « ces personnes ne suivent pas ce défaut » le dit
+      maintenant, et le bouton efface les exceptions plutôt que d'y recopier le
+      défaut. Recopier serait rétroactif une fois puis figé, et le prochain
+      changement de défaut ne toucherait plus personne.
    ========================================================================== */
 
 import {
     METRICS, TARGET_SCALES, TARGET_JOBS,
     loadTargets, targetsLoaded, jobTargets, userTargets, targetJobOf,
-    setTarget, clearTarget, humanError,
+    setTarget, clearTarget, applyJobTargets, humanError,
     listProfiles, todayISO, joursOuvres, fromISO, toISO
 } from './api.js';
 import { escapeHtml, toast, fmtInt } from './ui.js';
@@ -76,6 +87,29 @@ function bornesDuMois(iso) {
 function ouvresDuMois() {
     const [de, a] = bornesDuMois(todayISO());
     return joursOuvres(de, a);
+}
+
+/** « Damien », « Damien et Christophe », « Damien, Christophe et Sales 1 ». */
+function enumere(noms) {
+    if (noms.length <= 1) return noms[0] || '';
+    return noms.slice(0, -1).join(', ') + ' et ' + noms[noms.length - 1];
+}
+
+/**
+ * Les personnes du métier affiché qui portent au moins une exception
+ * personnelle sur l'échelle affichée, et que le défaut ne touche donc pas.
+ *
+ * Le tri des métiers reproduit celui de la base (apply_job_targets) : commercial
+ * l'emporte sur BDR, ce que targetJobOf fait déjà. Si les deux définitions
+ * divergeaient un jour, l'écran annoncerait un nombre et la base en effacerait
+ * un autre.
+ */
+function exceptions(job, scale) {
+    return profils.filter(p => {
+        if (targetJobOf(p) !== job) return false;
+        const perso = userTargets(p.user_id, scale);
+        return Object.values(perso).some(v => v != null);
+    });
 }
 
 /** Valeur d'un champ : null quand il est vide, sinon un entier positif. */
@@ -173,6 +207,83 @@ function deriver() {
         : "Aucun objectif mensuel n'est posé pour ce métier : il n'y a rien à déduire.";
 }
 
+/* --------------------------------------------------------------------------
+   « Qui ne suit pas ce défaut », et le bouton qui règle la question
+   -------------------------------------------------------------------------- */
+
+function renderApply() {
+    const boite = document.getElementById('obj-apply-box');
+    const texte = document.getElementById('obj-apply-txt');
+    const bouton = document.getElementById('obj-apply');
+    const hors = exceptions(jobKey, scaleKey);
+    const sc = TARGET_SCALES.find(x => x.key === scaleKey);
+
+    if (!hors.length) {
+        boite.hidden = false;
+        boite.classList.remove('obj-apply--warn');
+        texte.textContent = `Tout le monde suit ce défaut ${sc.article} : `
+            + `aucun objectif personnel ne l'emporte sur ces valeurs.`;
+        bouton.hidden = true;
+        return;
+    }
+
+    boite.hidden = false;
+    boite.classList.add('obj-apply--warn');
+    const noms = enumere(hors.map(p => p.display_name));
+    const pluriel = hors.length > 1;
+    texte.textContent = `${noms} ${pluriel ? 'ont' : 'a'} un objectif personnel `
+        + `${sc.article} qui l'emporte sur ce défaut. Ce que vous réglez ici ne `
+        + `${pluriel ? 'les' : 'le'} concerne donc pas.`;
+    bouton.hidden = false;
+    bouton.textContent = pluriel
+        ? `Aligner ces ${hors.length} personnes sur le défaut`
+        : `Aligner ${hors[0].display_name} sur le défaut`;
+}
+
+/**
+ * Efface les exceptions personnelles du métier affiché sur l'échelle affichée.
+ *
+ * La confirmation nomme les personnes et dit ce que l'opération ne fait pas :
+ * elle ne touche ni les autres échelles, ni l'autre métier, ni la moindre donnée
+ * d'activité. C'est irréversible — les valeurs personnelles ne sont pas
+ * archivées ailleurs — et la confirmation le dit aussi.
+ */
+async function appliquer() {
+    const statut = document.getElementById('obj-status');
+    const hors = exceptions(jobKey, scaleKey);
+    if (!hors.length) return;
+
+    const sc = TARGET_SCALES.find(x => x.key === scaleKey);
+    const metier = TARGET_JOBS.find(x => x.key === jobKey);
+    const noms = hors.map(p => '  · ' + p.display_name).join('\n');
+    const ok = confirm(
+        `Aligner sur le défaut ${metier.label} ${sc.article} :\n\n${noms}\n\n`
+        + `Leurs objectifs personnels ${sc.article} sont supprimés. Ils suivront `
+        + `le défaut du métier, maintenant et à chaque fois que vous le changerez.\n\n`
+        + `Les autres échelles ne bougent pas. Aucune donnée d'activité n'est touchée.\n\n`
+        + `Cette suppression est définitive.`
+    );
+    if (!ok) return;
+
+    statut.style.color = '';
+    statut.textContent = 'Application…';
+    try {
+        const n = await applyJobTargets(jobKey, scaleKey);
+        await loadTargets();
+        repeindre();
+        statut.style.color = 'var(--success)';
+        statut.textContent = n
+            ? `${n} valeur${n > 1 ? 's' : ''} personnelle${n > 1 ? 's' : ''} `
+              + `supprimée${n > 1 ? 's' : ''}. ${hors.length > 1 ? 'Ces personnes suivent' : 'Cette personne suit'} `
+              + 'à nouveau le défaut du métier.'
+            : "Aucune valeur à supprimer : l'écran était déjà à jour.";
+        toast('Objectifs personnels alignés sur le métier.', 'success');
+    } catch (e) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = humanError(e);
+    }
+}
+
 async function saveJob() {
     const statut = document.getElementById('obj-status');
     const actuels = jobTargets(jobKey, scaleKey);
@@ -212,6 +323,7 @@ async function saveJob() {
         }
         await loadTargets();
         renderJobGrid();
+        renderApply();
         renderUserGrid();
         statut.style.color = 'var(--success)';
         const poses = travaux.filter(t => t.quoi === 'pose').length;
@@ -282,6 +394,32 @@ function renderUserGrid() {
         </div>`;
 }
 
+/**
+ * Vide les champs de la fiche personnelle, sans rien enregistrer.
+ *
+ * Volontairement sans effet sur la base : c'est le parti pris n° 2 de cet écran.
+ * Le bouton propose, l'enregistrement décide. Une personne rendue au défaut de
+ * son métier dans son dos, sans que Bruno ait cliqué sur « Enregistrer », serait
+ * exactement le genre de changement silencieux qu'on refuse ici.
+ */
+function suivreLeMetier() {
+    const cible = profils.find(p => p.user_id === whoId);
+    const job = cible ? targetJobOf(cible) : null;
+    if (!job) return;
+    let vides = 0;
+    metriquesDe(job).forEach(m => {
+        const el = document.getElementById(`ou-${m.key}`);
+        if (el && el.value !== '') { el.value = ''; vides++; }
+    });
+    const statut = document.getElementById('obj-user-status');
+    statut.style.color = '';
+    statut.textContent = vides
+        ? `${vides} champ${vides > 1 ? 's' : ''} vidé${vides > 1 ? 's' : ''}. `
+          + "Rien n'est enregistré : cliquez sur « Enregistrer » pour que "
+          + `${cible.display_name} suive les objectifs de son métier.`
+        : `${cible.display_name} suit déjà les objectifs de son métier.`;
+}
+
 async function saveUser() {
     const statut = document.getElementById('obj-user-status');
     const cible = profils.find(p => p.user_id === whoId);
@@ -319,6 +457,7 @@ async function saveUser() {
         }
         await loadTargets();
         renderUserGrid();
+        renderApply();
         statut.style.color = 'var(--success)';
         const retires = travaux.filter(t => t.quoi === 'retire').length;
         statut.textContent = retires === travaux.length
@@ -338,6 +477,7 @@ async function saveUser() {
 function repeindre() {
     renderSegs();
     renderJobGrid();
+    renderApply();
     renderUserGrid();
 }
 
@@ -393,5 +533,7 @@ export async function initObjectifs() {
 
     document.getElementById('obj-save').addEventListener('click', saveJob);
     document.getElementById('obj-derive').addEventListener('click', deriver);
+    document.getElementById('obj-apply').addEventListener('click', appliquer);
     document.getElementById('obj-user-save').addEventListener('click', saveUser);
+    document.getElementById('obj-user-follow').addEventListener('click', suivreLeMetier);
 }

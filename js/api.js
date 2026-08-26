@@ -570,7 +570,13 @@ function normalize(p) {
         // l'ancienne case et l'application se comporte à l'identique.
         access_level: p.access_level ?? (isAdmin ? 'admin' : 'member'),
         is_demo: !!p.is_demo,
-        is_active: p.is_active !== false
+        is_active: p.is_active !== false,
+        /* Échelle de lecture des jauges (v13). Filtrée sur les trois valeurs
+           permises plutôt que recopiée telle quelle : avant la migration la
+           colonne n'existe pas et vaut undefined, ce qui donnerait un
+           `if (scale)` vrai et une échelle inconnue à afficher. NULL veut dire
+           « personne n'a choisi », et le jour s'applique alors. */
+        gauge_scale: ['day', 'week', 'month'].includes(p.gauge_scale) ? p.gauge_scale : null
     };
 }
 
@@ -1675,6 +1681,29 @@ export async function clearTarget({ scope, job = null, userId = null, scale, met
     invalidateTargets();
 }
 
+/**
+ * Efface les objectifs personnels de tous les membres d'un métier sur une
+ * échelle, pour qu'ils suivent à nouveau le défaut du métier. Renvoie le nombre
+ * de lignes effacées. Propriétaire seul, garde côté base.
+ *
+ * Pourquoi effacer et non recopier le défaut dans chaque fiche : voir l'en-tête
+ * de sql/period-scale-migration-v13.sql. Recopier serait rétroactif une fois
+ * puis figé, et reconstruirait le problème qu'on répare.
+ *
+ * Un seul aller-retour, et non une boucle de trente-cinq appels : sur le plan
+ * gratuit une rafale se fait parfois refuser en cours de route, et un effacement
+ * à moitié fait laisserait la moitié de l'équipe sur l'ancien réglage sans que
+ * l'écran sache le dire.
+ */
+export async function applyJobTargets(job, scale) {
+    const { data, error } = await supabase.rpc('apply_job_targets', {
+        p_job: job, p_scale: scale
+    });
+    if (error) throw error;
+    invalidateTargets();
+    return Number(data) || 0;
+}
+
 /* --------------------------------------------------------------------------
    Jours ouvrés
 
@@ -1787,6 +1816,18 @@ export function humanError(error) {
         return "La base n'a pas encore la table des objectifs : exécutez "
              + 'sql/targets-migration-v12.sql. La saisie fonctionne normalement, '
              + 'seules les jauges restent vides.';
+    }
+    if (msg.includes('apply_job_targets')
+        && ['PGRST202', '42883'].includes(error.code)) {
+        return "La base n'a pas encore la fonction d'application des objectifs : "
+             + 'exécutez sql/period-scale-migration-v13.sql. Les objectifs se '
+             + 'règlent normalement, seule l\'application à tous est indisponible.';
+    }
+    if (msg.includes('gauge_scale')
+        && ['42703', 'PGRST204', '23514'].includes(error.code)) {
+        return "La base n'a pas encore la colonne d'échelle de lecture : exécutez "
+             + 'sql/period-scale-migration-v13.sql. Le choix reste actif pour cette '
+             + 'session, il ne sera simplement pas retenu.';
     }
     if ((msg.includes('accounts_overview') || msg.includes('delete_account')
          || msg.includes('merge_accounts'))
@@ -1946,6 +1987,68 @@ export function periodLabel(from, to) {
 /** Libellé court, pour les puces et les légendes de graphiques. */
 export function periodLabelShort(from, to) {
     return from === to ? formatShort(from) : `${formatShort(from)} → ${formatShort(to)}`;
+}
+
+/* --------------------------------------------------------------------------
+   ÉCHELLE DE LECTURE DES JAUGES (v13)
+
+   Trois échelles, les mêmes que celles des objectifs : il n'y a pas d'objectif
+   « du 3 au 17 », donc pas d'échelle personnalisée ici. Une plage libre a du
+   sens sur l'écran Performances, où l'on compare des périodes ; elle n'en a
+   aucun en face d'un objectif, qui est toujours posé sur un jour, une semaine
+   ou un mois.
+
+   La saisie reste quotidienne quelle que soit l'échelle. C'est la seule chose à
+   ne jamais perdre de vue dans cette section : on change ce qu'on LIT, jamais
+   ce qu'on écrit.
+   -------------------------------------------------------------------------- */
+
+/**
+ * Bornes de la période contenant `iso`, pour une échelle donnée.
+ *
+ * Semaine du lundi au dimanche, comme partout ailleurs dans l'application
+ * (startOfWeek suit ISO 8601). Mois calendaire, et non trente jours glissants :
+ * un objectif mensuel se lit sur le mois du calendrier, c'est ce que dit la
+ * feuille de paie et c'est ce que les gens comptent.
+ *
+ * La borne de fin n'est PAS ramenée à aujourd'hui. Elle reste la fin de la
+ * période, y compris dans le futur : c'est ce qui permet d'afficher « il reste
+ * tant, en tant de jours ouvrés ». La somme des journées, elle, ne trouvera
+ * évidemment rien après aujourd'hui.
+ */
+export function periodBounds(scale, iso) {
+    if (scale === 'week')  return { from: startOfWeek(iso),  to: endOfWeek(iso) };
+    if (scale === 'month') return { from: startOfMonth(iso), to: endOfMonth(iso) };
+    return { from: iso, to: iso };
+}
+
+/** Échelle de lecture d'un profil, le jour à défaut de choix. */
+export const scaleOf = p => (p && p.gauge_scale) || 'day';
+
+/**
+ * Enregistre MON échelle de lecture. Jamais celle de quelqu'un d'autre : la
+ * policy profiles_update_own_name ne laisse toucher que sa propre ligne, et le
+ * privilège d'écriture n'est accordé que sur display_name et gauge_scale.
+ *
+ * Ne lève pas. Une préférence d'affichage qui ne s'enregistre pas est un
+ * désagrément, pas une panne : le choix reste actif pour la session en cours, et
+ * bloquer l'écran là-dessus empêcherait la saisie du jour pour rien. Renvoie
+ * vrai quand la base a confirmé, faux sinon.
+ */
+export async function saveGaugeScale(scale) {
+    if (!['day', 'week', 'month'].includes(scale)) return false;
+    const me = myProfile();
+    if (!me) return false;
+    const { error } = await supabase
+        .from('profiles').update({ gauge_scale: scale }).eq('user_id', me.user_id);
+    if (error) {
+        console.warn('Préférence d\'échelle non enregistrée :', error.message);
+        return false;
+    }
+    // Le profil en mémoire doit suivre, sinon un changement de page revient à
+    // l'ancienne échelle alors que la base, elle, a bien retenu la nouvelle.
+    me.gauge_scale = scale;
+    return true;
 }
 
 /** Renvoie la plus ancienne des deux dates. */

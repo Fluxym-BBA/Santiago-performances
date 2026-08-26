@@ -12,16 +12,27 @@
    La barre des deux volets
 
    Deux boutons, pas une navigation : on reste sur la même page et rien n'est
-   perdu en passant de l'un à l'autre. Le volet actif est marqué par un trait
-   sous le libellé plutôt que par un fond, pour ne pas ressembler aux
-   sélecteurs segmentés qui vivent à l'intérieur des cartes.
+   perdu en passant de l'un à l'autre.
+
+   PREMIÈRE VERSION ILLISIBLE, ET POURQUOI. La barre était un trait sous le
+   libellé, texte marine pour le volet actif, sans fond. Elle vit dans
+   .page-main--pulled, qui remonte le contenu de 64 px sous un .page-hero dont
+   le dégradé descend 88 px plus bas : la barre est donc posée SUR le marine, et
+   « marine sur marine » ne s'est vu qu'à l'écran. Corrigé le 27/08.
+
+   La barre porte maintenant son propre fond blanc, comme .date-bar qui vit au
+   même endroit de la page. Le contraste ne dépend plus de ce qu'il y a
+   derrière, et il resterait bon si le hero changeait un jour de couleur.
    -------------------------------------------------------------------------- */
 
 .bo-tabs {
     display: flex;
-    gap: 4px;
+    gap: 6px;
     margin-bottom: 18px;
-    border-bottom: 1.5px solid var(--gray-200);
+    padding: 6px;
+    background: var(--white);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
 }
 
 .bo-tabs .bo-tab {
@@ -29,26 +40,29 @@
     font-size: 14.5px;
     font-weight: 700;
     color: var(--gray-500);
-    background: none;
+    background: var(--gray-100);
     border: none;
-    border-bottom: 2.5px solid transparent;
-    margin-bottom: -1.5px;
-    padding: 10px 16px;
-    min-height: 42px;
-    transition: color 0.16s ease, border-color 0.16s ease;
+    border-radius: var(--radius-lg);
+    padding: 11px 22px;
+    min-height: 44px;
+    transition: background 0.16s ease, color 0.16s ease;
 }
 
-.bo-tabs .bo-tab:hover { color: var(--navy); }
+.bo-tabs .bo-tab:hover { background: var(--gray-200); color: var(--navy); }
 
+/* Blanc sur marine : le rapport de contraste est d'environ 15 pour 1, très
+   au-delà des 4,5 exigés. Le volet actif ne se devine plus, il se lit. */
 .bo-tabs .bo-tab.is-on {
-    color: var(--navy);
-    border-bottom-color: var(--cyan);
+    color: var(--white);
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+    box-shadow: var(--shadow-sm);
 }
+
+.bo-tabs .bo-tab.is-on:hover { color: var(--white); }
 
 .bo-tabs .bo-tab:focus-visible {
     outline: none;
     box-shadow: 0 0 0 3px var(--cyan-glow);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -178,11 +192,60 @@
    -------------------------------------------------------------------------- */
 
 @media (max-width: 639px) {
-    .bo-tabs .bo-tab { flex: 1; padding: 10px 8px; font-size: 14px; }
+    .bo-tabs { padding: 5px; }
+    .bo-tabs .bo-tab { flex: 1; padding: 11px 8px; font-size: 14px; }
     .obj-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
     .obj-cell { padding: 10px 11px; }
     /* 16 px : en dessous, iOS zoome sur le champ au moment de la frappe. */
     .obj-input { font-size: 16px; min-height: 44px; }
     .obj-actions .btn { width: 100%; }
     .obj-who { max-width: none; width: 100%; min-height: 44px; }
+}
+
+/* --------------------------------------------------------------------------
+   « Qui ne suit pas ce défaut »
+
+   Ce bloc dit à quoi sert l'écran qu'on est en train de régler. Il a deux
+   états, et le second est un avertissement : des valeurs viennent d'être
+   saisies pour un métier alors que certaines personnes n'y sont pas soumises.
+   Le fond ambre le signale sans dramatiser, le fond gris se contente de
+   confirmer que tout le monde suit.
+   -------------------------------------------------------------------------- */
+
+.obj-apply {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+}
+
+.obj-apply--warn {
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.obj-apply-txt {
+    flex: 1 1 320px;
+    min-width: 0;
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--gray-600);
+}
+
+.obj-apply--warn .obj-apply-txt { color: #92400e; }
+
+/* Le bouton ne rétrécit pas : « Aligner ces 5 personnes sur le défaut » sur
+   deux lignes coupées au milieu d'un chiffre serait illisible. */
+.obj-apply .btn { flex: 0 0 auto; }
+
+@media (max-width: 560px) {
+    .obj-apply { flex-direction: column; align-items: stretch; }
+    .obj-apply .btn { width: 100%; }
 }

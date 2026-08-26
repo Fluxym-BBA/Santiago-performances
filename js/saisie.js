@@ -33,7 +33,9 @@ import {
     SALES_EVENT_KINDS, isEventMetric, cleanAccountName, accountKey,
     loadAccounts, searchAccounts, ensureAccount, accountByName, similarAccounts,
     fetchDayEvents, addSalesEvent, deleteSalesEvent,
-    accountHistory, agoLabel, formatDMY
+    accountHistory, agoLabel, formatDMY,
+    TARGET_SCALES, scaleOf, saveGaugeScale, periodBounds, periodLabel,
+    fetchRange, joursOuvres, myProfile
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -53,6 +55,36 @@ let prevRow = null;          // veille, pour la comparaison
    de cette personne qui doivent s'afficher. Renseigné dans init(), après
    requireAuth() qui charge les profils. */
 let myMetrics = METRICS;
+
+/* --------------------------------------------------------------------------
+   L'ÉCHELLE DE LECTURE (v13)
+
+   Dominique ne compte pas ses rendez-vous à la journée : elle en veut dix-huit
+   dans le mois. Une jauge journalière ne lui dit donc rien, et l'objectif
+   mensuel posé en v12 restait invisible faute d'écran pour le lire.
+
+   CE QUI CHANGE ET CE QUI NE CHANGE PAS. La saisie reste quotidienne, toujours,
+   quelle que soit l'échelle : les champs et les boutons plus et moins portent sur
+   le jour affiché, exactement comme avant. Seules les JAUGES changent d'échelle.
+   C'est une décision, pas une facilité : une saisie qui se verrouille dès qu'on
+   regarde le mois est une saisie qu'on remet à plus tard, et le seul test qui
+   compte pour cet outil est que les chiffres soient saisis tous les jours.
+
+   POURQUOI « HORS JOUR AFFICHÉ ». Le cumul de la période est stocké sans la
+   journée en cours d'édition, et la jauge affiche « cumul hors jour + valeur du
+   jour ». La valeur du jour vit déjà dans `row`, tenue à jour à chaque frappe :
+   la jauge mensuelle avance donc à chaque clic sur « + » sans une requête de
+   plus. Stocker le cumul complet aurait obligé à relire la période après chaque
+   frappe, ou à bricoler un delta entre l'ancienne et la nouvelle valeur.
+
+   NULL SE PROPAGE. Un compteur qu'aucune journée de la période n'a renseigné
+   reste « non mesuré ». Le remplacer par zéro affirmerait un chiffre que
+   personne n'a déclaré, ce que cet écran ne fait nulle part ailleurs.
+   -------------------------------------------------------------------------- */
+
+let scale = 'day';           // 'day' | 'week' | 'month'
+let periode = null;          // { from, to } de l'échelle en cours, null en mode jour
+let cumulHorsJour = null;    // { metrique: nombre|null } sur la période, jour affiché exclu
 
 /* Trois états à distinguer, sans quoi l'écran et la base finissent par
    raconter deux histoires différentes :
@@ -107,9 +139,10 @@ function gaugeHtml(m) {
         <div class="gauge">
             <div class="gauge-track"><div class="gauge-fill" id="gauge-${m.key}" style="width:0%"></div></div>
             <div class="gauge-legend">
-                <span>Objectif : <b id="target-${m.key}">–</b></span>
+                <span>Objectif : <b id="target-${m.key}">–</b><span id="gauge-scale-${m.key}"></span></span>
                 <span id="gauge-pct-${m.key}">0 %</span>
             </div>
+            <div class="gauge-rest" id="gauge-rest-${m.key}" hidden></div>
         </div>`;
 }
 
@@ -982,6 +1015,60 @@ function onEventKey(inp, e) {
    Rendu
    -------------------------------------------------------------------------- */
 
+/**
+ * Valeur du compteur à l'échelle de lecture en cours.
+ *
+ * Renvoie null quand rien n'a été mesuré sur toute la période, jamais zéro : un
+ * zéro affiché serait une déclaration, et personne ne l'a faite.
+ */
+function periodValue(key) {
+    const jour = row[key] != null ? Number(row[key]) : null;
+    if (scale === 'day') return jour;
+    const hors = cumulHorsJour ? cumulHorsJour[key] : null;
+    if (hors == null && jour == null) return null;
+    return (hors || 0) + (jour || 0);
+}
+
+/**
+ * La phrase sous la jauge, en mode période : ce qui est fait, ce qui reste, et
+ * en combien de jours ouvrés.
+ *
+ * Trois situations, trois phrases. Une période terminée ne dit pas « il reste » :
+ * il ne reste rien, c'est fini, et afficher un reste à faire sur un mois clos
+ * ferait espérer une action impossible. Une période en cours sans jour ouvré
+ * devant elle le dit aussi — un objectif de semaine consulté le dimanche soir
+ * n'est plus rattrapable, et l'écran vaut mieux qu'un silence.
+ */
+function restLine(v, t) {
+    if (scale === 'day' || !periode) return '';
+
+    const finie = diffDays(todayISO(), periode.to) > 0;
+    // joursOuvres compte aujourd'hui s'il est ouvré : la journée n'est pas
+    // finie, et l'annoncer comme perdue découragerait pour rien.
+    const jo = finie ? 0 : joursOuvres(todayISO(), periode.to);
+    const nJours = n => `${n} jour${n > 1 ? 's' : ''} ouvré${n > 1 ? 's' : ''}`;
+
+    /* Rien de mesuré n'est pas zéro fait. La jauge affiche « non mesuré » juste
+       au-dessus : écrire « 0 sur 40 » ici la contredirait, et donnerait à lire
+       comme un échec ce qui n'est qu'une absence de déclaration. */
+    if (v == null) {
+        if (finie) return `rien de mesuré sur la période`;
+        return jo > 0
+            ? `rien de mesuré · objectif de ${fmtInt(t)}, ${nJours(jo)} devant`
+            : `rien de mesuré · plus de jour ouvré dans la période`;
+    }
+
+    const faits = `${fmtInt(v)} sur ${fmtInt(t)}`;
+    if (v >= t) return `${faits} · objectif atteint`;
+
+    const reste = t - v;
+    if (finie) return `${faits} · période terminée, ${fmtInt(reste)} de moins que l'objectif`;
+    if (jo <= 0) return `${faits} · plus de jour ouvré dans la période`;
+
+    return `${faits} · reste ${fmtInt(reste)} en ${nJours(jo)}`
+         + ` (${fmtInt(Math.ceil(reste / jo))} par jour)`;
+}
+
 function paintGauge(m) {
     if (!m.target) return;   // compteur sans objectif : aucune jauge à peindre
 
@@ -989,20 +1076,38 @@ function paintGauge(m) {
        valeur de la personne si elle en a une, sinon celle de son métier, sinon
        aucune. Le troisième cas s'affiche « non défini », et c'est une
        information : personne n'a encore dit ce qu'on attendait ici. Un zéro
-       affiché à la place aurait voulu dire « ne rien faire est l'objectif ». */
-    const t = Number(targetFor(viewedProfile(), m.key, 'day').value) || 0;
-    const mesure = row[m.key] != null;
-    const v = Number(row[m.key]) || 0;
-    const pct = mesure && t > 0 ? Math.min(100, (v / t) * 100) : 0;
+       affiché à la place aurait voulu dire « ne rien faire est l'objectif ».
+
+       Depuis la v13 l'objectif est demandé à l'échelle de lecture : un objectif
+       mensuel n'est pas douze fois l'objectif du jour, et il n'est pas déduit
+       ici. Ce qui n'a pas été posé pour l'échelle affichée reste « non défini ». */
+    const t = Number(targetFor(viewedProfile(), m.key, scale).value) || 0;
+    const v = periodValue(m.key);
+    const mesure = v != null;
+    const val = v || 0;
+    const pct = mesure && t > 0 ? Math.min(100, (val / t) * 100) : 0;
     const fill = document.getElementById(`gauge-${m.key}`);
     if (!fill) return;
     fill.style.width = `${pct}%`;
-    fill.classList.toggle('gauge-fill--done', mesure && t > 0 && v >= t);
+    fill.classList.toggle('gauge-fill--done', mesure && t > 0 && val >= t);
     document.getElementById(`target-${m.key}`).textContent = t > 0 ? fmtInt(t) : 'non défini';
-    // Journée non mesurée : ni pourcentage ni barre, sinon l'écran affirmerait
+
+    /* L'échelle est écrite à côté de l'objectif, et pas seulement en haut de la
+       page : sans elle, « Objectif : 40 » se lit comme un objectif du jour, et
+       quarante appels dans le mois se prendraient pour une catastrophe. */
+    const sc = TARGET_SCALES.find(x => x.key === scale);
+    document.getElementById(`gauge-scale-${m.key}`).textContent =
+        t > 0 && scale !== 'day' ? ` ${sc.article}` : '';
+
+    // Période non mesurée : ni pourcentage ni barre, sinon l'écran affirmerait
     // un zéro que personne n'a déclaré.
     document.getElementById(`gauge-pct-${m.key}`).textContent =
-        !mesure ? 'non mesuré' : t > 0 ? `${Math.round((v / t) * 100)} %` : '—';
+        !mesure ? 'non mesuré' : t > 0 ? `${Math.round((val / t) * 100)} %` : '—';
+
+    const rest = document.getElementById(`gauge-rest-${m.key}`);
+    const txt = t > 0 ? restLine(v, t) : '';
+    rest.textContent = txt;
+    rest.hidden = !txt;
 }
 
 function paintDerived() {
@@ -1072,6 +1177,8 @@ function paintDateBar() {
     $('#chip-today').classList.toggle('chip--active', isToday);
     $('#chip-yesterday').classList.toggle('chip--active', day === addDaysISO(todayISO(), -1));
 
+    paintScaleBar();
+
     $('#past-warning').innerHTML = isToday ? '' : `
         <div style="margin-top:14px">
             <span class="badge-past">✎ Vous modifiez une journée passée
@@ -1082,9 +1189,102 @@ function paintDateBar() {
     $('#kpi-prev-label').textContent = `Score du ${formatLong(prevIso).replace(/^\w+\s/, '')}`;
 }
 
+/**
+ * Le sélecteur d'échelle, et la phrase qui dit ce qu'il change.
+ *
+ * La phrase n'est pas décorative : elle est la réponse au seul vrai risque de
+ * cet écran. En vue Mois deux chiffres cohabitent, celui du jour dans le champ
+ * et celui du mois dans la jauge, et rien dans un champ à « 12 » ne dit lequel
+ * des deux on regarde. La phrase le dit, à chaque changement, en nommant les
+ * deux dates. Elle disparaît en vue Jour, où il n'y a plus d'ambiguïté à lever.
+ */
+function paintScaleBar() {
+    const seg = $('#scale-seg');
+    if (seg) {
+        seg.querySelectorAll('button').forEach(b => {
+            const on = b.dataset.scale === scale;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    }
+
+    const hint = $('#period-hint');
+    if (!hint) return;
+    if (scale === 'day') { hint.hidden = true; hint.innerHTML = ''; return; }
+
+    const b = periodBounds(scale, day);
+    const sc = TARGET_SCALES.find(x => x.key === scale);
+    hint.hidden = false;
+    hint.innerHTML = `Jauges ${escapeHtml(sc.article)}, <b>${escapeHtml(periodLabel(b.from, b.to))}</b>`
+        + ` · la saisie ci-dessous reste celle du <b>${escapeHtml(formatLong(day))}</b>`;
+}
+
+/**
+ * Change l'échelle de lecture.
+ *
+ * L'écran est repeint avant que la base ait répondu, et la préférence est
+ * enregistrée sans qu'on l'attende : un sélecteur qui met une demi-seconde à
+ * réagir donne l'impression d'un clic manqué, et on le clique deux fois. Si
+ * l'enregistrement échoue, le choix vaut pour la session en cours, ce que
+ * saveGaugeScale annonce dans la console sans embêter personne à l'écran — une
+ * préférence d'affichage non retenue n'est pas une panne.
+ */
+async function setScale(next) {
+    if (next === scale || !['day', 'week', 'month'].includes(next)) return;
+    scale = next;
+    paintScaleBar();
+    buildTargets();
+    paint();                    // les jauges affichent tout de suite la bonne échelle
+    const ok = await loadPeriode();
+    paint();                    // puis le cumul, dès qu'il est là
+    if (!ok && scale !== 'day') {
+        toast('Le cumul de la période n\'a pas pu être lu : les jauges restent vides, '
+            + 'la saisie du jour fonctionne normalement.', 'error', 6000);
+    }
+    saveGaugeScale(scale);
+}
+
 /* --------------------------------------------------------------------------
    Chargement d'un jour
    -------------------------------------------------------------------------- */
+
+/**
+ * Relit le cumul de la période, journée affichée exclue.
+ *
+ * Une seule requête, sur la vue v_daily_kpi, et seulement quand l'échelle n'est
+ * pas le jour : en mode jour la valeur affichée est déjà celle de `row`, il n'y
+ * a rien à additionner et rien à demander.
+ *
+ * Ne lève pas. Un cumul de période qui ne se charge pas doit laisser la saisie
+ * du jour intacte : les jauges retombent alors sur « non mesuré », ce qui est
+ * désagréable mais honnête, là où une exception aurait vidé l'écran.
+ */
+async function loadPeriode() {
+    if (scale === 'day') { periode = null; cumulHorsJour = null; return true; }
+
+    periode = periodBounds(scale, day);
+    try {
+        const rows = await fetchRange(periode.from, periode.to);
+        const somme = {};
+        myMetrics.forEach(m => {
+            let acc = null;
+            rows.forEach(r => {
+                // La journée affichée est écartée : sa valeur vient de `row`, qui
+                // suit la frappe en cours. La compter deux fois doublerait chaque
+                // chiffre saisi aujourd'hui.
+                if (r.activity_date === day) return;
+                if (r[m.key] != null) acc = (acc || 0) + Number(r[m.key]);
+            });
+            somme[m.key] = acc;
+        });
+        cumulHorsJour = somme;
+        return true;
+    } catch (e) {
+        cumulHorsJour = null;
+        console.warn('Cumul de période non chargé :', e.message);
+        return false;
+    }
+}
 
 async function load(iso) {
     // Ce qui attendait part maintenant, avec sa propre date : une frappe
@@ -1105,12 +1305,15 @@ async function load(iso) {
     history.replaceState({}, '', url);
 
     try {
-        // La troisième requête n'est envoyée que si la personne saisit un
-        // compteur du cycle de vente : un BDR ne paie rien pour cette v10.
+        /* La troisième requête n'est envoyée que si la personne saisit un
+           compteur du cycle de vente : un BDR ne paie rien pour cette v10. La
+           quatrième ne part qu'en lecture semaine ou mois, et loadPeriode ne
+           lève pas : le cumul est un confort, la saisie du jour est l'essentiel. */
         const [current, previous, evts] = await Promise.all([
             fetchDay(iso),
             fetchDay(addDaysISO(iso, -1)),
-            hasEvents ? fetchDayEvents(iso) : Promise.resolve([])
+            hasEvents ? fetchDayEvents(iso) : Promise.resolve([]),
+            loadPeriode()
         ]);
         row = current || { ...EMPTY_DAY, activity_date: iso, notes: '' };
         prevRow = previous;
@@ -1195,7 +1398,7 @@ function buildTargets() {
     const qui = viewedProfile();
 
     const lignes = montrables.map(m => {
-        const t = targetFor(qui, m.key, 'day');
+        const t = targetFor(qui, m.key, scale);
         const val = t.source ? fmtInt(t.value) : '—';
         const src = t.source === 'user' ? 'objectif personnel'
                   : t.source === 'job'  ? 'objectif du métier'
@@ -1209,11 +1412,27 @@ function buildTargets() {
     }).join('');
 
     const absent = !targetsLoaded();
+    const sc = TARGET_SCALES.find(x => x.key === scale);
+    const somme = $('#targets-summary');
+    if (somme) somme.textContent = `🎚️ Mes objectifs ${sc.article}`;
+
     $('#targets-grid').innerHTML = lignes || '<p class="target-read-none">Aucun objectif ne '
         + "s'applique à ce profil.</p>";
+
+    /* Un objectif absent à l'échelle affichée n'est pas la même chose qu'une
+       migration manquante, et les deux se ressemblaient à l'écran : dans les
+       deux cas les jauges sont vides. On distingue, sinon on cherchera une
+       panne de base là où il manque simplement une décision. */
+    const rien = montrables.length > 0
+        && montrables.every(m => !targetFor(qui, m.key, scale).source);
+
     $('#targets-note').innerHTML = absent
         ? "Les objectifs n'ont pas pu être lus : la migration v12 n'est peut-être pas passée. "
         + 'La saisie fonctionne normalement, seules les jauges restent vides.'
+        : rien
+        ? `Aucun objectif n'a encore été posé ${escapeHtml(sc.article)} pour ce profil. Les jauges `
+        + "restent donc vides à cette échelle : ce n'est pas une panne, c'est une décision qui "
+        + "n'a pas été prise. Le propriétaire du Cockpit les règle sur l'écran « Barème et objectifs »."
         : 'Ces objectifs sont fixés par le propriétaire du Cockpit, écran « Barème et '
         + "objectifs ». Ils ne se règlent plus ici : un objectif se discute de vive voix.";
 }
@@ -1226,6 +1445,16 @@ function buildTargets() {
     session = await requireAuth({ needs: 'bdr' });
     myMetrics = metricsFor(viewedProfile());
     hasEvents = myMetrics.some(m => isEventMetric(m.key));
+
+    /* L'échelle est celle du LECTEUR, pas de la personne consultée : c'est une
+       préférence d'affichage, et quand un administrateur ouvre la journée de
+       quelqu'un d'autre, c'est sa propre habitude de lecture qui s'applique.
+       L'objectif comparé, lui, reste bien celui de la personne consultée.
+
+       Posée avant tout rendu : buildTargets() et paintDateBar() la lisent, et
+       les voir afficher le jour une fraction de seconde avant de sauter au mois
+       serait le genre de clignotement qui fait douter de ce qu'on lit. */
+    scale = scaleOf(myProfile());
     renderNav();
     renderIdentity();
     buildCards();
@@ -1267,6 +1496,14 @@ function buildTargets() {
     });
     $('#chip-today').addEventListener('click', () => load(todayISO()));
     $('#chip-yesterday').addEventListener('click', () => load(addDaysISO(todayISO(), -1)));
+
+    /* Délégation sur le conteneur : trois boutons écrits en dur dans la page,
+       donc trois écouteurs auraient tout aussi bien marché, mais la délégation
+       survit au jour où une quatrième échelle serait ajoutée au HTML. */
+    $('#scale-seg').addEventListener('click', ev => {
+        const b = ev.target.closest('button[data-scale]');
+        if (b) setScale(b.dataset.scale);
+    });
 
     // Si l'onglet reste ouvert au passage de minuit, on recale la date du jour.
     document.addEventListener('visibilitychange', () => {
