@@ -591,6 +591,45 @@ function wire() {
    Démarrage
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   Les deux volets
+
+   Le barème dit combien vaut une action, les objectifs disent combien il en
+   faut : deux réglages du même pilotage, tous deux réservés au propriétaire.
+
+   Le volet des objectifs vit dans js/objectifs.js, et son import est différé
+   jusqu'au premier clic. Deux raisons : quelqu'un qui vient corriger un poids
+   n'a pas à attendre le chargement de la liste des profils, et bareme.js reste
+   un fichier qu'on peut relire.
+   -------------------------------------------------------------------------- */
+
+function wireTabs() {
+    const barre = document.getElementById('bo-tabs');
+    if (!barre) return;
+
+    barre.addEventListener('click', async ev => {
+        const b = ev.target.closest('button[data-pane]');
+        if (!b) return;
+
+        barre.querySelectorAll('button[data-pane]').forEach(x => {
+            const on = x === b;
+            x.classList.toggle('is-on', on);
+            x.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.getElementById('pane-bareme').hidden = b.dataset.pane !== 'bareme';
+        document.getElementById('pane-objectifs').hidden = b.dataset.pane !== 'objectifs';
+
+        if (b.dataset.pane === 'objectifs') {
+            try {
+                const mod = await import('./objectifs.js');
+                await mod.initObjectifs();
+            } catch (e) {
+                toast(humanError(e), 'error');
+            }
+        }
+    });
+}
+
 (async function main() {
     try {
         await requireAuth({ needs: 'admin' });
@@ -619,6 +658,7 @@ function wire() {
         renderWindow();
         renderPreview();
         wire();
+        wireTabs();
         hideVeil();
     } catch (e) {
         if (String(e.message || e).includes('Non authentifié')) return;

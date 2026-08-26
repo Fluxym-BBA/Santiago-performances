@@ -188,18 +188,15 @@
             </section>
         </div>
 
-        <!-- OBJECTIFS -->
+        <!-- OBJECTIFS
+             Panneau d'affichage depuis la v12, et non plus de réglage : les
+             objectifs sont fixés par le propriétaire du Cockpit. Le détail du
+             pourquoi est dans buildTargets(), js/saisie.js. -->
         <details class="panel" id="targets-panel">
             <summary>🎚️ Mes objectifs journaliers</summary>
             <div class="panel-body">
-                <p style="font-size:13.5px;color:var(--gray-500);margin-top:14px">
-                    Ces valeurs servent de référence aux jauges de progression. Elles s'appliquent à tous les jours,
-                    passés comme futurs.
-                </p>
-                <div class="targets-grid" id="targets-grid"></div>
-                <button class="btn btn--primary" id="targets-save" type="button" style="margin-top:20px">
-                    Enregistrer mes objectifs
-                </button>
+                <div class="targets-read" id="targets-grid"></div>
+                <p class="targets-note" id="targets-note"></p>
             </div>
         </details>
 

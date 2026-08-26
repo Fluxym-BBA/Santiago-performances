@@ -1,0 +1,188 @@
+/* ==========================================================================
+   OBJECTIFS.CSS — Cockpit BDR — volet « Objectifs » de l'écran Barème
+
+   Fichier à part et non un ajout à app.css, qui fait 81 Ko et que chaque
+   livraison réécrit en entier : deux chantiers menés en parallèle qui y
+   touchent, et la seconde archive efface la première. Rien ici ne redéfinit un
+   sélecteur existant, et seules les variables de :root déclarées dans app.css
+   sont utilisées.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   La barre des deux volets
+
+   Deux boutons, pas une navigation : on reste sur la même page et rien n'est
+   perdu en passant de l'un à l'autre. Le volet actif est marqué par un trait
+   sous le libellé plutôt que par un fond, pour ne pas ressembler aux
+   sélecteurs segmentés qui vivent à l'intérieur des cartes.
+   -------------------------------------------------------------------------- */
+
+.bo-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 18px;
+    border-bottom: 1.5px solid var(--gray-200);
+}
+
+.bo-tabs .bo-tab {
+    font-family: inherit;
+    font-size: 14.5px;
+    font-weight: 700;
+    color: var(--gray-500);
+    background: none;
+    border: none;
+    border-bottom: 2.5px solid transparent;
+    margin-bottom: -1.5px;
+    padding: 10px 16px;
+    min-height: 42px;
+    transition: color 0.16s ease, border-color 0.16s ease;
+}
+
+.bo-tabs .bo-tab:hover { color: var(--navy); }
+
+.bo-tabs .bo-tab.is-on {
+    color: var(--navy);
+    border-bottom-color: var(--cyan);
+}
+
+.bo-tabs .bo-tab:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--cyan-glow);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+/* --------------------------------------------------------------------------
+   La grille des objectifs
+   -------------------------------------------------------------------------- */
+
+.obj-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 6px;
+}
+
+.obj-cell {
+    padding: 12px 13px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+}
+
+/* Un objectif personnel en place : la bordure le signale, sinon une exception
+   se perd au milieu de six champs vides qui suivent tous le métier. */
+.obj-cell--perso {
+    background: var(--white);
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 1px var(--cyan);
+}
+
+.obj-lab {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--gray-600);
+    line-height: 1.3;
+}
+
+.obj-input {
+    width: 100%;
+    margin-top: 6px;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 800;
+    color: var(--navy);
+    text-align: right;
+    padding: 9px 11px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Le champ vide ne crie pas : « pas d'objectif » est une réponse valable, pas
+   un oubli à corriger. */
+.obj-input::placeholder {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-300);
+}
+
+.obj-input:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px var(--cyan-glow);
+}
+
+.obj-hint {
+    margin-top: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--gray-400);
+}
+
+.obj-none {
+    margin: 8px 0 0;
+    padding: 16px;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--gray-500);
+    background: var(--gray-50);
+    border: 1px dashed var(--gray-200);
+    border-radius: var(--radius-sm);
+}
+
+/* --------------------------------------------------------------------------
+   Actions
+   -------------------------------------------------------------------------- */
+
+.obj-actions {
+    margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+}
+
+.obj-actions .form-status {
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.45;
+    flex: 1;
+    min-width: 200px;
+}
+
+/* Le choix de la personne, dans l'en-tête de la seconde carte. */
+.obj-who {
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--navy);
+    padding: 8px 11px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+    max-width: 240px;
+}
+
+.obj-who:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px var(--cyan-glow);
+}
+
+/* --------------------------------------------------------------------------
+   Mode carte
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 639px) {
+    .bo-tabs .bo-tab { flex: 1; padding: 10px 8px; font-size: 14px; }
+    .obj-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .obj-cell { padding: 10px 11px; }
+    /* 16 px : en dessous, iOS zoome sur le champ au moment de la frappe. */
+    .obj-input { font-size: 16px; min-height: 44px; }
+    .obj-actions .btn { width: 100%; }
+    .obj-who { max-width: none; width: 100%; min-height: 44px; }
+}

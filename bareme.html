@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./css/app.css">
+    <link rel="stylesheet" href="./css/objectifs.css">
 </head>
 <body>
 
@@ -29,6 +30,28 @@
 
 <main class="page-main page-main--pulled">
     <div class="page-container">
+
+        <!-- ============================================================
+             DEUX VOLETS, UN SEUL ÉCRAN
+
+             Le barème dit combien vaut une action, les objectifs disent
+             combien il en faut. Deux réglages du même pilotage, tous deux
+             réservés au propriétaire : les séparer en deux pages aurait
+             ajouté une entrée de menu que personne d'autre ne peut ouvrir.
+
+             Les volets sont deux div affichés ou masqués, pas deux pages :
+             une valeur tapée dans l'un n'est pas perdue en allant voir
+             l'autre.
+             ============================================================ -->
+
+        <div class="bo-tabs" role="tablist" id="bo-tabs">
+            <button type="button" class="bo-tab is-on" data-pane="bareme"
+                    role="tab" aria-selected="true">Barème</button>
+            <button type="button" class="bo-tab" data-pane="objectifs"
+                    role="tab" aria-selected="false">Objectifs</button>
+        </div>
+
+        <div id="pane-bareme">
 
         <div class="charts-grid">
 
@@ -164,6 +187,112 @@
                 </dl>
             </div>
         </section>
+
+        </div><!-- /#pane-bareme -->
+
+        <!-- ============================================================
+             VOLET DES OBJECTIFS
+
+             Deux blocs, dans l'ordre où on s'en sert : le défaut du métier,
+             qui couvre tout le monde, puis l'exception d'une personne.
+
+             Tous les champs sont construits par le script depuis METRICS :
+             aucune métrique n'est écrite ici, sinon une treizième
+             n'apparaîtrait jamais dans cet écran.
+             ============================================================ -->
+
+        <div id="pane-objectifs" hidden>
+
+            <section class="chart-card chart-card--wide">
+                <div class="section-head">
+                    <div>
+                        <h2>Objectifs du métier</h2>
+                        <p>Ce qui s'applique à tout le monde, sauf à ceux qui ont un objectif
+                           personnel. Un champ laissé vide veut dire « pas d'objectif », ce qui
+                           n'est pas la même chose que zéro : sans objectif, aucune jauge ne
+                           s'affiche, alors que zéro affirmerait que ne rien faire est l'attente.</p>
+                    </div>
+                    <div class="section-head-actions">
+                        <span class="seg-label">Métier</span>
+                        <div class="seg" id="obj-job-seg"></div>
+                        <span class="seg-label">Échelle</span>
+                        <div class="seg" id="obj-scale-seg"></div>
+                    </div>
+                </div>
+
+                <div id="obj-grid"></div>
+
+                <div class="obj-actions">
+                    <button class="btn btn--primary" id="obj-save" type="button">
+                        Enregistrer les objectifs du métier
+                    </button>
+                    <button class="btn btn--ghost" id="obj-derive" type="button" hidden>
+                        Déduire de l'objectif mensuel
+                    </button>
+                    <span class="form-status" id="obj-status" role="status" aria-live="polite"></span>
+                </div>
+            </section>
+
+            <section class="chart-card chart-card--wide">
+                <div class="section-head">
+                    <div>
+                        <h2>Objectif personnel</h2>
+                        <p>Pour sortir quelqu'un du lot, sans changer l'attente de tout son métier.
+                           Un champ vide signifie que la personne suit le défaut de son métier, dont
+                           la valeur est rappelée sous le champ. L'échelle est celle choisie
+                           ci-dessus.</p>
+                    </div>
+                    <div class="section-head-actions">
+                        <span class="seg-label">Personne</span>
+                        <select id="obj-who" class="obj-who"></select>
+                    </div>
+                </div>
+
+                <div id="obj-user-grid"></div>
+
+                <div class="obj-actions">
+                    <button class="btn btn--primary" id="obj-user-save" type="button">
+                        Enregistrer cet objectif personnel
+                    </button>
+                    <span class="form-status" id="obj-user-status" role="status" aria-live="polite"></span>
+                </div>
+            </section>
+
+            <section class="info-panel info-panel--soft">
+                <div class="info-panel-head">
+                    <span class="info-panel-icon" aria-hidden="true">🎚️</span>
+                    <h2>Comment ces objectifs sont lus</h2>
+                </div>
+                <div class="info-panel-body">
+                    <dl class="def-list">
+                        <dt>La règle, en une phrase</dt>
+                        <dd>L'objectif d'une personne s'il existe, sinon celui de son métier, sinon
+                            aucun objectif et aucune jauge. Le troisième cas est un vrai cas : un
+                            objectif absent doit se voir comme absent.</dd>
+                        <dt>Quelqu'un qui est BDR et commercial</dt>
+                        <dd>C'est le métier commercial qui décide de ses objectifs. Christophe est
+                            coché dans les deux, et il est commercial. Si cela devait changer, la
+                            règle est écrite dans targetJobOf(), js/api.js, et nulle part ailleurs.</dd>
+                        <dt>Pourquoi trois échelles</dt>
+                        <dd>Parce qu'un objectif journalier de rendez-vous ne veut rien dire pour un
+                            BDR : un jour sans rendez-vous est un jour normal. Dominique et Santiago
+                            avaient mis tous leurs objectifs à zéro pour éteindre des jauges qui les
+                            mettaient en échec chaque soir. Ce qu'ils suivent, c'est un nombre dans
+                            le mois.</dd>
+                        <dt>Personne d'autre ne peut les changer</dt>
+                        <dd>Depuis la v12, le panneau de la page de saisie affiche l'objectif et sa
+                            provenance, il ne le règle plus. La base le refuse aussi, et pas
+                            seulement l'écran : un objectif se discute de vive voix.</dd>
+                        <dt>Ce que « déduire de l'objectif mensuel » calcule</dt>
+                        <dd>La valeur mensuelle divisée par les jours ouvrés du mois en cours, arrondie.
+                            Les week-ends et les onze fériés français sont retirés, les ponts et les
+                            congés ne le sont pas : ce sont des jours ouvrés, pas des jours
+                            travaillés. Le bouton remplit les champs, il n'enregistre rien.</dd>
+                    </dl>
+                </div>
+            </section>
+
+        </div><!-- /#pane-objectifs -->
 
     </div>
 </main>

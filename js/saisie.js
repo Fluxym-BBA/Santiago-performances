@@ -28,7 +28,7 @@
 import {
     requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY, todayISO,
     addDaysISO, formatLong, relativeLabel, diffDays, fetchDay,
-    saveDay, bump, setMetric, fetchTargets, saveTargets, humanError,
+    saveDay, bump, setMetric, loadTargets, targetFor, targetsLoaded, humanError,
     SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor,
     SALES_EVENT_KINDS, isEventMetric, cleanAccountName, accountKey,
     loadAccounts, searchAccounts, ensureAccount, accountByName, similarAccounts,
@@ -42,7 +42,11 @@ let session = null;
 let day = todayISO();       // date en cours de saisie
 let row = { ...EMPTY_DAY };  // valeurs affichées
 let prevRow = null;          // veille, pour la comparaison
-let targets = {};
+/* Plus de tableau d'objectifs local depuis la v12 : la résolution se fait à la
+   demande par targetFor(), qui applique la règle « valeur de la personne, sinon
+   de son métier, sinon aucun objectif ». Garder une copie ici obligerait à la
+   tenir à jour, et une jauge qui affiche un objectif périmé est pire que pas de
+   jauge. */
 
 /* Compteurs de la personne dont on saisit la journée, pas les miens : quand un
    administrateur remplit la journée de quelqu'un d'autre, ce sont les compteurs
@@ -980,7 +984,13 @@ function onEventKey(inp, e) {
 
 function paintGauge(m) {
     if (!m.target) return;   // compteur sans objectif : aucune jauge à peindre
-    const t = Number(targets[m.target]) || 0;
+
+    /* Depuis la v12, l'objectif vient de la base et non plus d'un réglage local :
+       valeur de la personne si elle en a une, sinon celle de son métier, sinon
+       aucune. Le troisième cas s'affiche « non défini », et c'est une
+       information : personne n'a encore dit ce qu'on attendait ici. Un zéro
+       affiché à la place aurait voulu dire « ne rien faire est l'objectif ». */
+    const t = Number(targetFor(viewedProfile(), m.key, 'day').value) || 0;
     const mesure = row[m.key] != null;
     const v = Number(row[m.key]) || 0;
     const pct = mesure && t > 0 ? Math.min(100, (v / t) * 100) : 0;
@@ -1163,33 +1173,49 @@ function buildScoreExplain() {
    Objectifs
    -------------------------------------------------------------------------- */
 
-function buildTargets() {
-    /* Seuls les compteurs affichés et pourvus d'un objectif : proposer de régler
-       un objectif de NO GO, ou l'objectif d'e-mails d'un commercial qui ne les
-       saisit pas, serait proposer un réglage sans effet. */
-    const reglables = myMetrics.filter(m => m.target);
-    $('#targets-grid').innerHTML = reglables.map(m => `
-        <div class="field">
-            <label for="t-${m.target}">${escapeHtml(m.short)}</label>
-            <input type="number" min="0" step="1" id="t-${m.target}"
-                   value="${Number(targets[m.target]) || 0}">
-        </div>`).join('');
+/* Le panneau n'est plus un formulaire depuis la v12, mais un affichage.
 
-    $('#targets-save').addEventListener('click', async () => {
-        const patch = {};
-        reglables.forEach(m => {
-            const v = parseInt(document.getElementById(`t-${m.target}`).value, 10);
-            patch[m.target] = Number.isNaN(v) || v < 0 ? 0 : v;
-        });
-        try {
-            targets = { ...targets, ...(await saveTargets(patch, session)) };
-            reglables.forEach(paintGauge);
-            toast('Objectifs enregistrés', 'success');
-            $('#targets-panel').open = false;
-        } catch (e) {
-            toast(humanError(e), 'error', 5000);
-        }
-    });
+   POURQUOI ON RETIRE UNE LIBERTÉ. Chacun réglait ses propres objectifs, et voilà
+   ce que la base en disait au 26 août : Dominique avait mis zéro partout le 25,
+   Santiago le 26. Les deux avaient éteint leurs jauges. Ce n'était pas de la
+   mauvaise volonté, c'était la seule sortie possible face à un objectif
+   journalier de rendez-vous, qui n'a pas de sens pour un BDR. Mais un objectif
+   qu'on peut mettre à zéro soi-même n'est plus un objectif, et un classement ne
+   veut plus rien dire si chacun a fixé sa propre barre.
+
+   Les objectifs sont donc fixés par le propriétaire, écran « Barème et
+   objectifs », et lus ici. Ce qui reste affiché : la valeur, et d'où elle vient.
+   Savoir que son objectif est celui de son métier ou un objectif personnel
+   change la conversation qu'on aura à son sujet. */
+function buildTargets() {
+    /* Seuls les compteurs affichés et pourvus d'un objectif : afficher un
+       objectif de NO GO, ou l'objectif d'e-mails d'un commercial qui n'en saisit
+       pas, serait afficher une ligne sans effet. */
+    const montrables = myMetrics.filter(m => m.target);
+    const qui = viewedProfile();
+
+    const lignes = montrables.map(m => {
+        const t = targetFor(qui, m.key, 'day');
+        const val = t.source ? fmtInt(t.value) : '—';
+        const src = t.source === 'user' ? 'objectif personnel'
+                  : t.source === 'job'  ? 'objectif du métier'
+                  : 'non défini';
+        return `
+        <div class="target-read">
+            <div class="target-read-lab">${escapeHtml(m.short)}</div>
+            <div class="target-read-val">${val}</div>
+            <div class="target-read-src">${src}</div>
+        </div>`;
+    }).join('');
+
+    const absent = !targetsLoaded();
+    $('#targets-grid').innerHTML = lignes || '<p class="target-read-none">Aucun objectif ne '
+        + "s'applique à ce profil.</p>";
+    $('#targets-note').innerHTML = absent
+        ? "Les objectifs n'ont pas pu être lus : la migration v12 n'est peut-être pas passée. "
+        + 'La saisie fonctionne normalement, seules les jauges restent vides.'
+        : 'Ces objectifs sont fixés par le propriétaire du Cockpit, écran « Barème et '
+        + "objectifs ». Ils ne se règlent plus ici : un objectif se discute de vive voix.";
 }
 
 /* --------------------------------------------------------------------------
@@ -1208,12 +1234,13 @@ function buildTargets() {
     /* Les deux lectures partent ensemble : le carnet d'entreprises n'a aucune
        raison d'attendre les objectifs. allSettled et non all, parce que l'échec
        de l'un ne doit pas emporter l'autre. */
-    const [resTargets, resAccounts] = await Promise.allSettled([
-        fetchTargets(),
+    const [, resAccounts] = await Promise.allSettled([
+        loadTargets(),
         hasEvents ? loadAccounts() : Promise.resolve([])
     ]);
-    if (resTargets.status === 'fulfilled') targets = resTargets.value;
-    else toast(humanError(resTargets.reason), 'error');
+    /* loadTargets ne lève pas : une migration non passée laisse les jauges
+       vides, ce que le panneau des objectifs annonce en clair, mais n'empêche
+       personne de saisir sa journée. C'est la seule chose qui compte ici. */
     /* Le carnet est un confort, pas une condition : sans lui l'autocomplétion
        ne propose rien, mais on peut toujours taper un nom et la base le créera,
        en refusant le doublon comme d'habitude. On ne bloque donc pas la page. */

@@ -340,3 +340,57 @@
     .event-ask-title { font-size: 13.5px; }
     .event-ask-btn { min-height: 44px; font-size: 14px; }
 }
+
+/* ==========================================================================
+   Objectifs en lecture (v12)
+
+   Le panneau « Mes objectifs journaliers » n'est plus un formulaire : les
+   objectifs sont fixés par le propriétaire. Trois colonnes par ligne, le
+   libellé, la valeur, et d'où elle vient. La provenance n'est pas un détail :
+   savoir que son objectif est celui de son métier ou un objectif personnel
+   change la conversation qu'on aura à son sujet.
+   ========================================================================== */
+
+.targets-read {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 8px;
+}
+
+.target-read {
+    padding: 10px 12px;
+    background: var(--gray-50);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+}
+
+.target-read-lab {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--gray-600);
+    line-height: 1.3;
+}
+
+.target-read-val {
+    margin-top: 2px;
+    font-size: 20px;
+    font-weight: 900;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
+}
+
+.target-read-src {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-400);
+}
+
+.target-read-none,
+.targets-note {
+    margin-top: 14px;
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1.5;
+    color: var(--gray-500);
+}

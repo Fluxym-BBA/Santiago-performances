@@ -118,8 +118,9 @@ export const METRICS = [
     },
 
     /* ---- Sorties de pipeline ---------------------------------------------
-       target: null n'est pas un oubli. On ne se fixe pas d'objectif journalier
-       de NO GO : donc pas de jauge, et pas de colonne dans daily_targets. Leur
+       target: null n'est pas un oubli. On ne se fixe pas d'objectif de NO GO, à
+       aucune échelle : donc pas de jauge, et rien à régler dans l'écran des
+       objectifs, qui ne propose que les métriques pourvues d'un target. Leur
        poids est à zéro dans le barème, et perdre une affaire ne peut donc pas
        faire monter un score. Elles se comptent, elles ne se notent pas. */
     {
@@ -1517,36 +1518,245 @@ export async function fetchTeamRange(fromIso, toIso,
 }
 
 /* --------------------------------------------------------------------------
-   Données — objectifs journaliers
+   Données — objectifs
+
+   REMPLACE daily_targets DEPUIS LA v12. L'ancienne table avait une colonne par
+   métrique, des objectifs journaliers seulement, et chacun réglait les siens.
+   Ce que ça donnait, en base, au 26 août : Dominique avait mis zéro partout le
+   25, Santiago le 26. Les deux avaient éteint leurs jauges, et ils avaient
+   raison : un objectif journalier de rendez-vous ne veut rien dire pour un BDR,
+   un jour sans rendez-vous n'est pas un mauvais jour. Ce qu'ils suivent, c'est
+   un nombre de rendez-vous dans le mois.
+
+   Trois échelles désormais, deux portées, et une seule règle de résolution :
+
+       la valeur de la personne si elle existe,
+       sinon celle de son métier,
+       sinon AUCUN objectif, et donc aucune jauge.
+
+   Le troisième cas est un vrai cas et non un repli à zéro. Un objectif absent
+   doit se voir comme absent : zéro voudrait dire « ne rien faire est
+   l'objectif », ce qui est une autre phrase. C'est pour la même raison qu'il n'y
+   a plus de DEFAULT_TARGETS en dur ici. Un repli codé dans le navigateur
+   masquerait une migration non passée, et ferait croire à un objectif que
+   personne n'a fixé.
+
+   Le métier retenu quand quelqu'un porte les deux étiquettes est commercial.
+   Christophe est coché BDR et commercial, et Bruno a tranché le 27 août : il est
+   commercial. Pas de maximum ni de moyenne des deux jeux d'objectifs, qui ne
+   correspondraient à l'attente de personne.
+
+   La table est chargée en entier, comme le barème : moins de trois cents lignes,
+   et la résolution a besoin de connaître les objectifs des autres dès que
+   l'écran d'équipe s'en mêlera.
    -------------------------------------------------------------------------- */
 
-export const DEFAULT_TARGETS = {
-    companies_target: 5, contacts_target: 10, calls_made_target: 40,
-    calls_connected_target: 10, engaged_target: 8, meetings_target: 2, emails_target: 30,
-    /* Objectifs commerciaux posés sans une seule journée de donnée réelle : des
-       points de départ à recalibrer après quelques semaines, pas des repères.
-       Ce sont aussi les défauts des colonnes correspondantes en base. */
-    first_meetings_target: 1, proposals_target: 1
-};
+/** Les trois échelles, dans l'ordre où elles se lisent. */
+export const TARGET_SCALES = [
+    { key: 'day',   label: 'Jour',    court: 'jour',       article: 'du jour' },
+    { key: 'week',  label: 'Semaine', court: 'la semaine', article: 'de la semaine' },
+    { key: 'month', label: 'Mois',    court: 'le mois',    article: 'du mois' }
+];
 
-export async function fetchTargets() {
+/** Les deux métiers qui ont des objectifs. */
+export const TARGET_JOBS = [
+    { key: 'bdr',   label: 'BDR' },
+    { key: 'sales', label: 'Commercial' }
+];
+
+let _targets = null;        // toutes les lignes de activity_targets
+let _targetsOk = false;     // la table a bien répondu
+
+/**
+ * Charge tous les objectifs. Ne lève pas : une migration non passée ne doit pas
+ * empêcher de saisir sa journée, qui est la seule chose vraiment importante.
+ * Renvoie false dans ce cas, à charge pour l'écran de le dire.
+ */
+export async function loadTargets() {
     const { data, error } = await supabase
-        .from('daily_targets').select('*')
-        .eq('user_id', target())
-        .maybeSingle();
-    if (error) throw error;
-    return { ...DEFAULT_TARGETS, ...(data || {}) };
+        .from('activity_targets')
+        .select('scope, job, user_id, scale, metric, value');
+    if (error) {
+        _targets = [];
+        _targetsOk = false;
+        return false;
+    }
+    _targets = data || [];
+    _targetsOk = true;
+    return true;
 }
 
-export async function saveTargets(patch, session) {
-    const payload = { user_id: target(), ...patch };
-    const { data, error } = await supabase
-        .from('daily_targets')
-        .upsert(payload, { onConflict: 'user_id' })
-        .select()
-        .single();
+/** Vrai si les objectifs ont pu être lus. */
+export function targetsLoaded() { return _targetsOk; }
+
+/** Force un rechargement au prochain besoin. */
+export function invalidateTargets() { _targets = null; _targetsOk = false; }
+
+/**
+ * Le métier qui décide des objectifs de quelqu'un.
+ * Commercial d'abord : voir l'en-tête de section.
+ */
+export function targetJobOf(profil) {
+    if (!profil) return null;
+    if (profil.is_sales) return 'sales';
+    if (profil.is_bdr) return 'bdr';
+    return null;
+}
+
+/**
+ * Objectif applicable à une personne, pour une métrique et une échelle.
+ *
+ * Renvoie toujours un objet, jamais null, pour que l'appelant n'ait pas à s'en
+ * défendre : { value, source } où source vaut 'user', 'job' ou null. Quand
+ * source est null, value est null aussi, et il n'y a pas d'objectif.
+ */
+export function targetFor(profil, metricKey, scale = 'day') {
+    const vide = { value: null, source: null };
+    if (!_targets || !profil) return vide;
+
+    const perso = _targets.find(t => t.scope === 'user' && t.user_id === profil.user_id
+                                  && t.scale === scale && t.metric === metricKey);
+    if (perso) return { value: Number(perso.value), source: 'user' };
+
+    const job = targetJobOf(profil);
+    if (!job) return vide;
+    const parMetier = _targets.find(t => t.scope === 'job' && t.job === job
+                                      && t.scale === scale && t.metric === metricKey);
+    if (parMetier) return { value: Number(parMetier.value), source: 'job' };
+
+    return vide;
+}
+
+/** Toutes les valeurs posées pour un métier, sous la forme { metrique: valeur }. */
+export function jobTargets(job, scale) {
+    const out = {};
+    (_targets || []).forEach(t => {
+        if (t.scope === 'job' && t.job === job && t.scale === scale) out[t.metric] = Number(t.value);
+    });
+    return out;
+}
+
+/** Toutes les valeurs posées pour une personne, sous la forme { metrique: valeur }. */
+export function userTargets(userId, scale) {
+    const out = {};
+    (_targets || []).forEach(t => {
+        if (t.scope === 'user' && t.user_id === userId && t.scale === scale) out[t.metric] = Number(t.value);
+    });
+    return out;
+}
+
+/**
+ * Pose un objectif. Réservé au propriétaire par la base, pas par cet appel.
+ *
+ * Passe par une fonction et non par un upsert PostgREST : l'unicité est garantie
+ * par des index PARTIELS (« where scope = ... »), que l'inférence d'upsert de
+ * PostgREST ne sait pas retrouver.
+ */
+export async function setTarget({ scope, job = null, userId = null, scale, metric, value }) {
+    const { error } = await supabase.rpc('set_activity_target', {
+        p_scope: scope, p_job: job, p_user: userId,
+        p_scale: scale, p_metric: metric, p_value: value
+    });
     if (error) throw error;
-    return data;
+    invalidateTargets();
+}
+
+/**
+ * Retire un objectif, ce qui n'est pas la même chose que le mettre à zéro :
+ * une personne sans objectif personnel revient au défaut de son métier, alors
+ * qu'un zéro lui dirait que ne rien faire est l'objectif.
+ */
+export async function clearTarget({ scope, job = null, userId = null, scale, metric }) {
+    const { error } = await supabase.rpc('clear_activity_target', {
+        p_scope: scope, p_job: job, p_user: userId,
+        p_scale: scale, p_metric: metric
+    });
+    if (error) throw error;
+    invalidateTargets();
+}
+
+/* --------------------------------------------------------------------------
+   Jours ouvrés
+
+   Sert à proposer une valeur journalière à partir d'une valeur mensuelle, et à
+   dire combien de jours il reste pour tenir un objectif de période.
+
+   Les onze fériés français sont calculés, pas listés : une liste en dur serait
+   fausse en 2027. Pâques par l'algorithme de Butcher, le reste s'en déduit.
+   Sont ignorés les ponts, les congés et les jours de récupération : l'écran
+   annonce des jours ouvrés, pas des jours travaillés, et ne prétend pas
+   connaître l'agenda de qui que ce soit.
+   -------------------------------------------------------------------------- */
+
+function paquesDe(annee) {
+    const a = annee % 19;
+    const b = Math.floor(annee / 100);
+    const c = annee % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const mois = Math.floor((h + l - 7 * m + 114) / 31);
+    const jour = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(Date.UTC(annee, mois - 1, jour));
+}
+
+const _feries = {};
+
+/** Les onze jours fériés français d'une année, en ISO. */
+export function feriesFrance(annee) {
+    if (_feries[annee]) return _feries[annee];
+    const iso = d => d.toISOString().slice(0, 10);
+    const plus = (d, n) => new Date(d.getTime() + n * 86400000);
+    const p = paquesDe(annee);
+    _feries[annee] = new Set([
+        `${annee}-01-01`,          // jour de l'an
+        iso(plus(p, 1)),           // lundi de Pâques
+        `${annee}-05-01`,          // fête du travail
+        `${annee}-05-08`,          // victoire 1945
+        iso(plus(p, 39)),          // Ascension
+        iso(plus(p, 50)),          // lundi de Pentecôte
+        `${annee}-07-14`,          // fête nationale
+        `${annee}-08-15`,          // Assomption
+        `${annee}-11-01`,          // Toussaint
+        `${annee}-11-11`,          // armistice 1918
+        `${annee}-12-25`           // Noël
+    ]);
+    return _feries[annee];
+}
+
+/** Vrai si la date ISO est un jour ouvré : ni week-end, ni férié français. */
+export function estOuvre(iso) {
+    const d = fromISO(iso);
+    const jour = d.getDay();
+    if (jour === 0 || jour === 6) return false;
+    return !feriesFrance(d.getFullYear()).has(iso);
+}
+
+/**
+ * Nombre de jours ouvrés entre deux dates ISO, bornes incluses.
+ *
+ * La boucle avance avec addDaysISO et non en ajoutant 86 400 000 millisecondes :
+ * les dates sont manipulées en heure locale dans tout ce fichier, et le dernier
+ * dimanche d'octobre fait 25 heures. L'arithmétique en millisecondes y
+ * retomberait sur le même jour, donc compterait deux fois ou tournerait sans
+ * fin. La garde de 20 000 tours est une ceinture, pas un calcul.
+ */
+export function joursOuvres(deIso, aIso) {
+    if (!deIso || !aIso || deIso > aIso) return 0;
+    let n = 0;
+    let iso = deIso;
+    let garde = 0;
+    while (iso <= aIso && garde++ < 20000) {
+        if (estOuvre(iso)) n++;
+        iso = addDaysISO(iso, 1);
+    }
+    return n;
 }
 
 /* --------------------------------------------------------------------------
@@ -1570,6 +1780,13 @@ export function humanError(error) {
     if (msg.includes('sales_events') && (error.code === '42P01' || error.code === 'PGRST205')) {
         return "La base n'a pas encore les tables du cycle de vente : exécutez "
              + 'sql/accounts-events-migration-v10.sql.';
+    }
+    if ((msg.includes('activity_targets') || msg.includes('set_activity_target')
+         || msg.includes('clear_activity_target'))
+        && ['42P01', 'PGRST205', 'PGRST202', '42883'].includes(error.code)) {
+        return "La base n'a pas encore la table des objectifs : exécutez "
+             + 'sql/targets-migration-v12.sql. La saisie fonctionne normalement, '
+             + 'seules les jauges restent vides.';
     }
     if ((msg.includes('accounts_overview') || msg.includes('delete_account')
          || msg.includes('merge_accounts'))
