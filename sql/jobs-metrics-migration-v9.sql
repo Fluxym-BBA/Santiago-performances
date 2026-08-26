@@ -240,7 +240,12 @@ as $$
   ]);
 $$;
 
-revoke all on function public.metric_allowed(text) from public;
+-- « from public, anon » et non « from public » seul : les privilèges par défaut
+-- du projet accordent l'exécution à anon sur toute nouvelle fonction du schéma
+-- public, et révoquer à PUBLIC ne retire pas un droit accordé explicitement à un
+-- rôle nommé. Oublier anon ici laisse une fonction SECURITY DEFINER appelable
+-- sans session. Corrigé après coup le 26/08, la leçon est écrite ici.
+revoke all on function public.metric_allowed(text) from public, anon;
 grant execute on function public.metric_allowed(text) to authenticated, service_role;
 
 create or replace function public.bump_metric(
@@ -419,7 +424,10 @@ begin
 end;
 $function$;
 
-revoke all on function public.admin_set_level(uuid, text, text, boolean, boolean, boolean, boolean) from public;
+-- Voir la note sur anon plus haut : ces deux fonctions changent de signature,
+-- ce sont donc de NOUVELLES fonctions pour PostgreSQL, et elles repartent avec
+-- les privilèges par défaut du schéma.
+revoke all on function public.admin_set_level(uuid, text, text, boolean, boolean, boolean, boolean) from public, anon;
 grant execute on function public.admin_set_level(uuid, text, text, boolean, boolean, boolean, boolean) to authenticated, service_role;
 
 create or replace function public.admin_update_profile(
@@ -458,7 +466,7 @@ begin
 end;
 $function$;
 
-revoke all on function public.admin_update_profile(uuid, text, boolean, boolean, boolean, boolean, boolean) from public;
+revoke all on function public.admin_update_profile(uuid, text, boolean, boolean, boolean, boolean, boolean) from public, anon;
 grant execute on function public.admin_update_profile(uuid, text, boolean, boolean, boolean, boolean, boolean) to authenticated, service_role;
 
 -- Les anciennes signatures à six arguments partent maintenant, et pas avant :
