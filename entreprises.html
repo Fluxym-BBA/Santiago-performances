@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Carnet d'entreprises | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+    <link rel="stylesheet" href="./css/entreprises.css">
+</head>
+<body>
+
+<div class="loading-veil">Chargement du carnet…</div>
+
+<nav id="main-nav"></nav>
+
+<header class="page-hero">
+    <div class="page-container">
+        <span class="hero-badge">Carnet d'entreprises</span>
+        <h1>Les noms d'entreprises, <em>et leur ménage</em></h1>
+        <p>Chaque nom saisi dans une ligne du cycle de vente vient ici. Une faute de frappe se
+           supprime tant qu'aucune action n'y est rattachée. Au delà, elle se fusionne avec la
+           bonne entreprise, et rien n'est perdu.</p>
+    </div>
+</header>
+
+<main class="page-main page-main--pulled">
+    <div class="page-container">
+
+        <!-- ============================================================
+             CE QUE CONTIENT LE CARNET
+
+             Quatre nombres, dont deux servent de raccourci de filtre. Le
+             but n'est pas de faire joli : c'est de répondre tout de suite
+             à « combien de noms ai-je créés moi-même », qui est la
+             question de quelqu'un qui vient réparer une bêtise.
+             ============================================================ -->
+
+        <section class="new-block">
+            <div class="acc-stats" id="acc-stats"></div>
+        </section>
+
+        <!-- ============================================================
+             RECHERCHE, FILTRE, TRI
+
+             La recherche cherche « contient » et non « commence par »,
+             contrairement à l'autocomplétion de la saisie : ici on
+             cherche un nom qu'on ne sait plus écrire, souvent par son
+             milieu (« carrefour » dans GROUPE CARREFOUR FRANCE).
+             ============================================================ -->
+
+        <section class="new-block">
+            <div class="acc-tools">
+                <div class="field acc-tools-search">
+                    <label for="acc-q">Chercher une entreprise</label>
+                    <input type="search" id="acc-q" placeholder="Trois lettres suffisent"
+                           autocomplete="off" spellcheck="false">
+                </div>
+                <div class="field">
+                    <label for="acc-filter">N'afficher que</label>
+                    <select id="acc-filter">
+                        <option value="all">Toutes les entreprises</option>
+                        <option value="mine">Les noms créés depuis l'outil</option>
+                        <option value="free">Celles sans aucune action</option>
+                        <option value="used">Celles qui portent des actions</option>
+                        <option value="del">Celles que je peux supprimer</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="acc-sort">Trier par</label>
+                    <select id="acc-sort">
+                        <option value="recent">Ajoutées le plus récemment</option>
+                        <option value="name">Nom, de A à Z</option>
+                        <option value="events">Nombre d'actions</option>
+                    </select>
+                </div>
+            </div>
+            <p class="acc-count" id="acc-count" role="status" aria-live="polite"></p>
+        </section>
+
+        <!-- ============================================================
+             FUSION — PROPRIÉTAIRE UNIQUEMENT
+
+             Le panneau reste masqué pour tout le monde d'autre, et la
+             base refuse l'opération de son côté : ce n'est pas l'écran
+             qui protège, c'est merge_accounts().
+             ============================================================ -->
+
+        <section class="new-block" id="acc-merge-block" hidden>
+            <div class="section-head">
+                <div>
+                    <h2>Fusionner deux entreprises</h2>
+                    <p>Pour le cas que la suppression ne sait pas traiter : un doublon qui porte
+                       déjà des actions. Elles passent toutes chez l'entreprise que vous gardez,
+                       et le doublon disparaît. Aucun score, aucun classement n'est modifié :
+                       les compteurs comptent des actions par personne et par jour, ce que la
+                       fusion ne change pas.</p>
+                </div>
+            </div>
+
+            <div class="acc-merge">
+                <div class="field">
+                    <label for="acc-src">Entreprise à faire disparaître</label>
+                    <input type="text" id="acc-src" list="acc-datalist" autocomplete="off"
+                           spellcheck="false" placeholder="Le doublon, par exemple CAREFOUR">
+                    <p class="field-note" id="acc-src-note">Ses actions seront réattribuées.</p>
+                </div>
+                <div class="acc-merge-arrow" aria-hidden="true">→</div>
+                <div class="field">
+                    <label for="acc-dst">Entreprise à garder</label>
+                    <input type="text" id="acc-dst" list="acc-datalist" autocomplete="off"
+                           spellcheck="false" placeholder="Le bon nom, par exemple CARREFOUR">
+                    <p class="field-note" id="acc-dst-note">Elle récupère tout.</p>
+                </div>
+            </div>
+            <datalist id="acc-datalist"></datalist>
+
+            <div class="form-actions">
+                <button class="btn btn--primary" id="acc-merge-go" type="button">Fusionner</button>
+                <span class="form-status" id="acc-merge-status" role="status" aria-live="polite"></span>
+            </div>
+        </section>
+
+        <!-- ============================================================
+             LA LISTE
+
+             Bornée à 200 lignes affichées, et l'écran dit combien il en
+             cache. Une liste qui tronque sans le dire fait croire qu'un
+             nom n'existe pas, et fait recréer un doublon.
+             ============================================================ -->
+
+        <section class="new-block">
+            <ul class="acc-list" id="acc-list"></ul>
+            <p class="acc-more" id="acc-more" hidden></p>
+        </section>
+
+        <section class="info-panel info-panel--soft">
+            <div class="info-panel-head">
+                <span class="info-panel-icon" aria-hidden="true">🏢</span>
+                <h2>Qui peut supprimer quoi, et pourquoi</h2>
+            </div>
+            <div class="info-panel-body">
+                <dl class="def-list">
+                    <dt>Une entreprise sans aucune action se supprime</dt>
+                    <dd>Par n'importe qui, sans demander la permission : personne ne perd rien.
+                        Le nom n'a jamais servi, et s'il faut le retaper demain, il se recréera
+                        tout seul.</dd>
+                    <dt>Une entreprise qui porte des actions ne se supprime pas</dt>
+                    <dd>Même si ces actions sont celles d'un collègue et que vous ne les voyez
+                        pas. La base compte les actions de tout le monde avant de répondre :
+                        supprimer le nom laisserait les lignes de ce collègue sans client.</dd>
+                    <dt>Les entreprises venues de Salesforce sont réservées au propriétaire</dt>
+                    <dd>Les 445 noms chargés le 26 août n'ont, eux aussi, aucune action
+                        rattachée. Sans cette réserve, le carnet d'amorçage pourrait fondre nom
+                        par nom sans que personne ne s'en aperçoive.</dd>
+                    <dt>La fusion est réservée au propriétaire</dt>
+                    <dd>Elle déplace des actions déclarées par d'autres personnes. C'est le même
+                        pouvoir que corriger leurs chiffres, et il n'appartient qu'à Bruno.</dd>
+                    <dt>Ce carnet n'est pas Salesforce</dt>
+                    <dd>C'est le carnet d'adresses du Cockpit, celui qui sert à écrire un nom
+                        vite et deux fois de la même façon. Les deux listes divergeront, et ce
+                        n'est pas un défaut : rien ici ne remonte dans le CRM.</dd>
+                </dl>
+            </div>
+        </section>
+
+    </div>
+</main>
+
+<footer class="app-footer">
+    Cockpit BDR · Fluxym — un client, un nom, une seule fois.
+</footer>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/entreprises.js"></script>
+</body>
+</html>

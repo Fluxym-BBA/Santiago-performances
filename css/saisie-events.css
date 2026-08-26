@@ -258,3 +258,85 @@
     .event-warn-close { width: 44px; height: 44px; top: 2px; right: 2px; }
     .event-warn-list li { font-size: 13px; }
 }
+
+/* ==========================================================================
+   Question de ressemblance (v11)
+
+   « carefour » tapé alors que CARREFOUR existe. Le bloc prend la place de la
+   ligne qui n'a pas encore été créée : il faut répondre pour qu'elle le soit.
+
+   Il ressemble à l'avertissement de doublon, en plus affirmé : bordure sur les
+   quatre côtés et fond plus dense, parce que celui-ci attend une réponse alors
+   que l'autre se contente d'informer. Pas de croix de fermeture, pour la même
+   raison : les deux boutons sont les deux sorties, et les deux enregistrent la
+   ligne.
+   ========================================================================== */
+
+.event-ask {
+    margin-top: 10px;
+    padding: 12px 13px;
+    border: 1.5px solid rgba(245, 158, 11, 0.5);
+    border-radius: var(--radius-sm);
+    background: rgba(245, 158, 11, 0.11);
+}
+
+.event-ask[hidden] { display: none; }
+
+.event-ask-title {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.45;
+    color: var(--navy);
+    overflow-wrap: anywhere;
+}
+
+/* En colonne : les noms d'entreprise ont des longueurs très inégales, et des
+   boutons de largeurs différentes sur une même ligne se lisent mal. En colonne,
+   la cible est pleine largeur, donc facile à viser au pouce. */
+.event-ask-btns {
+    margin-top: 10px;
+    display: grid;
+    gap: 6px;
+}
+
+.event-ask-btn {
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    padding: 10px 13px;
+    min-height: 40px;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid transparent;
+    overflow-wrap: anywhere;
+    transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+/* Le geste attendu dans la grande majorité des cas : rattacher au nom déjà
+   connu. Il est donc le seul en plein. */
+.event-ask-btn--use {
+    color: var(--white);
+    background: var(--navy);
+    border-color: var(--navy);
+}
+
+.event-ask-btn--use:hover { background: var(--navy-light); }
+
+.event-ask-btn--new {
+    color: var(--gray-600);
+    background: var(--white);
+    border-color: var(--gray-200);
+}
+
+.event-ask-btn--new:hover { background: var(--gray-50); border-color: var(--gray-400); }
+
+.event-ask-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--cyan-glow);
+}
+
+@media (max-width: 639px) {
+    .event-ask-title { font-size: 13.5px; }
+    .event-ask-btn { min-height: 44px; font-size: 14px; }
+}

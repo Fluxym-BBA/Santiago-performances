@@ -31,7 +31,7 @@ import {
     saveDay, bump, setMetric, fetchTargets, saveTargets, humanError,
     SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor,
     SALES_EVENT_KINDS, isEventMetric, cleanAccountName, accountKey,
-    loadAccounts, searchAccounts, ensureAccount,
+    loadAccounts, searchAccounts, ensureAccount, accountByName, similarAccounts,
     fetchDayEvents, addSalesEvent, deleteSalesEvent,
     accountHistory, agoLabel, formatDMY
 } from './api.js';
@@ -77,6 +77,10 @@ let tmpSeq = 0;
    quand aucune suggestion n'est sélectionnée, ce qui est l'état de départ et le
    plus important : voir onEventKey(). */
 const sugg = {};
+
+/* Question de ressemblance en attente, par compteur : { nom, proches }.
+   Voir la section « Ressemblance » plus bas. */
+const ask = {};
 
 /* Le score est calculé côté client pour un affichage instantané, à partir de
    SCORE_WEIGHTS (source unique partagée avec le dashboard). La vue SQL
@@ -161,6 +165,7 @@ function eventRowHtml(m) {
             <div class="event-sugg" id="sugg-${m.key}" role="listbox" hidden></div>
         </div>
         <p class="event-help"><b>Entrée</b> ajoute la ligne. Sans nom, elle compte quand même.</p>
+        <div class="event-ask" id="ask-${m.key}" role="alert" hidden></div>
         <div class="event-warn" id="warn-${m.key}" role="status" aria-live="polite" hidden></div>
         ${gaugeHtml(m)}
     </div>`;
@@ -217,7 +222,10 @@ function buildCards() {
             const choisie = suggState(key).list[Number(item.dataset.i)];
             closeSugg(key);
             inp.value = '';
-            if (choisie) pushEvent(key, choisie.name);
+            // Cliquer sur une entreprise déjà connue est un choix explicite :
+            // aucune question de ressemblance à poser. Cliquer sur « Nouveau »
+            // en pose une, comme la touche Entrée.
+            if (choisie) submitEvent(key, choisie.name, { force: !!choisie.id });
             inp.focus();
         });
     });
@@ -228,7 +236,29 @@ function buildCards() {
     document.querySelectorAll('.metric--events').forEach(bloc => {
         bloc.addEventListener('click', ev => {
             const b = ev.target.closest('[data-warn-close]');
-            if (b) hideWarn(b.dataset.warnClose);
+            if (b) { hideWarn(b.dataset.warnClose); return; }
+
+            // Réponse à une question de ressemblance. Les deux boutons mènent à
+            // une ligne enregistrée : l'un chez l'entreprise déjà connue,
+            // l'autre chez celle qu'on vient de taper. Aucun chemin ne fait
+            // perdre la saisie.
+            const use = ev.target.closest('[data-ask-use]');
+            if (use) {
+                const key = use.dataset.askKey;
+                const nom = (ask[key]?.proches || [])[Number(use.dataset.askUse)]?.name;
+                hideAsk(key);
+                if (nom) submitEvent(key, nom, { force: true });
+                document.getElementById(`ev-${key}`)?.focus();
+                return;
+            }
+            const neuf = ev.target.closest('[data-ask-new]');
+            if (neuf) {
+                const key = neuf.dataset.askNew;
+                const nom = ask[key]?.nom;
+                hideAsk(key);
+                if (nom) submitEvent(key, nom, { force: true });
+                document.getElementById(`ev-${key}`)?.focus();
+            }
         });
     });
 
@@ -595,6 +625,79 @@ function paintEventLists() {
  * l'intérêt du dispositif, donc on le DIT : un rattachement silencieux
  * laisserait croire à une faute de frappe de l'application.
  */
+/* --- Ressemblance : « carefour » alors que CARREFOUR existe -----------------
+
+   Cas réel du 26 août : le nom a été créé sans que rien ne le signale, et
+   l'autocomplétion ne pouvait pas aider puisqu'elle cherche par début de nom.
+   Deux entreprises pour un seul client, c'est un carnet qui se dégrade et des
+   statistiques par client fausses avant d'exister.
+
+   TROIS PARTIS PRIS.
+
+   1. LA QUESTION EST POSÉE AVANT LA CRÉATION, pas après. Corriger ensuite
+      demanderait de supprimer la ligne, de supprimer l'entreprise créée, puis
+      de tout resaisir. Une seconde d'attente au bon moment coûte moins cher.
+
+   2. CE N'EST PAS UN BLOCAGE, C'EST UNE QUESTION À DEUX RÉPONSES. « Utiliser
+      CARREFOUR » et « Créer carefour » mènent tous deux à une ligne
+      enregistrée. Rien n'est perdu, rien n'est imposé : deux sociétés peuvent
+      réellement porter des noms voisins, et l'application n'en sait rien.
+
+   3. ELLE NE SE POSE QUE SUR UN NOM INCONNU. Choisir une entreprise dans la
+      liste, ou retaper à l'identique un nom déjà présent, ne déclenche rien.
+      Le seuil de ressemblance est calibré sur le carnet réel, voir
+      similarAccounts() dans api.js : une seule fausse alerte sur 445 noms.
+   -------------------------------------------------------------------------- */
+
+function hideAsk(key) {
+    delete ask[key];
+    const box = document.getElementById(`ask-${key}`);
+    if (!box) return;
+    box.hidden = true;
+    box.innerHTML = '';
+}
+
+function showAsk(key, nom, proches) {
+    const box = document.getElementById(`ask-${key}`);
+    if (!box) return;
+    ask[key] = { nom, proches };
+    const un = proches.length === 1;
+    box.innerHTML = `
+        <div class="event-ask-title">
+            « ${escapeHtml(nom)} » n'est pas dans le carnet, mais
+            ${un ? 'un nom très proche y est' : 'des noms très proches y sont'}.
+        </div>
+        <div class="event-ask-btns">
+            ${proches.map((a, i) => `
+                <button class="event-ask-btn event-ask-btn--use" type="button"
+                        data-ask-use="${i}" data-ask-key="${key}">
+                    Utiliser ${escapeHtml(a.name)}
+                </button>`).join('')}
+            <button class="event-ask-btn event-ask-btn--new" type="button" data-ask-new="${key}">
+                Créer « ${escapeHtml(nom)} »
+            </button>
+        </div>`;
+    box.hidden = false;
+}
+
+/**
+ * Point d'entrée unique de l'ajout d'une ligne : pose la question de
+ * ressemblance s'il y a lieu, sinon enregistre.
+ *
+ * `force` veut dire « la personne a déjà tranché » : elle a choisi dans la
+ * liste, ou elle vient de répondre à la question. Ne jamais reposer une
+ * question à laquelle on a déjà répondu, sinon la saisie tourne en rond.
+ */
+function submitEvent(key, saisi, { force = false } = {}) {
+    const nom = cleanAccountName(saisi);
+    if (!force && nom && !accountByName(nom)) {
+        const proches = similarAccounts(nom, 3);
+        if (proches.length) { showAsk(key, nom, proches); return; }
+    }
+    hideAsk(key);
+    pushEvent(key, nom);
+}
+
 function pushEvent(key, saisi) {
     if (!allowWrite()) return;
     const nom = cleanAccountName(saisi);
@@ -867,7 +970,7 @@ function onEventKey(inp, e) {
     const nom = choisie ? choisie.name : inp.value;
     closeSugg(key);
     inp.value = '';
-    pushEvent(key, nom);
+    submitEvent(key, nom, { force: !!(choisie && choisie.id) });
     inp.focus();
 }
 

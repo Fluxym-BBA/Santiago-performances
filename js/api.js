@@ -1346,6 +1346,147 @@ export async function accountHistory(accountId) {
 }
 
 /* --------------------------------------------------------------------------
+   Entreprises — ressemblance orthographique
+
+   Ce bloc existe à cause d'un cas réel : « carefour » a été créé le 26 août à
+   côté de CARREFOUR, sans que rien ne le signale. L'autocomplétion ne pouvait
+   pas aider, elle cherche par début de nom et « carefour » ne commence par
+   aucun nom connu.
+
+   LE SEUIL A ÉTÉ CALIBRÉ SUR LE CARNET RÉEL, PAS CHOISI. Mesuré sur les 445
+   noms importés de Salesforce :
+
+     — distance de Levenshtein ≤ 2 seule           : 16 fausses alertes
+       (KEOLIS/VEOLIA, RATP/RAGT, PWC/PMU, NEXANS/MEXENS, MALT/VILT,
+        AS GROUP/AST GROUPE, ALE INTERNATIONAL/ARC INTERNATIONAL…)
+     — ≤ 1 seule                                  : 0 fausse alerte, mais rate
+       les fautes dans les noms longs
+     — le seuil adaptatif ci-dessous               : 1 seule fausse alerte
+       (GROUPE B&B / GROUPE SEB)
+
+   Deux règles cumulées, donc :
+   1. tolérance de 1 caractère sur les noms courts, 2 à partir de 10 caractères,
+      parce qu'une faute dans « SOCIETE GENERALLE » est plausible alors que deux
+      lettres d'écart sur quatre lettres, ce sont deux sociétés différentes ;
+   2. les trois premières lettres doivent coïncider. C'est ce qui élimine
+      l'essentiel du bruit sans rien perdre : on se trompe sur la fin d'un nom,
+      rarement sur son début.
+   -------------------------------------------------------------------------- */
+
+/** Longueur à partir de laquelle on tolère deux caractères d'écart. */
+const SIMILAR_LONG = 10;
+
+/**
+ * Distance de Levenshtein, abandonnée dès qu'elle dépasse `max`.
+ * L'abandon n'est pas une optimisation gratuite : la fonction tourne sur les
+ * 446 noms du carnet à chaque nom inconnu saisi.
+ */
+function levenshtein(a, b, max) {
+    if (a === b) return 0;
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const cur = [i];
+        let ligneMin = i;
+        for (let j = 1; j <= b.length; j++) {
+            const cout = a[i - 1] === b[j - 1] ? 0 : 1;
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cout);
+            if (cur[j] < ligneMin) ligneMin = cur[j];
+        }
+        // Toute la ligne dépasse déjà le seuil : le résultat final ne peut plus
+        // redescendre en dessous.
+        if (ligneMin > max) return max + 1;
+        prev = cur;
+    }
+    return prev[b.length];
+}
+
+/**
+ * Entreprises du carnet dont le nom ressemble à `name` sans lui être égal.
+ * Renvoie un tableau de lignes de `accounts`, les plus proches d'abord.
+ *
+ * Le carnet doit avoir été chargé (loadAccounts). Sans cache, renvoie un
+ * tableau vide : l'absence de suggestion est un moindre mal, une attente
+ * réseau au milieu d'une frappe n'en est pas un.
+ */
+export function similarAccounts(name, limit = 3) {
+    const q = accountKey(name);
+    if (!q || q.length < 3 || !_accounts) return [];
+    const out = [];
+    for (const a of _accounts) {
+        const k = a.name_key;
+        if (k === q) continue;                       // même entreprise, pas une ressemblance
+        if (k.slice(0, 3) !== q.slice(0, 3)) continue;
+        const max = Math.min(k.length, q.length) >= SIMILAR_LONG ? 2 : 1;
+        const d = levenshtein(q, k, max);
+        if (d <= max) out.push({ compte: a, d });
+    }
+    out.sort((x, y) => x.d - y.d || x.compte.name.localeCompare(y.compte.name, 'fr'));
+    return out.slice(0, limit).map(x => x.compte);
+}
+
+/* --------------------------------------------------------------------------
+   Entreprises — tenue du carnet
+
+   Trois fonctions, un seul écran : entreprises.html. Elles passent toutes par
+   des fonctions de la base et non par la table, pour une raison qui n'est pas
+   négociable : le critère « aucune action rattachée » doit se juger sur les
+   actions de TOUT LE MONDE, alors que la RLS de sales_events ne montre à un
+   membre que les siennes. Un décompte fait ici serait faux, et ferait
+   supprimer le nom d'une entreprise travaillée par un collègue.
+
+   Voir sql/accounts-cleanup-migration-v11.sql pour le détail du raisonnement.
+   -------------------------------------------------------------------------- */
+
+/**
+ * Tout le carnet, avec pour chaque nom le nombre d'actions du cycle de vente,
+ * les dates extrêmes, le créateur, et la raison qui empêche éventuellement de
+ * le supprimer (`block_reason`, nul quand la suppression est permise).
+ */
+export async function accountsOverview() {
+    const { data, error } = await supabase.rpc('accounts_overview');
+    if (error) throw error;
+    return data || [];
+}
+
+/** Retire une entreprise du cache local après suppression ou fusion. */
+function forgetAccount(id) {
+    if (!_accounts) return;
+    const i = _accounts.findIndex(a => a.id === id);
+    if (i >= 0) _accounts.splice(i, 1);
+}
+
+/**
+ * Supprime une entreprise du carnet. Renvoie le nom supprimé.
+ *
+ * La base refait le décompte des actions : entre l'affichage de la liste et le
+ * clic, un collègue a pu rattacher une action à ce nom. Le refus arrive alors
+ * sous forme d'erreur, avec une phrase déjà écrite pour être lue.
+ */
+export async function deleteAccount(id) {
+    const { data, error } = await supabase.rpc('delete_account', { p_account: id });
+    if (error) throw error;
+    forgetAccount(id);
+    return data;
+}
+
+/**
+ * Fusionne deux entreprises : toutes les actions de `sourceId` passent chez
+ * `targetId`, puis `sourceId` disparaît. Renvoie le nombre d'actions déplacées.
+ *
+ * Réservée au propriétaire par la base, pas seulement par l'écran. Aucun score
+ * n'est modifié : les compteurs du cycle de vente dérivent du nombre d'actions
+ * par personne et par jour, que la fusion ne change pas.
+ */
+export async function mergeAccounts(sourceId, targetId) {
+    const { data, error } = await supabase.rpc('merge_accounts',
+        { p_source: sourceId, p_target: targetId });
+    if (error) throw error;
+    forgetAccount(sourceId);
+    return Number(data) || 0;
+}
+
+/* --------------------------------------------------------------------------
    Données — équipe (administrateurs)
    -------------------------------------------------------------------------- */
 
@@ -1429,6 +1570,13 @@ export function humanError(error) {
     if (msg.includes('sales_events') && (error.code === '42P01' || error.code === 'PGRST205')) {
         return "La base n'a pas encore les tables du cycle de vente : exécutez "
              + 'sql/accounts-events-migration-v10.sql.';
+    }
+    if ((msg.includes('accounts_overview') || msg.includes('delete_account')
+         || msg.includes('merge_accounts'))
+        && (error.code === 'PGRST202' || error.code === '42883')) {
+        return "La base n'a pas encore les fonctions de tenue du carnet : exécutez "
+             + 'sql/accounts-cleanup-migration-v11.sql. La saisie et le reste de '
+             + "l'application ne sont pas concernés.";
     }
     if (msg.includes('account_history') && (error.code === 'PGRST202' || error.code === '42883')) {
         return "La base n'a pas encore la fonction account_history : exécutez "

@@ -1,0 +1,301 @@
+/* ==========================================================================
+   ENTREPRISES.CSS — Cockpit BDR — écran du carnet d'entreprises
+
+   Pourquoi un fichier séparé de app.css : app.css fait 81 Ko, c'est le fichier
+   le plus partagé du dépôt, et chaque livraison le réécrit en entier. Deux
+   chantiers menés en parallèle qui y touchent, et la seconde archive efface la
+   première. Ce fichier n'est chargé que par entreprises.html, n'ajoute aucune
+   règle sur un sélecteur existant, et n'utilise que les variables de :root
+   déclarées dans app.css. Il ne peut donc rien casser ailleurs, et pourra y
+   être fondu le jour où le rythme des livraisons le permettra.
+
+   Deux règles d'ergonomie du projet sont tenues ici :
+     - aucun texte n'est tronqué. Un nom d'entreprise long passe à la ligne,
+       jamais d'ellipse : « GROUPE CARREFOU… » et « GROUPE CARREFOUR » se
+       liraient pareil, et c'est précisément ce que cet écran doit distinguer ;
+     - en mode carte (moins de 640 px), toute cible tactile fait au moins 44 px.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Ce que contient le carnet
+
+   Quatre nombres en tête d'écran. Ils ne sont pas décoratifs : ils répondent à
+   « combien de noms ai-je créés moi-même », qui est la question de quelqu'un
+   qui vient réparer une faute de frappe.
+   -------------------------------------------------------------------------- */
+
+.acc-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.acc-stat {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-sm);
+}
+
+.acc-stat-num {
+    font-size: 27px;
+    font-weight: 900;
+    line-height: 1.1;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
+}
+
+.acc-stat-lab {
+    margin-top: 3px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--gray-600);
+}
+
+.acc-stat-sub {
+    margin-top: 2px;
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--gray-400);
+}
+
+/* --------------------------------------------------------------------------
+   Recherche, filtre, tri
+   -------------------------------------------------------------------------- */
+
+.acc-tools {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 14px;
+    align-items: start;
+}
+
+.acc-tools input[type="search"],
+.acc-tools select {
+    width: 100%;
+    font-family: inherit;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--navy);
+    padding: 11px 13px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+}
+
+.acc-tools input[type="search"]:focus,
+.acc-tools select:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px var(--cyan-glow);
+}
+
+.acc-count {
+    margin-top: 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--gray-500);
+}
+
+/* --------------------------------------------------------------------------
+   La liste
+
+   Une liste de lignes et non un tableau : cinq colonnes deviennent illisibles
+   sur un téléphone, et un tableau à défilement horizontal cache justement la
+   colonne des boutons, celle dont on a besoin.
+   -------------------------------------------------------------------------- */
+
+.acc-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.acc-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+}
+
+/* Entreprise qu'on ne peut pas supprimer : fond légèrement en retrait, pour
+   qu'on comprenne d'un coup d'œil quelles lignes sont tenues. Aucune couleur
+   d'alerte : rien n'est anormal, ces noms travaillent. */
+.acc-row--locked { background: var(--gray-50); }
+
+.acc-main { flex: 1; min-width: 0; }
+
+.acc-name {
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1.3;
+    color: var(--navy);
+    overflow-wrap: anywhere;   /* un nom long passe à la ligne, il ne se coupe pas */
+}
+
+.acc-meta {
+    margin-top: 3px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--gray-600);
+    overflow-wrap: anywhere;
+}
+
+.acc-meta--dim { color: var(--gray-400); }
+
+.acc-acts {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.acc-btn {
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    padding: 9px 14px;
+    min-height: 38px;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid transparent;
+    background: var(--white);
+    transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+/* La suppression est bordée de rouge, pas remplie : c'est une action normale et
+   sans perte ici, pas un danger. Le rouge plein est réservé à ce qui détruit
+   des chiffres. */
+.acc-btn--del {
+    color: var(--danger);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.acc-btn--del:hover { background: rgba(239, 68, 68, 0.08); border-color: var(--danger); }
+
+/* Remplace le bouton de suppression quand la base la refuse. Il ne fait pas
+   semblant d'être désactivé : il répond. Un bouton grisé n'explique rien, et un
+   survol n'existe pas sous le pouce. */
+.acc-btn--why {
+    color: var(--gray-500);
+    border-color: var(--gray-200);
+}
+
+.acc-btn--why:hover { background: var(--gray-100); border-color: var(--gray-400); }
+
+.acc-btn--merge {
+    color: var(--navy);
+    border-color: var(--gray-300);
+}
+
+.acc-btn--merge:hover { background: var(--gray-50); border-color: var(--navy); }
+
+.acc-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--cyan-glow);
+}
+
+.acc-empty {
+    padding: 22px 16px;
+    text-align: center;
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--gray-500);
+    background: var(--gray-50);
+    border: 1px dashed var(--gray-200);
+    border-radius: var(--radius-md);
+}
+
+/* Ce que la liste ne montre pas. Affiché, jamais sous-entendu : une liste qui
+   coupe en silence fait croire qu'un nom n'existe pas, et fait recréer le
+   doublon qu'on venait supprimer. */
+.acc-more {
+    margin-top: 12px;
+    padding: 10px 13px;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--gray-600);
+    background: var(--gray-100);
+    border-radius: var(--radius-sm);
+}
+
+.acc-more[hidden] { display: none; }
+
+/* --------------------------------------------------------------------------
+   Fusion
+   -------------------------------------------------------------------------- */
+
+.acc-merge {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 14px;
+    align-items: start;
+}
+
+.acc-merge input[type="text"] {
+    width: 100%;
+    font-family: inherit;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--navy);
+    padding: 11px 13px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+}
+
+.acc-merge input[type="text"]:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 3px var(--cyan-glow);
+}
+
+.acc-merge-arrow {
+    align-self: center;
+    padding-top: 18px;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--gray-400);
+}
+
+/* --------------------------------------------------------------------------
+   Mode carte
+
+   Sous 900 px les quatre nombres passent à deux par ligne, sous 640 px les
+   outils et la fusion s'empilent, et les boutons montent à 44 px. La flèche de
+   la fusion tourne d'un quart de tour : de gauche à droite, elle ne voudrait
+   plus rien dire une fois les champs empilés.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+    .acc-stats { grid-template-columns: repeat(2, 1fr); }
+    .acc-tools { grid-template-columns: 1fr 1fr; }
+    .acc-tools-search { grid-column: 1 / -1; }
+}
+
+@media (max-width: 639px) {
+    .acc-stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .acc-stat { padding: 12px 13px; }
+    .acc-stat-num { font-size: 23px; }
+    .acc-tools { grid-template-columns: 1fr; }
+    .acc-tools input[type="search"],
+    .acc-tools select { font-size: 16px; padding: 13px; }  /* 16 px : iOS ne zoome pas */
+
+    .acc-row { flex-direction: column; align-items: stretch; gap: 10px; }
+    .acc-acts { flex-direction: row; }
+    .acc-btn { flex: 1; min-height: 44px; font-size: 13.5px; }
+
+    .acc-merge { grid-template-columns: 1fr; }
+    .acc-merge input[type="text"] { font-size: 16px; padding: 13px; }
+    .acc-merge-arrow { padding-top: 0; text-align: center; transform: rotate(90deg); }
+}

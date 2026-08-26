@@ -59,6 +59,18 @@ const MENU = [
     // parce qu'on ne s'y rend que deux fois par an, et que la règle des trois
     // onglets vaut plus que la visibilité d'un réglage.
     { href: './compte.html', label: 'Mon compte', icon: '🔑', when: () => true },
+    // Le carnet d'entreprises : ouvert à tous ceux qui y écrivent, et non aux
+    // seuls administrateurs. Celui qui se trompe en tapant un nom est celui qui
+    // saisit, le soir, seul : faire passer la correction par un administrateur
+    // laisserait le doublon vivre une semaine.
+    //
+    // Absente pour un BDR pur, en revanche : les cinq compteurs qui nomment une
+    // entreprise sont ceux du commercial, un BDR ne crée jamais rien dans ce
+    // carnet et n'a donc rien à y nettoyer. La page reste accessible par son
+    // adresse, elle ne met personne dehors, elle ne s'affiche simplement pas là
+    // où elle ne sert pas.
+    { href: './entreprises.html', label: 'Carnet d\'entreprises', icon: '🏢',
+      when: p => !!p?.is_sales || canReadAll(p) },
     { href: './admin.html', label: 'Gérer les comptes', icon: '⚙️', when: p => canManageAccounts(p) },
     // Réservée au propriétaire, et non aux administrateurs : le barème est
     // global et rétroactif, il ne se règle pas à plusieurs mains. La page
