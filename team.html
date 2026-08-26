@@ -115,22 +115,22 @@
         <div class="section-head">
             <div>
                 <h2>Classement sur la période</h2>
-                <p>Trié par score de productivité, <b>séparément pour chaque métier</b> : le score
-                   d'un BDR et celui d'un commercial ne se composent pas des mêmes actions et ne se
-                   comparent donc pas. Les colonnes de compteurs, elles, restent lisibles d'un métier
-                   à l'autre. Le bouton « ouvrir » bascule le tableau de bord individuel sur la
-                   personne choisie, sans quitter votre session.</p>
+                <p>Trié par score de productivité. Le bouton « ouvrir » bascule le tableau de bord
+                   individuel sur la personne choisie, sans quitter votre session.</p>
             </div>
             <div class="section-head-actions">
                 <button class="btn btn--ghost" id="btn-export" type="button">⬇ Exporter en CSV</button>
             </div>
         </div>
         <div class="table-wrap">
-            <!-- Les colonnes sont écrites par le script, pas ici : elles dépendent
-                 des métiers présents dans la période affichée. Une équipe sans
-                 commercial retrouve exactement les colonnes d'avant. -->
             <table>
-                <thead id="ranking-head"></thead>
+                <thead>
+                    <tr>
+                        <th>#</th><th>BDR</th><th>Appels</th><th>Aboutis</th><th>RDV</th><th>E-mails</th>
+                        <th>Entrep.</th><th>Contacts</th><th>Abouti %</th><th>RDV %</th>
+                        <th>Jours</th><th>Score</th><th></th>
+                    </tr>
+                </thead>
                 <tbody id="ranking-body"></tbody>
             </table>
         </div>

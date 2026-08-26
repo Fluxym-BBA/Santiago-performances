@@ -18,8 +18,7 @@ import {
     formatLong, formatShort, periodLength,
     startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter,
     periodLabel, periodLabelShort, humanError, METRICS, SCORE_WEIGHTS,
-    isContributor, metricsForAny, jobLabel, jobsOf,
-    loadScoreWeights, scoreWeightsMeta
+    isContributor, metricsForAny, jobLabel
 } from './api.js';
 import {
     num, score, isActive, agg, valOf, bucketize, autoGran, granWord, rowsForRange
@@ -71,32 +70,6 @@ const state = {
     // huit sans le savoir. Ici, chaque ouverture de page repart de tout le monde.
     excluded: new Set()
 };
-
-/**
- * Les populations du classement.
- *
- * Un score de BDR et un score de commercial ne se composent pas des mêmes
- * actions : les mettre dans un même classement produirait un dernier de la
- * classe fabriqué par la différence de métier, pas par la différence d'effort.
- * Chaque groupe est donc classé chez lui. Les compteurs, eux, restent affichés
- * côte à côte : un appel est un appel dans les deux métiers, et c'est la seule
- * comparaison transverse qui tienne.
- *
- * Quatre groupes et non deux : quelqu'un qui porte les deux métiers n'est
- * comparable ni à l'un ni à l'autre, et le dupliquer dans deux classements
- * ferait deux fois la même personne dans le même tableau. Il a donc son
- * groupe. Le groupe « sans métier » n'existe en principe pas, isContributor
- * l'écarte en amont ; il reste comme filet, pour qu'une ligne ne disparaisse
- * jamais du tableau sans un mot.
- */
-const JOB_GROUPS = [
-    { key: 'bdr',   label: 'BDR',                 match: p => !!p.is_bdr && !p.is_sales },
-    { key: 'sales', label: 'Commerciaux',         match: p => !!p.is_sales && !p.is_bdr },
-    { key: 'both',  label: 'BDR et commercial',   match: p => !!p.is_bdr && !!p.is_sales },
-    { key: 'none',  label: 'Sans métier déclaré', match: p => !p.is_bdr && !p.is_sales }
-];
-
-const groupOf = pr => (JOB_GROUPS.find(g => g.match(pr)) || JOB_GROUPS[3]).key;
 
 let people = [];      // [{ profile, byDate, rows, a }] trié par score décroissant
 let allProfiles = [];
@@ -271,23 +244,7 @@ async function load() {
     people.forEach((p, i) => {
         p.rank = i + 1;
         p.color = BDR_COLORS[i % BDR_COLORS.length];
-        p.group = groupOf(p.profile);
     });
-
-    /* Le rang de métier, à côté du rang global et non à sa place. Le rang global
-       continue de décider des couleurs et des huit séries montrées dans les
-       graphiques : le changer ferait sauter une couleur d'une personne à l'autre
-       au premier commercial coché, et une couleur doit désigner toujours la même
-       personne d'un écran à l'autre. Le classement, lui, affiche le rang de
-       métier, qui est le seul comparable. `people` étant déjà trié par score
-       décroissant, un simple compteur par groupe suffit. */
-    const seen = new Map();
-    people.forEach(p => {
-        const n = (seen.get(p.group) || 0) + 1;
-        seen.set(p.group, n);
-        p.jobRank = n;
-    });
-    people.forEach(p => { p.groupSize = seen.get(p.group) || 1; });
 
     // Une personne décochée ne peut pas rester en lice dans la comparaison :
     // sans cela le duel afficherait encore des chiffres qui ne comptent plus.
@@ -352,45 +309,20 @@ function renderKpis() {
     const activePeople = people.filter(p => p.a.activeDays > 0);
     const best = people[0];
 
-    /* Compter les métiers présents, pour ne montrer une tuile de cycle de vente
-       qu'à une équipe qui en a une. Une tuile à zéro n'informe pas, elle
-       encombre. */
-    const hasJob = j => people.some(p => jobsOf(p.profile).includes(j));
-    const anySales = hasJob('sales');
-    const anyBdr = hasJob('bdr');
-
-    /* Le total d'équipe additionne des scores de deux métiers. C'est assumé,
-       mais il faut le dire : c'est une masse de travail déclarée, pas un
-       classement. Le sous-titre porte donc la composition. */
-    const mix = anyBdr && anySales
-        ? `${people.filter(p => jobsOf(p.profile).includes('bdr')).length} BDR et ${
-             people.filter(p => jobsOf(p.profile).includes('sales')).length} commerciaux`
-        : `${people.length} personne${people.length > 1 ? 's' : ''}`;
-
     const tiles = [
         {
             hero: true, label: 'Score total de l\'équipe',
             value: fmtInt(team.productivity_score),
-            sub: `${activePeople.length} ayant saisi sur ${mix} · ${pLabel()}`
+            sub: `${activePeople.length} BDR ayant saisi sur ${people.length} · ${pLabel()}`
         },
         { label: 'Appels passés', value: fmtInt(team.calls_made),
           sub: `${fmtInt(team.calls_connected)} aboutis · ${team.connect_rate == null ? '–' : fmtDec(team.connect_rate) + ' %'}` },
-        // Les deux rendez-vous ne sont jamais additionnés : le RDV obtenu est
-        // décroché par un BDR, le RDV1 est tenu par un commercial. La même
-        // rencontre peut porter les deux, une somme la compterait deux fois.
-        anySales && !anyBdr
-            ? { label: 'RDV1 tenus', value: fmtInt(team.first_meetings),
-                sub: `${fmtInt(team.proposals_sent)} proposition(s) envoyée(s)` }
-            : { label: 'Rendez-vous obtenus', value: fmtInt(team.meetings_booked),
-                sub: team.calls_per_meeting == null ? 'aucun RDV' : `${fmtDec(team.calls_per_meeting)} appels par RDV` },
-        anySales
-            ? { label: 'Cycle de vente', value: fmtInt(team.first_meetings + team.proposals_sent),
-                sub: `${fmtInt(team.first_meetings)} RDV1 · ${fmtInt(team.proposals_sent)} propositions · ${
-                    fmtInt(team.no_go + team.deals_dropped + team.deals_lost)} sortie(s)` }
-            : { label: 'E-mails envoyés', value: fmtInt(team.emails_sent),
-                sub: `${fmtInt(team.crm)} fiches CRM créées` },
+        { label: 'Rendez-vous', value: fmtInt(team.meetings_booked),
+          sub: team.calls_per_meeting == null ? 'aucun RDV' : `${fmtDec(team.calls_per_meeting)} appels par RDV` },
+        { label: 'E-mails envoyés', value: fmtInt(team.emails_sent),
+          sub: `${fmtInt(team.crm)} fiches CRM créées` },
         { label: 'Meilleur score', value: best ? fmtInt(best.a.productivity_score) : '–',
-          sub: best ? `${nameOf(best)}${jobLabel(best.profile) ? ' · ' + jobLabel(best.profile) : ''}` : 'aucune donnée' },
+          sub: best ? nameOf(best) : 'aucune donnée' },
         { label: 'Jours saisis', value: fmtInt(team.activeDays),
           sub: `sur ${fmtInt(people.length * periodLength(state.from, state.to))} jours-personne possibles` }
     ];
@@ -407,47 +339,8 @@ function renderKpis() {
    Classement
    -------------------------------------------------------------------------- */
 
-/**
- * Les colonnes de compteurs affichées : l'union des métiers présents.
- *
- * Piloté par metricsForAny et non écrit en dur, pour deux raisons. D'abord une
- * équipe sans commercial retrouve exactement les colonnes d'avant, sans qu'on
- * ait à maintenir deux listes. Ensuite l'ordre est celui de METRICS, donc celui
- * de la page de saisie et celui de l'export CSV : trois écrans qui nomment les
- * mêmes chiffres dans le même ordre sont trois écrans qu'on peut lire ensemble.
- */
-const rankMetrics = () => metricsForAny(people.map(p => p.profile));
-
-/** Colonnes de taux : un taux sans son compteur au tableau n'a pas de sens. */
-function rankRates(ms) {
-    const has = k => ms.some(m => m.key === k);
-    const out = [];
-    if (has('calls_made')) out.push({ th: 'Abouti %', get: a => a.connect_rate });
-    if (has('meetings_booked')) out.push({ th: 'RDV %', get: a => a.meeting_rate });
-    return out;
-}
-
-/** Nombre total de colonnes, pour les messages qui occupent toute la largeur. */
-const rankSpan = (ms, rates) => 2 + ms.length + rates.length + 3;
-
 function renderRanking() {
-    const head = document.getElementById('ranking-head');
     const body = document.getElementById('ranking-body');
-    if (!body) return;
-
-    const ms = rankMetrics();
-    const rates = rankRates(ms);
-    const span = rankSpan(ms, rates);
-
-    if (head) {
-        head.innerHTML = `<tr>
-            <th>#</th><th>Personne</th>
-            ${ms.map(m => `<th>${escapeHtml(m.short || m.label)}</th>`).join('')}
-            ${rates.map(r => `<th>${escapeHtml(r.th)}</th>`).join('')}
-            <th>Jours</th><th>Score</th><th></th>
-        </tr>`;
-    }
-
     if (!people.length) {
         // Trois causes possibles, trois phrases : il n'y a personne, tout le
         // monde est masqué par un filtre, ou tout le monde a été décoché à la
@@ -456,50 +349,30 @@ function renderRanking() {
         const byHand = eligible.filter(pr => state.excluded.has(pr.user_id)).length;
         const hidden = allProfiles.length;
         body.innerHTML = byHand > 0
-            ? `<tr><td colspan="${span}" class="td-muted">Aucun compte visible : les
+            ? `<tr><td colspan="13" class="td-muted">Aucun compte visible : les
                ${byHand} personne${byHand > 1 ? 's' : ''} de la période
                ${byHand > 1 ? 'ont' : 'a'} été décochée${byHand > 1 ? 's' : ''}
                dans « Qui est compté ».</td></tr>`
             : hidden > 0
-            ? `<tr><td colspan="${span}" class="td-muted">Aucun compte visible : les
+            ? `<tr><td colspan="13" class="td-muted">Aucun compte visible : les
                ${hidden} compte${hidden > 1 ? 's' : ''} de la période
                ${hidden > 1 ? 'sont' : 'est'} écarté${hidden > 1 ? 's' : ''} par
                les filtres « Qui est compté ».</td></tr>`
-            : `<tr><td colspan="${span}" class="td-muted">Aucun compte à afficher sur cette période.</td></tr>`;
+            : '<tr><td colspan="13" class="td-muted">Aucun compte à afficher sur cette période.</td></tr>';
         return;
     }
-
     const dec = state.mode === 'avg';
     const f = v => (dec ? fmtDec(v) : fmtInt(v));
     const me = myProfile();
 
-    /* Une cellule vide n'est pas un zéro. Si la métrique ne relève pas du métier
-       de la personne ET qu'elle n'a rien saisi dessus, on écrit un tiret : un
-       « 0 appels » en face d'un commercial se lirait comme une contre-performance
-       alors que la question ne lui est pas posée.
-
-       La seconde condition n'est pas un luxe. Le métier est une propriété du
-       compte, pas de la journée : quelqu'un passé de BDR à commercial garde un
-       historique de prospection, et le masquer effacerait de vraies journées de
-       l'écran. Dès qu'il y a un chiffre, on le montre. */
-    const cellOf = (p, m) => {
-        const mine = m.jobs.some(j => jobsOf(p.profile).includes(j));
-        const raw = Number(p.a[m.key]) || 0;
-        if (!mine && raw === 0) return '<span class="td-muted">—</span>';
-        return f(valOf(p.a, m.key, state.mode));
-    };
-
-    const rowOf = p => {
+    body.innerHTML = people.map(p => {
         const a = p.a;
         const isMe = me && p.profile.user_id === me.user_id;   // vrai seulement pour un manager qui prospecte aussi
-        // La médaille porte sur le classement du métier, pas sur un classement
-        // mêlé : premier des commerciaux est un fait, premier de tout le monde
-        // confondu n'en est pas un.
-        const medal = p.jobRank === 1 ? '🥇' : p.jobRank === 2 ? '🥈' : p.jobRank === 3 ? '🥉' : p.jobRank;
+        const medal = p.rank === 1 ? '🥇' : p.rank === 2 ? '🥈' : p.rank === 3 ? '🥉' : p.rank;
         return `
         <tr${isMe ? ' class="row-me"' : ''}>
             <td data-th="Rang" class="rank-cell">${medal}</td>
-            <td data-th="Personne" class="td-day">
+            <td data-th="BDR" class="td-day">
                 <span class="bdr-chip">
                     <span class="bdr-dot" style="background:${p.color}"></span>
                     <a class="bdr-name" href="${linkFor('./dashboard.html', p.profile.user_id)}"
@@ -509,40 +382,21 @@ function renderRanking() {
                     ${p.profile.is_admin ? '<b class="tag tag--admin">admin</b>' : ''}
                 </span>
             </td>
-            ${ms.map(m => `<td data-th="${escapeHtml(m.short || m.label)}">${cellOf(p, m)}</td>`).join('')}
-            ${rates.map(r => {
-                const v = r.get(a);
-                return `<td data-th="${escapeHtml(r.th)}">${v == null ? '–' : fmtDec(v) + ' %'}</td>`;
-            }).join('')}
+            <td data-th="Appels">${f(valOf(a, 'calls_made', state.mode))}</td>
+            <td data-th="Aboutis">${f(valOf(a, 'calls_connected', state.mode))}</td>
+            <td data-th="RDV">${f(valOf(a, 'meetings_booked', state.mode))}</td>
+            <td data-th="E-mails">${f(valOf(a, 'emails_sent', state.mode))}</td>
+            <td data-th="Entreprises">${f(valOf(a, 'companies_created', state.mode))}</td>
+            <td data-th="Contacts">${f(valOf(a, 'contacts_created', state.mode))}</td>
+            <td data-th="Taux aboutis">${a.connect_rate == null ? '–' : fmtDec(a.connect_rate) + ' %'}</td>
+            <td data-th="Taux RDV">${a.meeting_rate == null ? '–' : fmtDec(a.meeting_rate) + ' %'}</td>
             <td data-th="Jours saisis" class="td-muted">${fmtInt(a.activeDays)} / ${fmtInt(a.days)}</td>
             <td data-th="Score" class="td-score"><b>${f(valOf(a, 'productivity_score', state.mode))}</b></td>
             <td data-th="" class="td-action"><a class="chip chip--sm" href="${linkFor('./dashboard.html', p.profile.user_id)}"
                    title="Voir la fiche de ${escapeHtml(nameOf(p))}">ouvrir →</a></td>
         </tr>`;
-    };
+    }).join('');
 
-    /* Un seul métier présent : aucun titre de groupe, le tableau est celui
-       d'avant. Deux ou plus : un intertitre par métier, pour qu'on ne lise
-       jamais deux scores incomparables comme s'ils se suivaient. */
-    const groups = JOB_GROUPS
-        .map(g => ({ g, list: people.filter(p => p.group === g.key) }))
-        .filter(x => x.list.length);
-
-    if (groups.length <= 1) {
-        body.innerHTML = people.map(rowOf).join('');
-        return;
-    }
-
-    body.innerHTML = groups.map(({ g, list }) => `
-        <tr>
-            <td colspan="${span}" class="td-muted">
-                <b>${escapeHtml(g.label)}</b> · ${fmtInt(list.length)} personne${list.length > 1 ? 's' : ''},
-                ${list.length > 1
-                    ? 'classées entre elles sur le score'
-                    : 'seule de son métier sur la période, donc sans rang comparable'}
-            </td>
-        </tr>
-        ${list.map(rowOf).join('')}`).join('');
 }
 
 /* --------------------------------------------------------------------------
@@ -597,28 +451,9 @@ function teamTip(buckets, key, gran, unit = '') {
                 : [],
             foot: total === 0
                 ? `Aucune saisie sur ce ${granWord(gran)}.`
-                : `Moyenne par personne ayant saisi : <b>${fmtDec(total / Math.max(1, vals.filter(x => x.active > 0).length))}${unit}</b>.`
+                : `Moyenne par BDR ayant saisi : <b>${fmtDec(total / Math.max(1, vals.filter(x => x.active > 0).length))}${unit}</b>.`
         };
     };
-}
-
-/**
- * Le poids d'une action, dit en français et lu dans le barème enregistré.
- *
- * Écrire « vaut vingt points » dans un commentaire d'écran était une bombe à
- * retardement : le barème est réglable depuis l'écran Barème, et la phrase est
- * devenue fausse au premier changement. On la lit désormais à la source.
- */
-function weightWord(key) {
-    // Muet si le barème n'a pas pu être chargé : SCORE_WEIGHTS porterait alors
-    // les valeurs par défaut du fichier, et annoncer un poids qui n'est pas
-    // celui appliqué serait pire que de ne rien dire.
-    if (!scoreWeightsMeta().loaded) return '';
-    const w = SCORE_WEIGHTS.find(x => x.key === key);
-    if (!w) return '';
-    const v = Number(w.w);
-    if (!Number.isFinite(v)) return '';
-    return `Le barème en cours lui accorde ${fmtInt(v)} point${Math.abs(v) === 1 ? '' : 's'}.`;
 }
 
 const METRIC_LABEL = {
@@ -641,55 +476,47 @@ const METRIC_LABEL = {
 const CHARTS = [
     {
         key: 'score', icon: '⭐', wide: true,
-        title: 'Score de productivité par personne',
+        title: 'Score de productivité par BDR',
         sub: ctx => `Une courbe par personne, ${granWord(ctx.gran)} par ${granWord(ctx.gran)}`,
         metric: 'productivity_score',
         note: () => `Chaque courbe est une personne, sa couleur est la même dans tous les graphiques
             et dans le classement. Une courbe qui s'interrompt signale des jours sans aucune saisie,
-            jamais un zéro inventé. Attention si l'équipe mêle les deux métiers : le score d'un BDR
-            et celui d'un commercial ne comptent pas les mêmes actions, deux courbes de métiers
-            différents se lisent chacune dans le temps, pas l'une contre l'autre. Le classement, lui,
-            sépare les métiers.`,
+            jamais un zéro inventé.`,
         hover: () => `le classement complet de l'équipe sur le moment pointé, la part de chacun dans
-            le total, l'avance du premier sur le second, et la moyenne par personne ayant saisi.`,
+            le total, l'avance du premier sur le second, et la moyenne par BDR ayant saisi.`,
         render: (host, shown, ctx) => drawLines(host, shown, 'productivity_score', ctx)
     },
     {
         key: 'calls', icon: '📞',
-        title: 'Appels passés par personne',
+        title: 'Appels passés par BDR',
         sub: ctx => `Barres groupées par ${granWord(ctx.gran)}`,
         metric: 'calls_made',
         note: ctx => `Le volume d'appels est le premier levier d'un BDR : c'est la seule métrique
             entièrement sous son contrôle. Les barres sont groupées par personne à l'intérieur de
-            chaque ${granWord(ctx.gran)}. C'est un compteur commun aux deux métiers, donc l'un des
-            rares qui se compare directement entre un BDR et un commercial. Attendez-vous quand même
-            à un écart d'ordre de grandeur : le téléphone est le métier du premier, pas du second.`,
-        hover: () => `tout le monde sur le moment pointé, classé, avec la part de chacun.`,
+            chaque ${granWord(ctx.gran)}.`,
+        hover: () => `tous les BDR sur le moment pointé, classés, avec la part de chacun.`,
         render: (host, shown, ctx) => drawBars(host, shown, 'calls_made', ctx)
     },
     {
         key: 'meetings', icon: '🤝',
-        title: 'Rendez-vous obtenus',
+        title: 'Rendez-vous obtenus par BDR',
         sub: ctx => `Le résultat qui compte, par ${granWord(ctx.gran)}`,
         metric: 'meetings_booked',
-        note: () => `${weightWord('meetings_booked')} C'est de loin l'action la plus lourde du barème.
+        note: () => `Le rendez-vous vaut vingt points au score, c'est de loin l'action la plus lourde.
             Un BDR qui en obtient peu malgré beaucoup d'appels doit être regardé sur le taux de
-            conversion plutôt que sur le volume. Ce compteur est celui du rendez-vous <b>décroché</b>
-            par la prospection : le premier rendez-vous <b>tenu</b> par un commercial est le RDV1,
-            un autre compteur. Une courbe plate à zéro ici pour un commercial est donc normale, pas
-            un mauvais résultat.`,
-        hover: () => `tout le monde sur le moment pointé, classé, avec la part de chacun.`,
+            conversion plutôt que sur le volume.`,
+        hover: () => `tous les BDR sur le moment pointé, classés, avec la part de chacun.`,
         render: (host, shown, ctx) => drawBars(host, shown, 'meetings_booked', ctx)
     },
     {
         key: 'rate', icon: '🎯', wide: true,
-        title: 'Taux de rendez-vous',
+        title: 'Taux de rendez-vous par BDR',
         sub: () => 'Rendez-vous obtenus pour cent appels aboutis',
         metric: 'meeting_rate',
         note: ctx => `Le taux est recalculé depuis les volumes du ${granWord(ctx.gran)}, jamais moyenné.
             Attention aux petits volumes : deux appels aboutis et un rendez-vous donnent 50 %, ce qui
             ne veut rien dire. L'info-bulle donne les volumes pour trancher.`,
-        hover: () => `le taux de chacun sur le moment pointé, avec les volumes d'appels aboutis et
+        hover: () => `le taux de chaque BDR sur le moment pointé, avec les volumes d'appels aboutis et
             de rendez-vous qui ont servi à le calculer.`,
         render: (host, shown, ctx) => drawRates(host, shown, ctx)
     }
@@ -1237,14 +1064,11 @@ function exportCsv() {
     // Colonnes des seuls métiers présents dans l'export : une équipe 100 % BDR
     // produit exactement le même fichier qu'avant.
     const cols = metricsForAny(people.map(p => p.profile));
-    // Deux rangs et non un : le rang de métier est celui qui se lit, le rang
-    // global celui qui explique les couleurs des graphiques. Un tableur qui
-    // n'aurait que le second referait le classement mêlé qu'on vient d'écarter.
-    const head = ['Rang metier', 'Rang global', 'Personne', 'E-mail', 'Metier', 'Admin', 'Demo', 'Actif',
+    const head = ['Rang', 'Personne', 'E-mail', 'Metier', 'Admin', 'Demo', 'Actif',
         'Jours saisis', 'Jours periode',
         ...cols.map(m => m.short), 'Taux aboutis %', 'Taux RDV %', 'Score'];
     const lines = people.map(p => [
-        p.jobRank, p.rank, nameOf(p), p.profile.email || '', jobLabel(p.profile),
+        p.rank, nameOf(p), p.profile.email || '', jobLabel(p.profile),
         p.profile.is_admin ? 'oui' : 'non',
         p.profile.is_demo ? 'oui' : 'non', p.profile.is_active ? 'oui' : 'non',
         p.a.activeDays, p.a.days,
@@ -1496,11 +1320,6 @@ function wire() {
         }
 
         allProfiles = await listProfiles();
-        // Le barème sert aux commentaires des graphiques, pas au calcul : les
-        // scores viennent de la base, déjà pondérés. La vue d'équipe ne le
-        // chargeait pas et citait donc les valeurs par défaut du fichier, qui
-        // deviennent fausses dès le premier réglage depuis l'écran Barème.
-        await loadScoreWeights();
         wire();
         // Les graphiques se redessinent à la largeur disponible : la fenêtre
         // agrandie aussi, sinon son contenu resterait à l'ancienne taille.
