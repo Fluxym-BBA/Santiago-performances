@@ -32,7 +32,8 @@ import {
     SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor,
     SALES_EVENT_KINDS, isEventMetric, cleanAccountName, accountKey,
     loadAccounts, searchAccounts, ensureAccount,
-    fetchDayEvents, addSalesEvent, deleteSalesEvent
+    fetchDayEvents, addSalesEvent, deleteSalesEvent,
+    accountHistory, agoLabel, formatDMY
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -160,6 +161,7 @@ function eventRowHtml(m) {
             <div class="event-sugg" id="sugg-${m.key}" role="listbox" hidden></div>
         </div>
         <p class="event-help"><b>Entrée</b> ajoute la ligne. Sans nom, elle compte quand même.</p>
+        <div class="event-warn" id="warn-${m.key}" role="status" aria-live="polite" hidden></div>
         ${gaugeHtml(m)}
     </div>`;
 }
@@ -217,6 +219,16 @@ function buildCards() {
             inp.value = '';
             if (choisie) pushEvent(key, choisie.name);
             inp.focus();
+        });
+    });
+
+    // Fermeture des avertissements de doublon. Délégué sur la carte : le contenu
+    // du bloc est réécrit à chaque alerte, un écouteur posé sur le bouton
+    // disparaîtrait avec lui.
+    document.querySelectorAll('.metric--events').forEach(bloc => {
+        bloc.addEventListener('click', ev => {
+            const b = ev.target.closest('[data-warn-close]');
+            if (b) hideWarn(b.dataset.warnClose);
         });
     });
 
@@ -599,6 +611,17 @@ function pushEvent(key, saisi) {
     enqueue(async () => {
         try {
             const compte = nom ? await ensureAccount(nom) : null;
+
+            /* Lu avant l'insertion, voir la note de la section « Avertissement ».
+               Un échec ici ne doit rien empêcher : l'avertissement est un
+               confort, saisir tous les jours est la mission. Une base sans la
+               fonction account_history laisse donc la saisie intacte. */
+            let histo = [];
+            if (compte) {
+                try { histo = await accountHistory(compte.id); }
+                catch { histo = []; }
+            }
+
             const ligne = await addSalesEvent(key, iso, compte ? compte.id : null);
             inflight--;
             if (iso !== day) { settle(); return; }   // la journée affichée a changé
@@ -610,6 +633,10 @@ function pushEvent(key, saisi) {
             if (compte && nom && compte.name !== nom) {
                 toast(`Rattaché à « ${compte.name} », déjà connu sous cette orthographe.`,
                       'success', 5000);
+            }
+            if (compte) {
+                const lignes = warnLines(key, histo);
+                if (lignes.length) showWarn(key, compte.name, lignes);
             }
         } catch (e) {
             inflight--;
@@ -654,6 +681,86 @@ function removeEvent(id) {
             toast(humanError(e), 'error', 6000);
         }
     });
+}
+
+/* --- Avertissement : ce client a déjà un antécédent -------------------------
+
+   Demande de Bruno : « il y a tant de jours ou tant de mois, tu avais déjà
+   envoyé une proposition pour tel client », pour éveiller la vigilance. Deux
+   décisions de conception en découlent.
+
+   1. ON AVERTIT, ON NE BLOQUE PAS. La ligne est enregistrée dans tous les cas.
+      Deux propositions chez le même client sont parfois parfaitement légitimes,
+      et une boîte de dialogue qui demande de confirmer une saisie exacte est le
+      plus sûr moyen de faire cesser la saisie.
+
+   2. L'HISTORIQUE EST LU AVANT L'INSERTION. account_history() ne renvoie pas
+      d'identifiant d'événement : la ligne qu'on vient de créer y serait
+      indiscernable d'un antécédent, et il faudrait la deviner en retirant « une
+      occurrence du même type, à la même date, à moi ». Lire d'abord coûte un
+      aller-retour de plus mais supprime le bricolage. L'affichage étant
+      optimiste, la lenteur ne se voit pas : la ligne est déjà à l'écran.
+   -------------------------------------------------------------------------- */
+
+/* Les libellés de METRICS sont au pluriel parce qu'ils titrent un compteur.
+   Dans une phrase il faut un singulier, et une forme qui évite l'accord :
+   « une proposition, il y a 2 mois » se lit quel que soit le genre. */
+const EVENT_ONE = {
+    first_meetings: 'un RDV1',
+    proposals_sent: 'une proposition',
+    no_go:          'un NO GO',
+    deals_dropped:  'une affaire abandonnée',
+    deals_lost:     'une affaire perdue'
+};
+
+/* Les trois sorties de pipeline. Un client déjà classé NO GO ou perdu mérite un
+   mot au moment où on lui envoie autre chose : c'est le seul antécédent, en
+   dehors du même type, qui peut changer une décision. Un RDV1 avant une
+   proposition est le cycle normal et n'a rien à signaler ; l'afficher ferait du
+   bruit, et du bruit finit par se lire comme rien.
+
+   Ce second motif est une proposition de ma part et non une demande de Bruno :
+   vider ce tableau le désactive, sans autre effet. */
+const WARN_EXITS = ['no_go', 'deals_lost', 'deals_dropped'];
+
+const whoOf = h => (h.is_mine ? 'vous' : (h.who || 'un collègue'));
+
+/**
+ * Phrases à afficher pour un ajout de type `key` chez un client dont voici
+ * l'historique, du plus récent au plus ancien. Tableau vide s'il n'y a rien à
+ * dire, ce qui est le cas le plus fréquent.
+ */
+function warnLines(key, histo) {
+    const out = [];
+    const dit = h => `${EVENT_ONE[h.kind] || h.kind}, ${agoLabel(h.activity_date)} `
+                   + `(le ${formatDMY(h.activity_date)}), par ${whoOf(h)}`;
+
+    const meme = histo.filter(h => h.kind === key);
+    if (meme.length) {
+        out.push(`Déjà chez ce client : ${dit(meme[0])}.`
+               + (meme.length > 1 ? ` ${meme.length} au total.` : ''));
+    }
+    const sorties = histo.filter(h => WARN_EXITS.includes(h.kind) && h.kind !== key);
+    if (sorties.length) out.push(`Également : ${dit(sorties[0])}.`);
+    return out;
+}
+
+function showWarn(key, nom, lignes) {
+    const box = document.getElementById(`warn-${key}`);
+    if (!box || !lignes.length) return;
+    box.innerHTML = `
+        <button class="event-warn-close" type="button" data-warn-close="${key}"
+                title="Masquer" aria-label="Masquer l'avertissement">×</button>
+        <div class="event-warn-title">${escapeHtml(nom)}</div>
+        <ul class="event-warn-list">${lignes.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`;
+    box.hidden = false;
+}
+
+function hideWarn(key) {
+    const box = document.getElementById(`warn-${key}`);
+    if (!box) return;
+    box.hidden = true;
+    box.innerHTML = '';
 }
 
 /* --- Autocomplétion ---------------------------------------------------------
@@ -895,6 +1002,10 @@ async function load(iso) {
         row = current || { ...EMPTY_DAY, activity_date: iso, notes: '' };
         prevRow = previous;
         events = evts;
+        /* Les avertissements portent sur un ajout précis, pas sur la journée :
+           les laisser en place après un changement de date les ferait lire comme
+           s'ils concernaient le jour affiché. */
+        SALES_EVENT_KINDS.forEach(hideWarn);
         paint();
         paintEventLists();
         status(current ? '✓ À jour' : 'Aucune saisie pour ce jour', current ? 'saved' : '');

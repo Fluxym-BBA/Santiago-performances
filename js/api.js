@@ -400,6 +400,37 @@ export function relativeLabel(iso) {
     return `Dans ${-n} jours`;
 }
 
+/** Date complète en chiffres : 12/06/2026. formatShort() omet l'année, ce qui
+ *  suffit pour titrer la journée en cours mais pas pour situer un antécédent. */
+export function formatDMY(iso) {
+    return fromISO(iso).toLocaleDateString('fr-FR', {
+        day: '2-digit', month: '2-digit', year: 'numeric'
+    });
+}
+
+/**
+ * Ancienneté d'une date passée, en toutes lettres et en minuscules, destinée à
+ * être insérée dans une phrase : « une proposition, il y a 2 mois ».
+ *
+ * relativeLabel() ne convient pas ici : elle répondrait « Il y a 427 jours »,
+ * ce qui est exact et illisible. Au-delà d'un an la précision n'a plus de
+ * valeur : le message à faire passer est « c'est vieux », et la date exacte est
+ * de toute façon affichée à côté.
+ *
+ * Le diviseur 30.44 est la durée moyenne d'un mois grégorien. Un mois calendaire
+ * exact demanderait de connaître le mois de départ pour un gain nul à l'écran.
+ */
+export function agoLabel(iso) {
+    const n = diffDays(todayISO(), iso);
+    if (n <= 0) return "aujourd'hui";
+    if (n === 1) return 'hier';
+    if (n < 30) return `il y a ${n} jours`;
+    if (n < 60) return 'il y a un mois';
+    if (n < 365) return `il y a ${Math.round(n / 30.44)} mois`;
+    const ans = Math.floor(n / 365.25);
+    return ans <= 1 ? "il y a plus d'un an" : `il y a plus de ${ans} ans`;
+}
+
 /* --------------------------------------------------------------------------
    Authentification
    -------------------------------------------------------------------------- */
