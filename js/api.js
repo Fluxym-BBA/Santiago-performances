@@ -25,29 +25,48 @@ export const supabase = createClient(
    réutilisée par la saisie, le dashboard, les graphiques et le tableau.
    -------------------------------------------------------------------------- */
 
+/* Le champ jobs dit à quel métier appartient un compteur, et rien d'autre. Il
+   ne remplace ni le niveau d'accès ni la RLS : la base reste la seule barrière,
+   jobs ne décide que de ce qu'un écran montre et propose de saisir.
+     'bdr'   : prospection
+     'sales' : cycle de vente
+   Les deux valeurs pour un compteur partagé. Un compte qui a les deux métiers
+   voit l'union, dans l'ordre de déclaration ci-dessous. */
 export const METRICS = [
     {
         key: 'companies_created', target: 'companies_target', group: 'crm',
+        jobs: ['bdr'],
         label: 'Entreprises créées', short: 'Entreprises',
         hint: 'Nouveaux comptes ajoutés au CRM', color: '#6366f1'
     },
     {
         key: 'contacts_created', target: 'contacts_target', group: 'crm',
+        jobs: ['bdr', 'sales'],
         label: 'Contacts créés', short: 'Contacts',
         hint: 'Nouvelles fiches contact renseignées', color: '#8b5cf6'
     },
     {
+        /* Les trois compteurs d'appels vont ensemble, pour le commercial aussi.
+           La base impose calls_engaged <= calls_connected <= calls_made par
+           daily_activity_engaged_coherent et daily_activity_calls_coherent : ne
+           montrer que « appels avec échange » à un commercial ferait refuser sa
+           toute première saisie. Le prix de cette règle est deux champs de plus
+           sur sa page, et c'est le bon prix : remplir les deux cases amont à sa
+           place fabriquerait des chiffres que personne n'a saisis. */
         key: 'calls_made', target: 'calls_made_target', group: 'calls',
+        jobs: ['bdr', 'sales'],
         label: "Nombre d'appels", short: 'Appels',
         hint: 'Tous les appels passés, aboutis ou non', color: '#00A7E1'
     },
     {
         key: 'calls_connected', target: 'calls_connected_target', group: 'calls',
+        jobs: ['bdr', 'sales'],
         label: 'Appels aboutis', short: 'Aboutis',
         hint: 'Interlocuteur réellement joint', color: '#0ea5e9'
     },
     {
         key: 'calls_engaged', target: 'engaged_target', group: 'calls',
+        jobs: ['bdr', 'sales'],
         label: 'Appels avec échange', short: 'Échanges',
         hint: 'Conversation réelle, au-delà des 30 premières secondes', color: '#0284c7',
         /* Première journée mesurable. Avant cette date la colonne vaut NULL en
@@ -59,14 +78,68 @@ export const METRICS = [
         since: '2026-08-25'
     },
     {
+        /* Rendez-vous OBTENU par la prospection, à ne pas confondre avec le
+           RDV1 plus bas, qui est le rendez-vous TENU par le commercial. Deux
+           personnes, deux événements, deux compteurs : les additionner
+           compterait deux fois la même rencontre. */
         key: 'meetings_booked', target: 'meetings_target', group: 'calls',
+        jobs: ['bdr'],
         label: 'Rendez-vous obtenus', short: 'RDV',
         hint: 'Le seul chiffre qui compte vraiment', color: '#10b981'
     },
     {
+        /* Réservé au BDR faute de demande, pas par principe : un commercial en
+           envoie aussi. Ajouter 'sales' ici suffirait, la colonne existe. */
         key: 'emails_sent', target: 'emails_target', group: 'emails',
+        jobs: ['bdr'],
         label: 'E-mails envoyés', short: 'E-mails',
         hint: 'E-mails de prospection sortants', color: '#f59e0b'
+    },
+
+    /* ---- Cycle de vente, métier commercial -------------------------------
+       Aucune contrainte croisée entre ces cinq compteurs, volontairement : une
+       proposition peut suivre un RDV1 tenu la semaine précédente, une affaire
+       perdue peut n'avoir jamais eu de RDV1 dans l'outil. Les enchaîner sur une
+       même journée refuserait des journées parfaitement réelles. C'est ce qui
+       distingue ce groupe de la chaîne des appels, où les trois compteurs
+       décrivent le même appel le même jour. */
+    {
+        key: 'first_meetings', target: 'first_meetings_target', group: 'pipeline',
+        jobs: ['sales'],
+        label: 'RDV1', short: 'RDV1',
+        hint: 'Premier rendez-vous avec un prospect', color: '#10b981'
+    },
+    {
+        key: 'proposals_sent', target: 'proposals_target', group: 'pipeline',
+        jobs: ['sales'],
+        label: 'Propositions envoyées', short: 'Propositions',
+        hint: "Réponse à un appel d'offres, ou chiffrage d'un besoin identifié",
+        color: '#14b8a6'
+    },
+
+    /* ---- Sorties de pipeline ---------------------------------------------
+       target: null n'est pas un oubli. On ne se fixe pas d'objectif journalier
+       de NO GO : donc pas de jauge, et pas de colonne dans daily_targets. Leur
+       poids est à zéro dans le barème, et perdre une affaire ne peut donc pas
+       faire monter un score. Elles se comptent, elles ne se notent pas. */
+    {
+        key: 'no_go', target: null, group: 'outcome',
+        jobs: ['sales'],
+        label: 'NO GO', short: 'NO GO',
+        hint: 'Prospect ou client que nous décidons de ne pas poursuivre',
+        color: '#94a3b8'
+    },
+    {
+        key: 'deals_dropped', target: null, group: 'outcome',
+        jobs: ['sales'],
+        label: 'Close / Abandonné', short: 'Abandonnées',
+        hint: "Affaire avortée : il n'existe plus d'opportunité", color: '#64748b'
+    },
+    {
+        key: 'deals_lost', target: null, group: 'outcome',
+        jobs: ['sales'],
+        label: 'Affaires perdues', short: 'Perdues',
+        hint: "Allée jusqu'au bout, gagnée par un concurrent", color: '#ef4444'
     }
 ];
 
@@ -117,7 +190,18 @@ export const SCORE_WEIGHTS = [
     { key: 'meetings_booked', w: 25, icon: '🤝', label: 'Rendez-vous', plural: 'rendez-vous' },
     { key: 'emails_sent', w: 1, icon: '✉️', label: 'E-mail envoyé', plural: 'e-mails envoyés' },
     { key: 'companies_created', w: 2, icon: '🏢', label: 'Entreprise créée', plural: 'entreprises créées' },
-    { key: 'contacts_created', w: 2, icon: '👤', label: 'Contact créé', plural: 'contacts créés' }
+    { key: 'contacts_created', w: 2, icon: '👤', label: 'Contact créé', plural: 'contacts créés' },
+    /* Le RDV1 vaut autant que le rendez-vous obtenu : pour un commercial, c'est
+       le même « seul chiffre qui compte vraiment ». La proposition vaut moins
+       parce qu'elle suit un RDV1 déjà valorisé. */
+    { key: 'first_meetings', w: 25, icon: '🎯', label: 'RDV1', plural: 'RDV1' },
+    { key: 'proposals_sent', w: 15, icon: '📄', label: 'Proposition envoyée', plural: 'propositions envoyées' },
+    /* Les trois sorties de pipeline à zéro. Perdre une affaire ne rapporte pas
+       de points : comptées et suivies, jamais valorisées. Le poids reste
+       réglable depuis l'écran Barème, c'est un défaut et non une règle. */
+    { key: 'no_go', w: 0, icon: '🚫', label: 'NO GO', plural: 'NO GO' },
+    { key: 'deals_dropped', w: 0, icon: '📉', label: 'Affaire abandonnée', plural: 'affaires abandonnées' },
+    { key: 'deals_lost', w: 0, icon: '❌', label: 'Affaire perdue', plural: 'affaires perdues' }
 ];
 
 /** Score d'une ligne (ou d'un agrégat) à partir des pondérations ci-dessus. */
@@ -296,7 +380,7 @@ export async function getSession() {
  */
 export function homePageFor(p) {
     if (!p) return './login.html';
-    if (p.is_bdr) return './index.html';
+    if (isContributor(p)) return './index.html';
     if (canReadAll(p)) return './team.html';
     // Un compte qui ne prospecte pas et ne voit pas l'équipe n'a pas de page
     // utile. On l'envoie quand même vers la vue d'équipe, qui sait afficher un
@@ -348,7 +432,10 @@ export async function requireAuth({ needs = null } = {}) {
     // canReadAll et non is_admin : un responsable en lecture seule doit pouvoir
     // ouvrir le tableau de bord d'un commercial depuis la vue d'équipe.
     const asVisitor = canReadAll(me) && isViewingOther();
-    const wrong = (needs === 'bdr' && !me.is_bdr && !asVisitor)
+    // needs: 'bdr' veut dire « cette page sert à saisir son activité », donc BDR
+    // comme commercial. Le mot est resté pour ne pas retoucher chaque page au
+    // moment où le métier commercial est arrivé.
+    const wrong = (needs === 'bdr' && !isContributor(me) && !asVisitor)
                || (needs === 'admin' && !canManageAccounts(me))
                || (needs === 'team' && !canReadAll(me));
     if (wrong) {
@@ -405,6 +492,10 @@ function normalize(p) {
         ...p,
         is_admin: !!isAdmin,
         is_bdr: p.is_bdr ?? (p.role ? p.role !== 'admin' : true),
+        // Repli à false : avant la migration v9 la colonne n'existe pas et
+        // personne n'est commercial. L'application se comporte alors exactement
+        // comme avant, ce qui rend l'ordre de déploiement indifférent ici.
+        is_sales: p.is_sales ?? false,
         // Repli volontaire, pour la même raison que ci-dessus : si la migration
         // des niveaux n'a pas encore été exécutée, le niveau est déduit de
         // l'ancienne case et l'application se comporte à l'identique.
@@ -486,10 +577,80 @@ export function canWriteAny(p) {
 /** Rôle écrit en clair, pour que personne n'ait à deviner ce qu'il est ici. */
 export function roleLabel(p) {
     if (!p) return '';
+    const job = jobLabel(p);
     if (levelRank(p) >= 2) {
-        return p.is_bdr ? `${levelLabel(p)} et BDR` : levelLabel(p);
+        if (!job) return levelLabel(p);
+        // « Responsable et BDR », mais « Responsable et commercial » : le sigle
+        // garde ses majuscules, le nom de métier non.
+        return `${levelLabel(p)} et ${job === 'Commercial' ? 'commercial' : job}`;
     }
-    return p.is_bdr ? 'BDR' : 'Observateur';
+    return job || 'Observateur';
+}
+
+/* --------------------------------------------------------------------------
+   Les métiers
+
+   Troisième axe, indépendant des deux autres. Le niveau dit ce qu'un compte a
+   le droit de voir, le métier dit quels compteurs il tient. Aucun des deux ne
+   se déduit de l'autre : un responsable peut prospecter, un membre peut être
+   commercial.
+
+   Deux booléens plutôt qu'une colonne unique : is_bdr existe depuis la v2 et
+   est lu par la base comme par la navigation. Une colonne job en ferait une
+   valeur dérivée, donc deux vérités pour la même information.
+   -------------------------------------------------------------------------- */
+
+/** Métiers d'un profil : ['bdr'], ['sales'], les deux, ou rien. */
+export function jobsOf(p) {
+    const j = [];
+    if (p?.is_bdr) j.push('bdr');
+    if (p?.is_sales) j.push('sales');
+    return j;
+}
+
+/**
+ * Vrai si ce compte saisit une activité, donc a une page de saisie, un score et
+ * une place dans les classements. À utiliser partout où is_bdr servait à
+ * répondre à cette question : ne pas le faire laisserait les commerciaux sans
+ * page de saisie et absents des classements.
+ */
+export const isContributor = p => !!p && (!!p.is_bdr || !!p.is_sales);
+
+/** Libellé du métier, chaîne vide si le compte n'en a aucun. */
+export function jobLabel(p) {
+    const j = jobsOf(p);
+    if (j.length === 2) return 'BDR et commercial';
+    if (j[0] === 'bdr') return 'BDR';
+    if (j[0] === 'sales') return 'Commercial';
+    return '';
+}
+
+/**
+ * Métriques d'un profil. Un BDR ne voit pas le cycle de vente, un commercial ne
+ * voit pas la création d'entreprises. Les deux métiers donnent l'union, dans
+ * l'ordre de déclaration de METRICS.
+ *
+ * Repli sur toutes les métriques si le compte n'a aucun métier : c'est le cas
+ * d'un administrateur pur qui consulte quelqu'un, et un écran vide serait plus
+ * déroutant qu'un écran complet. La base refuse de toute façon ce qu'il n'a pas
+ * le droit d'écrire.
+ */
+export function metricsFor(p) {
+    const j = jobsOf(p);
+    if (!j.length) return METRICS.slice();
+    return METRICS.filter(m => m.jobs.some(x => j.includes(x)));
+}
+
+/**
+ * Union des métriques de plusieurs profils. Sert aux écrans d'équipe, où deux
+ * métiers cohabitent dans un même tableau : une colonne s'affiche dès qu'une
+ * personne affichée la tient, et disparaît sinon. Une équipe 100 % BDR voit
+ * donc exactement les mêmes colonnes qu'avant.
+ */
+export function metricsForAny(list) {
+    const j = new Set((list || []).flatMap(jobsOf));
+    if (!j.size) return METRICS.slice();
+    return METRICS.filter(m => m.jobs.some(x => j.has(x)));
 }
 
 /**
@@ -512,7 +673,7 @@ export async function loadProfile(session) {
         user_id: session.user.id,
         email: session.user.email,
         display_name: (session.user.email || '').split('@')[0],
-        is_admin: false, is_bdr: true, is_demo: false, is_active: true
+        is_admin: false, is_bdr: true, is_sales: false, is_demo: false, is_active: true
     });
 
     _viewed = _me;
@@ -542,7 +703,11 @@ export function myProfile() { return _me; }
 export function isAdmin() { return !!_me && _me.is_admin; }
 /** Mon niveau, en rang. Raccourci de lecture pour les pages. */
 export function myRank() { return levelRank(_me); }
+/** Suis-je BDR ? Répond au métier, pas à la question « ai-je une saisie » :
+    pour celle-là, utiliser amContributor(). */
 export function isBdr() { return !!_me && _me.is_bdr; }
+/** Vrai si MON compte saisit une activité, quel que soit son métier. */
+export function amContributor() { return isContributor(_me); }
 
 /** Profil dont on regarde les données. Jamais nul après loadProfile(). */
 export function viewedProfile() { return _viewed || _me; }
@@ -589,7 +754,8 @@ export async function adminUpdateProfile(userId, patch) {
         p_is_admin: patch.is_admin ?? null,
         p_is_bdr: patch.is_bdr ?? null,
         p_is_demo: patch.is_demo ?? null,
-        p_is_active: patch.is_active ?? null
+        p_is_active: patch.is_active ?? null,
+        p_is_sales: patch.is_sales ?? null
     });
     if (error) throw error;
     return normalize(Array.isArray(data) ? data[0] : data);
@@ -611,7 +777,8 @@ export async function adminSetLevel(userId, patch = {}) {
         p_access_level: patch.access_level ?? null,
         p_is_bdr: patch.is_bdr ?? null,
         p_is_demo: patch.is_demo ?? null,
-        p_is_active: patch.is_active ?? null
+        p_is_active: patch.is_active ?? null,
+        p_is_sales: patch.is_sales ?? null
     });
     if (error) throw error;
     return normalize(Array.isArray(data) ? data[0] : data);
@@ -890,9 +1057,12 @@ export async function fetchTeamRange(fromIso, toIso,
         .gte('activity_date', fromIso)
         .lte('activity_date', toIso)
         .order('activity_date', { ascending: true });
-    // Un administrateur pur ne prospecte pas : le faire figurer dans un
-    // classement avec un score de zéro n'aurait aucun sens.
-    if (onlyBdr) q = q.eq('is_bdr', true);
+    // Un administrateur pur ne saisit rien : le faire figurer dans un classement
+    // avec un score de zéro n'aurait aucun sens. Le nom onlyBdr est resté, mais
+    // l'option retient désormais tous ceux qui saisissent, BDR comme
+    // commerciaux : sans ce or, un commercial serait purement absent de la vue
+    // d'équipe et des classements.
+    if (onlyBdr) q = q.or('is_bdr.eq.true,is_sales.eq.true');
     if (!includeDemo) q = q.eq('is_demo', false);
     if (!includeInactive) q = q.eq('is_active', true);
     const { data, error } = await q;
@@ -906,7 +1076,11 @@ export async function fetchTeamRange(fromIso, toIso,
 
 export const DEFAULT_TARGETS = {
     companies_target: 5, contacts_target: 10, calls_made_target: 40,
-    calls_connected_target: 10, engaged_target: 8, meetings_target: 2, emails_target: 30
+    calls_connected_target: 10, engaged_target: 8, meetings_target: 2, emails_target: 30,
+    /* Objectifs commerciaux posés sans une seule journée de donnée réelle : des
+       points de départ à recalibrer après quelques semaines, pas des repères.
+       Ce sont aussi les défauts des colonnes correspondantes en base. */
+    first_meetings_target: 1, proposals_target: 1
 };
 
 export async function fetchTargets() {

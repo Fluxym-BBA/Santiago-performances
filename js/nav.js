@@ -18,8 +18,9 @@
    ========================================================================== */
 
 import {
-    signOut, isAdmin, isBdr, myProfile, viewedProfile, isViewingOther, roleLabel,
-    levelLabel, canReadAll, canManageAccounts, canWriteAny
+    signOut, isAdmin, myProfile, viewedProfile, isViewingOther, roleLabel,
+    levelLabel, canReadAll, canManageAccounts, canWriteAny,
+    isContributor, amContributor, jobLabel
 } from './api.js';
 
 /* --------------------------------------------------------------------------
@@ -33,12 +34,14 @@ const SECTIONS = [
     {
         href: './index.html', match: ['', 'index.html'],
         label: 'Ma journée', short: 'Journée', mini: 'Journée', icon: '✍️',
-        when: p => p.is_bdr
+        // isContributor et non is_bdr : sans quoi un commercial n'aurait aucune
+        // page de saisie, donc aucun usage de l'outil.
+        when: p => isContributor(p)
     },
     {
         href: './dashboard.html', match: ['dashboard.html'],
         label: 'Mes performances', short: 'Performances', mini: 'Perfs', icon: '📊',
-        when: p => p.is_bdr
+        when: p => isContributor(p)
     },
     {
         href: './team.html', match: ['team.html'],
@@ -62,8 +65,8 @@ const MENU = [
     // refuserait de toute façon le formulaire, et la base l'écriture.
     { href: './bareme.html', label: 'Barème du score', icon: '⚖️', when: p => canWriteAny(p) },
     { href: './team.html', label: 'Vue d\'équipe', icon: '👥', when: p => canReadAll(p), onlyCollapsed: true },
-    { href: './dashboard.html', label: 'Mes performances', icon: '📊', when: p => p.is_bdr, onlyCollapsed: true },
-    { href: './index.html', label: 'Ma journée', icon: '✍️', when: p => p.is_bdr, onlyCollapsed: true }
+    { href: './dashboard.html', label: 'Mes performances', icon: '📊', when: p => isContributor(p), onlyCollapsed: true },
+    { href: './index.html', label: 'Ma journée', icon: '✍️', when: p => isContributor(p), onlyCollapsed: true }
 ];
 
 const here = () => location.pathname.split('/').pop();
@@ -146,8 +149,8 @@ export function renderNav() {
                         <span>${me.email || ''}</span>
                         <span class="menu-badges">
                             ${canReadAll(me) ? `<b class="badge badge--admin">${levelLabel(me)}</b>` : ''}
-                            ${me.is_bdr ? '<b class="badge badge--bdr">BDR</b>' : ''}
-                            ${!me.is_admin && !me.is_bdr ? '<b class="badge">Observateur</b>' : ''}
+                            ${jobLabel(me) ? `<b class="badge badge--bdr">${jobLabel(me)}</b>` : ''}
+                            ${!me.is_admin && !isContributor(me) ? '<b class="badge">Observateur</b>' : ''}
                             ${me.is_demo ? '<b class="badge badge--demo">Compte de démonstration</b>' : ''}
                         </span>
                     </div>
@@ -240,7 +243,7 @@ function wireMenu() {
             panel.classList.add('flash');
             setTimeout(() => panel.classList.remove('flash'), 1600);
         } else {
-            location.href = isBdr() ? './dashboard.html#score' : './team.html#score';
+            location.href = amContributor() ? './dashboard.html#score' : './team.html#score';
         }
     });
 }

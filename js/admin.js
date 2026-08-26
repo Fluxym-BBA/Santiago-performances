@@ -24,7 +24,7 @@ import {
     adminWipeActivity, fetchTeamRange, humanError, todayISO, addDaysISO, formatLong,
     adminFnStatus, adminAuthInfo, adminCreateAccount, adminSetPassword,
     adminDeleteAccount, adminDeletePreview, linkFor,
-    LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank
+    LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank, isContributor
 } from './api.js';
 import { renderNav } from './nav.js';
 import { escapeHtml, fmtInt, toast, hideVeil } from './ui.js';
@@ -194,7 +194,11 @@ function render() {
                     </select>
                     <button class="toggle${p.is_bdr ? ' toggle--on' : ''}" type="button"
                             data-bdr="${p.user_id}" aria-pressed="${p.is_bdr}"${lockAttr}>
-                        ${p.is_bdr ? 'Prospecte' : 'Ne prospecte pas'}
+                        ${p.is_bdr ? 'BDR' : 'Pas BDR'}
+                    </button>
+                    <button class="toggle${p.is_sales ? ' toggle--on' : ''}" type="button"
+                            data-sales="${p.user_id}" aria-pressed="${p.is_sales}"${lockAttr}>
+                        ${p.is_sales ? 'Commercial' : 'Pas commercial'}
                     </button>
                 </div>
                 ${note ? `<span class="cell-note">${note}</span>` : ''}
@@ -223,7 +227,7 @@ function render() {
             </td>
 
             <td data-th="Saisie">
-                ${!s2.days ? `<span class="td-muted">${p.is_bdr ? 'aucune' : 'sans objet'}</span>`
+                ${!s2.days ? `<span class="td-muted">${isContributor(p) ? 'aucune' : 'sans objet'}</span>`
                   : `<div class="stack-2">
                         <b>${fmtInt(s2.days)} jour${s2.days > 1 ? 's' : ''}</b>
                         <span class="td-muted">dernière le ${formatLong(s2.last).replace(/^\w+\s/, '')}</span>
@@ -232,7 +236,7 @@ function render() {
 
             <td data-th="Actions">
                 <div class="act-row">
-                    ${p.is_bdr ? `<a class="chip chip--sm" href="${linkFor('./dashboard.html', p.user_id)}"
+                    ${isContributor(p) ? `<a class="chip chip--sm" href="${linkFor('./dashboard.html', p.user_id)}"
                             title="Voir la fiche de ${who}, telle qu'elle la voit">Fiche</a>` : ''}
                     ${fn.ok ? `<button class="chip chip--sm" type="button"
                             data-pass="${p.user_id}"${lockAttr}>Mot de passe</button>` : ''}
@@ -240,7 +244,7 @@ function render() {
                             data-wipe="${p.user_id}"${lockAttr}>Effacer données</button>` : ''}
                     ${fn.ok && !isMe ? `<button class="chip chip--sm chip--danger" type="button"
                             data-del="${p.user_id}"${lockAttr}>Supprimer</button>` : ''}
-                    ${!fn.ok && !s2.days && !p.is_bdr ? '<span class="td-muted">—</span>' : ''}
+                    ${!fn.ok && !s2.days && !isContributor(p) ? '<span class="td-muted">—</span>' : ''}
                 </div>
             </td>
         </tr>`;
@@ -319,23 +323,39 @@ function wireRows() {
         });
     });
 
-    // Les deux axes restent indépendants : le niveau dit ce que le compte a le
-    // droit de voir et de faire, « Prospecte » dit s'il saisit son activité.
-    // Un responsable peut prospecter, un administrateur peut ne pas prospecter.
-    body.querySelectorAll('[data-bdr]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const id = btn.dataset.bdr;
-            const p = profiles.find(x => x.user_id === id);
-            if (p.is_bdr && (stats.get(id)?.days || 0) > 0 && !confirm(
-                `${nameOf(id)} a déjà saisi ${stats.get(id).days} journée(s).\n\n`
-                + `En le retirant des BDR, ses données restent en base mais il `
-                + `disparaît des classements et perd l'accès à la saisie.\n\nContinuer ?`)) return;
-            apply(id, { is_bdr: !p.is_bdr },
-                !p.is_bdr
-                    ? `${nameOf(id)} saisit désormais son activité`
-                    : `${nameOf(id)} ne saisit plus d'activité et sort des classements`);
+    /* Trois axes indépendants, et ils le restent : le niveau dit ce que le
+       compte a le droit de voir, les deux métiers disent quels compteurs il
+       tient. Un responsable peut être BDR, un administrateur ni l'un ni l'autre,
+       et un manager qui prospecte et vend coche les deux.
+
+       Le seul point délicat est le retrait : décocher un métier ne fait perdre
+       la saisie que si l'autre est déjà décoché. L'avertissement en tient
+       compte, sinon il annoncerait une perte d'accès qui n'a pas lieu. */
+    const wireJob = (attr, champ, nomMetier) => {
+        body.querySelectorAll(`[data-${attr}]`).forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset[attr];
+                const p = profiles.find(x => x.user_id === id);
+                const avant = !!p[champ];
+                const apresContributeur = isContributor({ ...p, [champ]: !avant });
+                const jours = stats.get(id)?.days || 0;
+
+                if (avant && !apresContributeur && jours > 0 && !confirm(
+                    `${nameOf(id)} a déjà saisi ${jours} journée(s).\n\n`
+                    + `En retirant ce métier, ses données restent en base mais il `
+                    + `disparaît des classements et perd l'accès à la saisie.\n\nContinuer ?`)) return;
+
+                apply(id, { [champ]: !avant },
+                    !avant
+                        ? `${nameOf(id)} est désormais ${nomMetier}`
+                        : apresContributeur
+                            ? `${nameOf(id)} n'est plus ${nomMetier}`
+                            : `${nameOf(id)} ne saisit plus d'activité et sort des classements`);
+            });
         });
-    });
+    };
+    wireJob('bdr', 'is_bdr', 'BDR');
+    wireJob('sales', 'is_sales', 'commercial');
 
     body.querySelectorAll('[data-demo]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -546,6 +566,7 @@ async function copyCred() {
 function roleSentence() {
     const level = document.getElementById('f-level').value || 'member';
     const bdr = document.getElementById('f-bdr').checked;
+    const sales = document.getElementById('f-sales').checked;
     const demo = document.getElementById('f-demo').checked;
 
     const voit = level === 'member'
@@ -556,8 +577,13 @@ function roleSentence() {
                 ? 'Voit toute l\'équipe et gère les comptes. Ne peut pas corriger les chiffres de quelqu\'un d\'autre : seul le propriétaire le peut.'
                 : 'Tout, y compris corriger les chiffres des autres.';
 
-    const fait = bdr
-        ? ' Saisit son activité, a ses performances et apparaît dans les classements.'
+    const metier = bdr && sales ? ' Tient les compteurs de prospection et de cycle de vente.'
+        : bdr ? ' Tient les compteurs de prospection.'
+        : sales ? ' Tient les compteurs de cycle de vente : RDV1, propositions, sorties de pipeline.'
+        : '';
+
+    const fait = (bdr || sales)
+        ? metier + ' Saisit son activité, a ses performances et apparaît dans les classements.'
         : ' Ne saisit rien : ni page de saisie, ni score, absent des classements.';
 
     let s = voit + fait;
@@ -583,7 +609,7 @@ function wireForm() {
                 + `${l.label}</option>`).join('');
 
     const refreshNote = () => { note.textContent = roleSentence(); };
-    ['f-level', 'f-bdr', 'f-demo'].forEach(id =>
+    ['f-level', 'f-bdr', 'f-sales', 'f-demo'].forEach(id =>
         document.getElementById(id).addEventListener('change', refreshNote));
     refreshNote();
 
@@ -636,12 +662,21 @@ function wireForm() {
 
             // Le compte existe : à partir d'ici on n'échoue plus sans afficher
             // le mot de passe, qui n'est lisible qu'une fois.
-            if (wanted === 'manager' && r.user_id) {
+            /* Le niveau responsable et le métier commercial se posent après
+               coup, par le même chemin : la fonction Edge de création ne connaît
+               ni l'un ni l'autre, et la retoucher imposerait un redéploiement de
+               fonction à chaque évolution de ce genre. Un appel de plus ici
+               coûte moins cher. */
+            const wantedSales = document.getElementById('f-sales').checked;
+            if (r.user_id && (wanted === 'manager' || wantedSales)) {
+                const patch = {};
+                if (wanted === 'manager') patch.access_level = 'manager';
+                if (wantedSales) patch.is_sales = true;
                 try {
-                    await adminSetLevel(r.user_id, { access_level: 'manager' });
+                    await adminSetLevel(r.user_id, patch);
                 } catch (e) {
-                    toast(`Compte créé, mais le niveau responsable n'a pas pu être `
-                        + `appliqué : ${humanError(e)}. Réglez-le dans le tableau.`, 'error');
+                    toast(`Compte créé, mais son rôle n'a pas pu être appliqué `
+                        + `entièrement : ${humanError(e)}. Réglez-le dans le tableau.`, 'error');
                 }
             }
             close();

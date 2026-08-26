@@ -51,8 +51,10 @@
         <!-- CARTES DE SAISIE -->
         <div class="cards-grid">
 
-            <!-- CARTE 1 : ENRICHISSEMENT DU CRM -->
-            <section class="card">
+            <!-- CARTE 1 : ENRICHISSEMENT DU CRM (BDR)
+                 data-card : buildCards() masque toute carte dont aucun compteur
+                 n'appartient au métier de la personne affichée. -->
+            <section class="card" data-card="crm">
                 <div class="card-header">
                     <div class="card-icon card-icon--purple">🗂️</div>
                     <div>
@@ -64,8 +66,8 @@
                 <div class="card-body" data-metrics="crm"></div>
             </section>
 
-            <!-- CARTE 2 : PROSPECTION -->
-            <section class="card">
+            <!-- CARTE 2 : PROSPECTION (BDR et commercial) -->
+            <section class="card" data-card="prospection">
                 <div class="card-header">
                     <div class="card-icon card-icon--cyan">🎯</div>
                     <div>
@@ -75,14 +77,47 @@
                     <div class="card-total"><span data-total="prospection">0</span><small>actions</small></div>
                 </div>
                 <div class="card-body">
-                    <div class="subcard-title">📞 Appels téléphoniques</div>
+                    <!-- data-sub-for : le sous-titre disparaît avec son groupe.
+                         Structure volontairement laissée plate, sans conteneur
+                         supplémentaire, pour ne rien changer à la mise en page
+                         existante. -->
+                    <div class="subcard-title" data-sub-for="calls">📞 Appels téléphoniques</div>
                     <div data-metrics="calls"></div>
-                    <div class="subcard-title">✉️ E-mails de prospection</div>
+                    <div class="subcard-title" data-sub-for="emails">✉️ E-mails de prospection</div>
                     <div data-metrics="emails"></div>
                 </div>
             </section>
 
-            <!-- CARTE 3 : RÉSULTAT DU JOUR -->
+            <!-- CARTE 3 : CYCLE DE VENTE (commercial) -->
+            <section class="card" data-card="pipeline">
+                <div class="card-header">
+                    <div class="card-icon card-icon--success">🤝</div>
+                    <div>
+                        <div class="card-title">Cycle de vente</div>
+                        <div class="card-subtitle">Ce que j'ai fait avancer aujourd'hui</div>
+                    </div>
+                    <div class="card-total"><span data-total="pipeline">0</span><small>actions</small></div>
+                </div>
+                <div class="card-body" data-metrics="pipeline"></div>
+            </section>
+
+            <!-- CARTE 4 : SORTIES DE PIPELINE (commercial)
+                 Séparée du cycle de vente à dessein. Ces trois compteurs valent
+                 zéro point, et les mélanger avec le RDV1 et les propositions
+                 laisserait croire qu'on note quelqu'un sur ses échecs. -->
+            <section class="card" data-card="outcome">
+                <div class="card-header">
+                    <div class="card-icon card-icon--purple">📉</div>
+                    <div>
+                        <div class="card-title">Sorties de pipeline</div>
+                        <div class="card-subtitle">Aucun point : ces compteurs servent à comprendre le pipeline, pas à noter la personne</div>
+                    </div>
+                    <div class="card-total"><span data-total="outcome">0</span><small>sorties</small></div>
+                </div>
+                <div class="card-body" data-metrics="outcome"></div>
+            </section>
+
+            <!-- CARTE 5 : RÉSULTAT DU JOUR -->
             <section class="card">
                 <div class="card-header">
                     <div class="card-icon card-icon--success">⚡</div>

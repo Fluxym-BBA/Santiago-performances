@@ -17,7 +17,8 @@ import {
     fetchTeamRange, todayISO, addDaysISO, diffDays, minISO, maxISO,
     formatLong, formatShort, periodLength,
     startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter,
-    periodLabel, periodLabelShort, humanError, METRICS, SCORE_WEIGHTS
+    periodLabel, periodLabelShort, humanError, METRICS, SCORE_WEIGHTS,
+    isContributor, metricsForAny, jobLabel
 } from './api.js';
 import {
     num, score, isActive, agg, valOf, bucketize, autoGran, granWord, rowsForRange
@@ -192,10 +193,11 @@ async function load() {
     // sont conservés avec un score nul : un BDR qui n'a rien saisi est une
     // information, le faire disparaître du classement serait trompeur.
     const map = new Map();
-    // Seuls les commerciaux entrent dans un classement : un administrateur pur
-    // ne prospecte pas, l'y faire figurer avec un score de zéro n'a aucun sens.
+    // Seuls ceux qui saisissent entrent dans un classement : un administrateur
+    // pur ne saisit rien, l'y faire figurer avec un score de zéro n'a aucun sens.
+    // isContributor et non is_bdr, sans quoi les commerciaux seraient absents.
     allProfiles
-        .filter(p => p.is_bdr
+        .filter(p => isContributor(p)
             && (state.demo || !p.is_demo)
             && (state.inactive || p.is_active))
         .forEach(p => map.set(p.user_id, { profile: p, byDate: new Map() }));
@@ -211,7 +213,7 @@ async function load() {
         map.set(r.user_id, {
             profile: {
                 user_id: r.user_id, display_name: r.display_name, email: r.email,
-                is_admin: r.is_admin, is_bdr: r.is_bdr,
+                is_admin: r.is_admin, is_bdr: r.is_bdr, is_sales: r.is_sales,
                 is_demo: r.is_demo, is_active: r.is_active
             },
             byDate: new Map()
@@ -718,14 +720,18 @@ function drawDuelCompare(host, A, B, ctx) {
     const fV = v => (dec ? fmtDec(v) : fmtInt(v));
 
     compareChart(host, {
-        rows: METRICS.map(m => ({
+        // Union des métiers des deux personnes comparées : comparer un BDR et un
+        // commercial affiche les compteurs des deux, avec des zéros là où le
+        // métier ne s'applique pas. Deux BDR voient exactement les mêmes lignes
+        // qu'avant.
+        rows: metricsForAny([A.profile, B.profile]).map(m => ({
             label: m.short, colorA: A_MAIN, colorB: B_MAIN,
             a: valOf(sA.a, m.key, state.mode), b: valOf(sB.a, m.key, state.mode)
         })),
         labelA: nameOf(A), labelB: nameOf(B),
         fmt: fV,
         tip: i => {
-            const m = METRICS[i];
+            const m = metricsForAny([A.profile, B.profile])[i];
             const w = SCORE_WEIGHTS.find(x => x.key === m.key);
             const side = (sp, color) => [
                 { color, label: m.short, value: fV(valOf(sp.a, m.key, state.mode)), em: true },
@@ -1055,13 +1061,18 @@ function renderSummary() {
 }
 
 function exportCsv() {
-    const head = ['Rang', 'BDR', 'E-mail', 'Admin', 'Demo', 'Actif', 'Jours saisis', 'Jours periode',
-        ...METRICS.map(m => m.short), 'Taux aboutis %', 'Taux RDV %', 'Score'];
+    // Colonnes des seuls métiers présents dans l'export : une équipe 100 % BDR
+    // produit exactement le même fichier qu'avant.
+    const cols = metricsForAny(people.map(p => p.profile));
+    const head = ['Rang', 'Personne', 'E-mail', 'Metier', 'Admin', 'Demo', 'Actif',
+        'Jours saisis', 'Jours periode',
+        ...cols.map(m => m.short), 'Taux aboutis %', 'Taux RDV %', 'Score'];
     const lines = people.map(p => [
-        p.rank, nameOf(p), p.profile.email || '', p.profile.is_admin ? 'oui' : 'non',
+        p.rank, nameOf(p), p.profile.email || '', jobLabel(p.profile),
+        p.profile.is_admin ? 'oui' : 'non',
         p.profile.is_demo ? 'oui' : 'non', p.profile.is_active ? 'oui' : 'non',
         p.a.activeDays, p.a.days,
-        ...METRICS.map(m => p.a[m.key]),
+        ...cols.map(m => p.a[m.key]),
         p.a.connect_rate == null ? '' : p.a.connect_rate.toFixed(1),
         p.a.meeting_rate == null ? '' : p.a.meeting_rate.toFixed(1),
         p.a.productivity_score

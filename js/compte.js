@@ -28,7 +28,8 @@
    ========================================================================== */
 
 import {
-    requireAuth, myProfile, roleLabel, levelLabel, humanError, signIn, supabase
+    requireAuth, myProfile, roleLabel, levelLabel, humanError, signIn, supabase,
+    jobLabel, isContributor
 } from './api.js';
 import { renderNav } from './nav.js';
 import { escapeHtml, toast, hideVeil } from './ui.js';
@@ -49,7 +50,7 @@ let session = null;
    Qui je suis
 
    En lecture seule. Ces lignes ne sont pas un formulaire déguisé : le niveau
-   d'accès et la prospection décident de ce que la base laisse voir, et ils
+   d'accès et le métier décident de ce que la base laisse voir, et ils
    n'appartiennent qu'à l'administrateur.
    -------------------------------------------------------------------------- */
 
@@ -62,9 +63,12 @@ function renderMe() {
         ['Adresse de connexion', email],
         ['Ce que je suis ici', roleLabel(me)],
         ['Niveau d\'accès', levelLabel(me)],
-        ['Prospection', me.is_bdr
-            ? 'Oui : je saisis mon activité et j\'apparais dans les classements'
-            : 'Non : je ne saisis aucune activité']
+        // Le métier, et non la seule prospection : sans cela un commercial
+        // lirait « je ne saisis aucune activité » sur sa propre fiche, alors
+        // qu'il saisit tous les jours.
+        ['Métier', isContributor(me)
+            ? `${jobLabel(me)} : je saisis mon activité et j'apparais dans les classements`
+            : 'Aucun : je ne saisis aucune activité']
     ];
     if (me.is_demo) {
         rows.push(['Compte de démonstration',

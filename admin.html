@@ -86,8 +86,15 @@
                             <label class="pick">
                                 <input type="checkbox" id="f-bdr" checked>
                                 <span class="pick-body">
-                                    <b>Prospecte</b>
-                                    <em>Saisit son activité, a ses performances, apparaît dans les classements</em>
+                                    <b>BDR</b>
+                                    <em>Compteurs de prospection : appels, e-mails, rendez-vous obtenus</em>
+                                </span>
+                            </label>
+                            <label class="pick">
+                                <input type="checkbox" id="f-sales">
+                                <span class="pick-body">
+                                    <b>Commercial</b>
+                                    <em>Compteurs de cycle de vente : RDV1, propositions, sorties de pipeline</em>
                                 </span>
                             </label>
                             <label class="pick">
@@ -248,12 +255,26 @@
                         l'outil suit une activité déclarée. Si un tiers peut réécrire la saisie de
                         quelqu'un, le chiffre n'appartient plus à celui qui l'a saisi et la saisie
                         quotidienne perd son sens.</dd>
-                    <dt>Prospecte : un axe indépendant du niveau</dt>
-                    <dd><b>Prospecte</b> dit si la personne saisit son activité, apparaît dans les
-                        classements et dispose des pages « Ma journée » et « Mes performances ».
-                        C'est une question distincte du niveau. Un administrateur qui ne prospecte pas
-                        n'a donc ni page de saisie, ni score, et ne pollue aucun classement. Un
-                        responsable qui prospecte aussi cumule les deux.</dd>
+                    <dt>BDR et commercial : deux métiers, indépendants du niveau</dt>
+                    <dd>Le niveau dit ce que le compte a le droit de voir. Le <b>métier</b> dit quels
+                        compteurs il tient, et c'est une question entièrement distincte. Un
+                        administrateur sans métier n'a donc ni page de saisie, ni score, et ne pollue
+                        aucun classement. Un responsable qui prospecte cumule les deux.</dd>
+                    <dd><b>BDR</b> donne les compteurs de prospection : appels, appels aboutis, appels
+                        avec échange, e-mails, entreprises et contacts créés, rendez-vous obtenus.
+                        <b>Commercial</b> donne ceux du cycle de vente : RDV1, propositions envoyées,
+                        NO GO, affaires abandonnées, affaires perdues, plus les appels et les contacts
+                        créés, communs aux deux métiers.</dd>
+                    <dd>Les deux cases se cumulent. Quelqu'un qui prospecte et vend voit l'union des
+                        compteurs sur une seule page de saisie. Décocher un métier ne fait perdre la
+                        saisie que si l'autre est décoché aussi.</dd>
+                    <dd>Un point de vocabulaire, pour éviter un double comptage : <b>rendez-vous
+                        obtenu</b> est le rendez-vous décroché par la prospection, <b>RDV1</b> est le
+                        premier rendez-vous tenu par le commercial. Deux personnes, deux événements,
+                        deux compteurs distincts.</dd>
+                    <dd>Les trois sorties de pipeline valent zéro point au barème. Elles se comptent
+                        et se suivent, elles ne se notent pas : perdre une affaire ne peut pas faire
+                        monter un score de productivité.</dd>
                     <dd>Un BDR ne voit strictement que ses propres lignes, y compris s'il interroge la
                         base directement avec la clé publique : la règle est posée dans PostgreSQL,
                         pas dans le navigateur.</dd>

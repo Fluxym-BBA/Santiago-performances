@@ -23,7 +23,7 @@ import {
     requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY, todayISO,
     addDaysISO, formatLong, relativeLabel, diffDays, fetchDay,
     saveDay, bump, setMetric, fetchTargets, saveTargets, humanError,
-    SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile
+    SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -33,6 +33,12 @@ let day = todayISO();       // date en cours de saisie
 let row = { ...EMPTY_DAY };  // valeurs affichées
 let prevRow = null;          // veille, pour la comparaison
 let targets = {};
+
+/* Compteurs de la personne dont on saisit la journée, pas les miens : quand un
+   administrateur remplit la journée de quelqu'un d'autre, ce sont les compteurs
+   de cette personne qui doivent s'afficher. Renseigné dans init(), après
+   requireAuth() qui charge les profils. */
+let myMetrics = METRICS;
 
 /* Trois états à distinguer, sans quoi l'écran et la base finissent par
    raconter deux histoires différentes :
@@ -56,6 +62,8 @@ let inflight = 0;
    Rendu des lignes de métriques
    -------------------------------------------------------------------------- */
 
+/* Un compteur sans objectif n'a pas de jauge : afficher une barre vide et
+   « non défini » sous un NO GO laisserait croire qu'on attend un chiffre. */
 function metricRowHtml(m) {
     return `
     <div class="metric" data-metric="${m.key}">
@@ -74,20 +82,35 @@ function metricRowHtml(m) {
                         data-act="inc" data-key="${m.key}" aria-label="Ajouter 1 ${escapeHtml(m.label)}">+</button>
             </div>
         </div>
+        ${m.target ? `
         <div class="gauge">
             <div class="gauge-track"><div class="gauge-fill" id="gauge-${m.key}" style="width:0%"></div></div>
             <div class="gauge-legend">
                 <span>Objectif : <b id="target-${m.key}">–</b></span>
                 <span id="gauge-pct-${m.key}">0 %</span>
             </div>
-        </div>
+        </div>` : ''}
     </div>`;
 }
 
+/* Les cartes dépendent du métier : un BDR ne voit pas le cycle de vente, un
+   commercial ne voit ni les entreprises créées ni les e-mails. Une carte sans
+   aucun compteur est masquée plutôt que laissée vide, et il en va de même des
+   sous-titres de la carte Prospection. On masque en style plutôt qu'en
+   supprimant : les éléments de total restent dans le document, ce qui évite un
+   garde-fou dans chaque fonction d'affichage. */
 function buildCards() {
-    ['crm', 'calls', 'emails'].forEach(group => {
+    ['crm', 'calls', 'emails', 'pipeline', 'outcome'].forEach(group => {
         const host = document.querySelector(`[data-metrics="${group}"]`);
-        if (host) host.innerHTML = METRICS.filter(m => m.group === group).map(metricRowHtml).join('');
+        if (!host) return;
+        const list = myMetrics.filter(m => m.group === group);
+        host.innerHTML = list.map(metricRowHtml).join('');
+        const titre = document.querySelector(`[data-sub-for="${group}"]`);
+        if (titre) titre.style.display = list.length ? '' : 'none';
+    });
+
+    document.querySelectorAll('[data-card]').forEach(carte => {
+        if (!carte.querySelector('.metric')) carte.style.display = 'none';
     });
 
     // Boutons + / −
@@ -397,6 +420,7 @@ function flash(key) {
    -------------------------------------------------------------------------- */
 
 function paintGauge(m) {
+    if (!m.target) return;   // compteur sans objectif : aucune jauge à peindre
     const t = Number(targets[m.target]) || 0;
     const mesure = row[m.key] != null;
     const v = Number(row[m.key]) || 0;
@@ -415,7 +439,11 @@ function paintGauge(m) {
 function paintDerived() {
     const calls = Number(row.calls_made) || 0;
     const conn = Number(row.calls_connected) || 0;
-    const rdv = Number(row.meetings_booked) || 0;
+    /* Rendez-vous du jour : le RDV obtenu du BDR et le RDV1 tenu du commercial
+       ne coexistent jamais chez la même personne, l'un des deux termes étant
+       toujours nul. Pour qui a les deux métiers, les additionner est bien le
+       sens voulu : ce sont deux rencontres différentes. */
+    const rdv = (Number(row.meetings_booked) || 0) + (Number(row.first_meetings) || 0);
 
     $('#kpi-connect').textContent = calls > 0 ? `${fmtDec((conn / calls) * 100)} %` : '–';
     // Non mesuré et zéro ne s'affichent pas pareil : le premier est une absence
@@ -428,10 +456,15 @@ function paintDerived() {
     $('#kpi-meeting').textContent = conn > 0 ? `${fmtDec((rdv / conn) * 100)} %` : '–';
     $('#kpi-effort').textContent = rdv > 0 ? `${fmtDec(calls / rdv)} appels` : '–';
 
-    const crmTotal = (Number(row.companies_created) || 0) + (Number(row.contacts_created) || 0);
-    const prospTotal = calls + (Number(row.emails_sent) || 0);
-    document.querySelector('[data-total="crm"]').textContent = fmtInt(crmTotal);
-    document.querySelector('[data-total="prospection"]').textContent = fmtInt(prospTotal);
+    const total = (sel, v) => {
+        const el = document.querySelector(`[data-total="${sel}"]`);
+        if (el) el.textContent = fmtInt(v);
+    };
+    const num = k => Number(row[k]) || 0;
+    total('crm', num('companies_created') + num('contacts_created'));
+    total('prospection', calls + num('emails_sent'));
+    total('pipeline', num('first_meetings') + num('proposals_sent'));
+    total('outcome', num('no_go') + num('deals_dropped') + num('deals_lost'));
     $('#day-score').textContent = fmtInt(scoreOf(row));
 
     const prevScore = prevRow ? scoreOf(prevRow) : 0;
@@ -441,7 +474,7 @@ function paintDerived() {
 }
 
 function paint() {
-    METRICS.forEach(m => {
+    myMetrics.forEach(m => {
         const input = document.getElementById(`in-${m.key}`);
         if (input && document.activeElement !== input) input.value = inputValue(m.key);
         paintGauge(m);
@@ -512,16 +545,27 @@ async function load(iso) {
 function buildScoreExplain() {
     const host = $('#score-explain');
     if (!host) return;
+    /* Le barème est réglable depuis la page Barème depuis la v8 : citer un
+       nombre en dur dans la phrase mentirait dès le premier réglage. Et on ne
+       liste que les poids des compteurs affichés, sinon un commercial lirait le
+       tarif d'actions qu'il ne saisit pas. */
+    const mine = new Set(myMetrics.map(m => m.key));
     host.innerHTML = `
         <details class="chart-note">
             <summary>Comment est calculé ce score ?</summary>
             <p>
                 Chaque action du jour est multipliée par un poids, puis tout est additionné.
-                Un rendez-vous vaut 20 points parce qu'un BDR est jugé sur ses rendez-vous,
-                pas sur son volume d'appels.
+                Un rendez-vous pèse beaucoup plus lourd qu'un appel, parce qu'on est jugé
+                sur ses rendez-vous et pas sur son volume d'appels. Les poids exacts sont
+                ci-dessous.
             </p>
+            ${SCORE_WEIGHTS.some(w => mine.has(w.key) && w.w === 0) ? `
+            <p>
+                Les compteurs à zéro point ne sont pas des oublis : ils se comptent, ils ne
+                se notent pas. Perdre une affaire ne peut pas faire monter un score.
+            </p>` : ''}
             <div class="weights" style="margin:14px 0 0">
-                ${SCORE_WEIGHTS.map(w => `
+                ${SCORE_WEIGHTS.filter(w => mine.has(w.key)).map(w => `
                     <div class="weight" style="background:var(--gray-100);border-color:var(--gray-200)">
                         <span style="font-size:15px">${w.icon}</span>
                         <span class="weight-label" style="color:var(--gray-600)">${w.label}</span>
@@ -540,7 +584,11 @@ function buildScoreExplain() {
    -------------------------------------------------------------------------- */
 
 function buildTargets() {
-    $('#targets-grid').innerHTML = METRICS.map(m => `
+    /* Seuls les compteurs affichés et pourvus d'un objectif : proposer de régler
+       un objectif de NO GO, ou l'objectif d'e-mails d'un commercial qui ne les
+       saisit pas, serait proposer un réglage sans effet. */
+    const reglables = myMetrics.filter(m => m.target);
+    $('#targets-grid').innerHTML = reglables.map(m => `
         <div class="field">
             <label for="t-${m.target}">${escapeHtml(m.short)}</label>
             <input type="number" min="0" step="1" id="t-${m.target}"
@@ -549,13 +597,13 @@ function buildTargets() {
 
     $('#targets-save').addEventListener('click', async () => {
         const patch = {};
-        METRICS.forEach(m => {
+        reglables.forEach(m => {
             const v = parseInt(document.getElementById(`t-${m.target}`).value, 10);
             patch[m.target] = Number.isNaN(v) || v < 0 ? 0 : v;
         });
         try {
             targets = { ...targets, ...(await saveTargets(patch, session)) };
-            METRICS.forEach(paintGauge);
+            reglables.forEach(paintGauge);
             toast('Objectifs enregistrés', 'success');
             $('#targets-panel').open = false;
         } catch (e) {
@@ -570,6 +618,7 @@ function buildTargets() {
 
 (async function init() {
     session = await requireAuth({ needs: 'bdr' });
+    myMetrics = metricsFor(viewedProfile());
     renderNav();
     renderIdentity();
     buildCards();

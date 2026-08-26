@@ -12,7 +12,7 @@ import {
     endOfMonth, addMonthsISO, startOfQuarter, endOfQuarter, periodLength,
     previousPeriod, samePeriodLastYear, periodLabel, periodLabelShort, minISO,
     maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS,
-    isViewingOther, viewedProfile, isAdmin, linkFor, scoreWeightsMeta
+    isViewingOther, viewedProfile, isAdmin, linkFor, scoreWeightsMeta, metricsFor
 } from './api.js';
 import {
     num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
@@ -143,6 +143,16 @@ const A_SHADES = ['#00A7E1', '#0369a1', '#0B2046'];
 const B_SHADES = ['#8b5cf6', '#6d28d9', '#4c1d95'];
 const A_MAIN = A_SHADES[0];
 const B_MAIN = B_SHADES[0];
+
+/* Compteurs de la personne affichée, et non tous les compteurs : un BDR n'a
+   rien à faire de cinq séries plates à zéro sur le cycle de vente, et un
+   commercial rien à faire des entreprises créées.
+
+   Évalué à chaque appel plutôt que figé au chargement : les définitions de
+   graphiques sont construites une fois pour toutes, alors que le profil affiché
+   change quand un administrateur consulte quelqu'un d'autre. */
+const shown = () => metricsFor(viewedProfile());
+const shownIn = groups => shown().filter(m => groups.includes(m.group));
 
 /* Camaïeux à quatre crans, pour tout ce dont le nombre de séries dépend de
    METRICS ou du nombre d'étages d'un entonnoir.
@@ -385,7 +395,7 @@ const CHARTS = [
             const perDay = (a, key) => (a.activeDays > 0 ? fmtDec(a[key] / a.activeDays) : '–');
 
             compareChart(host, {
-                rows: METRICS.map(m => ({
+                rows: shown().map(m => ({
                     label: m.short, colorA: A_MAIN, colorB: B_MAIN,
                     a: val(aA, m.key, ctx.mode), b: val(aB, m.key, ctx.mode)
                 })),
@@ -397,7 +407,7 @@ const CHARTS = [
                 // moyenne par jour actif et le nombre de jours saisis : de quoi
                 // savoir si un écart vient du volume ou de la régularité.
                 tip: i => {
-                    const m = METRICS[i];
+                    const m = shown()[i];
                     const w = SCORE_WEIGHTS.find(x => x.key === m.key);
                     const side = (a, color) => [
                         { color, label: m.short, value: fmtV(val(a, m.key, ctx.mode)), em: true },
@@ -599,18 +609,18 @@ const CHARTS = [
         sub: ctx => `Volume par ${granWord(ctx.gran)}. Les deux panneaux partagent la même échelle verticale.`,
         legend: ctx => [
             { head: 'Bleu = période analysée · Violet = période de référence' },
-            ...METRICS.filter(m => m.group === 'calls').map((m, i) => ({
+            ...shownIn(['calls']).map((m, i) => ({
                 pair: [A_RAMP[i], B_RAMP[i]], label: m.short
             }))
         ],
         note: () => `Deux panneaux superposés plutôt qu'un seul graphique surchargé : ${
-            METRICS.filter(m => m.group === 'calls').length * 2} séries mélangées dans ` +
+            shownIn(['calls']).length * 2} séries mélangées dans ` +
             `la même grille deviennent illisibles. L'<b>échelle verticale est volontairement identique</b> sur ` +
             `les deux panneaux, donc une barre deux fois plus haute vaut réellement deux fois plus. ` +
             `Les périodes sont alignées sur leur premier ${granWord()}, ce qui permet de comparer même si ` +
             `elles ne portent pas sur les mêmes dates.`,
-        hover: () => `les ${METRICS.filter(m => m.group === 'calls').length} volumes du moment pointé sur les <b>deux</b> panneaux à la fois, les taux de conversion, le score, et l'écart pour chaque série. Il n'y a pas à descendre la souris sur le second panneau.`,
-        render: (host, ctx) => renderPanelPair(host, ctx, METRICS.filter(m => m.group === 'calls'))
+        hover: () => `les ${shownIn(['calls']).length} volumes du moment pointé sur les <b>deux</b> panneaux à la fois, les taux de conversion, le score, et l'écart pour chaque série. Il n'y a pas à descendre la souris sur le second panneau.`,
+        render: (host, ctx) => renderPanelPair(host, ctx, shownIn(['calls']))
     },
     {
         key: 'other', wide: true, icon: '✉️',
@@ -618,7 +628,7 @@ const CHARTS = [
         sub: ctx => `Volume par ${granWord(ctx.gran)}. Les deux panneaux partagent la même échelle verticale.`,
         legend: ctx => [
             { head: 'Bleu = période analysée · Violet = période de référence' },
-            ...METRICS.filter(m => m.group !== 'calls').map((m, i) => ({
+            ...shownIn(['crm', 'emails']).map((m, i) => ({
                 pair: [A_RAMP[i], B_RAMP[i]], label: m.short
             }))
         ],
@@ -626,7 +636,7 @@ const CHARTS = [
             `L'enrichissement du CRM est un travail de fond dont l'effet se voit sur les semaines suivantes, ` +
             `pas le jour même : c'est le volume régulier qui compte, pas le pic.`,
         hover: () => `les volumes du moment pointé sur les <b>deux</b> panneaux à la fois, leur total, le score, et l'écart pour chaque série.`,
-        render: (host, ctx) => renderPanelPair(host, ctx, METRICS.filter(m => m.group !== 'calls'))
+        render: (host, ctx) => renderPanelPair(host, ctx, shownIn(['crm', 'emails']))
     },
     {
         key: 'rates', wide: true, icon: '🎯',
