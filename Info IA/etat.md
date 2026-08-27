@@ -130,3 +130,7 @@ vérifiée : ne pas promettre de retour arrière après une migration.
 | Écran des comptes, niveaux | ✅ En ligne | Liste déroulante à quatre niveaux, verrouillage aligné sur admin_set_level | 20/08 |
 | Création de compte, niveau | ✅ En ligne | Choix du niveau au lieu de la case administrateur ; « responsable » appliqué en second appel | 20/08 |
 | Reste à faire, rôles lot 3 | ⏳ À faire | L'Edge Function ignore le niveau du demandeur : un administrateur pourrait créer son égal en l'appelant directement | 20/08 |
+
+| Échelle par compteur (v20) | 📦 Déposé, publication en échec | Quatre lettres J S M A dans la légende de chaque jauge ; le bandeau du haut reste le défaut et efface les exceptions au changement | 27/08 |
+| `profiles.metric_scales` | ✅ En base | jsonb, défaut `{}` ; `grant update` posé colonne par colonne, comme `display_name` et `gauge_scale`, faute de quoi chaque clic partait en « permission denied » silencieux | 27/08 |
+| Publication Pages du 27/08 | ⚠️ Incident GitHub | Run 65 expiré après dix minutes sur `updating_pages`, puis bloqué en file sans possibilité d'annulation. Contenu du dépôt vérifié correct : rien à recorriger, seulement à republier | 27/08 |
