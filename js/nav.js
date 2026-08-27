@@ -10,11 +10,18 @@
 
    2. LA BARRE NE MONTRE QUE CE QUI SERT À CETTE PERSONNE. Les sections sont
       construites depuis le profil : un administrateur pur n'a pas de page de
-      saisie, un BDR n'a pas de vue d'équipe. Trois onglets au maximum, ce qui
-      règle le problème de place à la source.
+      saisie, un BDR n'a pas de vue d'équipe. C'est ce qui règle le problème de
+      place à la source : personne ne voit les quatre onglets sans les utiliser
+      tous les quatre.
 
    3. LE RÔLE EST ÉCRIT EN CLAIR. Un utilisateur doit pouvoir répondre à
       « qu'est-ce que je suis ici ? » sans deviner.
+
+   4. LA PLACE SE REPREND SUR LES LIBELLÉS, JAMAIS SUR LE NOMBRE D'ONGLETS.
+      Depuis la v24 la barre peut compter quatre onglets. Quatre libellés longs
+      ne tiennent pas sur un écran de 1024 px : dans ce cas seulement, et entre
+      1024 et 1180 px seulement, css/nav.css bascule les libellés courts. Voir
+      poseFeuilleNav() plus bas, et le calcul de largeurs en tête de nav.css.
    ========================================================================== */
 
 import {
@@ -22,6 +29,37 @@ import {
     levelLabel, canReadAll, canManageAccounts, canWriteAny, canWriteViewed,
     isContributor, amContributor, jobLabel, linkFor
 } from './api.js';
+
+/* --------------------------------------------------------------------------
+   La feuille de la barre
+
+   css/nav.css contient les deux règles qui font tenir un quatrième onglet sur
+   un écran étroit. Elle est posée ici plutôt que déclarée dans les huit pages :
+   la barre appartient à ce fichier, sa feuille le suit, et une page nouvelle
+   n'aura rien à penser.
+
+   L'adresse est calculée depuis celle du module et non écrite en dur : nav.js
+   vit dans js/, la feuille dans css/, et cela reste vrai quel que soit le
+   dossier depuis lequel la page est servie.
+
+   Chargement asynchrone, donc : sur le tout premier affichage, la barre peut
+   apparaître une fraction de seconde avec ses libellés longs avant que la
+   feuille arrive. Le voile de chargement couvre ce moment sur toutes les pages
+   du projet. Si un jour il disparaissait, il faudrait remettre les <link> dans
+   les pages.
+   -------------------------------------------------------------------------- */
+
+function poseFeuilleNav() {
+    if (typeof document === 'undefined') return;
+    if (document.querySelector('link[data-nav-css]')) return;
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = new URL('../css/nav.css', import.meta.url).href;
+    l.dataset.navCss = '1';
+    (document.head || document.documentElement).appendChild(l);
+}
+
+poseFeuilleNav();
 
 /* --------------------------------------------------------------------------
    QUATRIÈME RÈGLE, AJOUTÉE EN v19 : CONSULTER QUELQU'UN, C'EST VOIR SON ÉCRAN.
@@ -70,6 +108,21 @@ const SECTIONS = [
         when: p => isContributor(p)
     },
     {
+        // v24 : le calendrier était dans le menu de droite, il est ici. Un
+        // écran de relecture que l'on ouvre en fin de semaine n'a rien à faire
+        // derrière un bouton d'avatar, à côté du mot de passe et de la
+        // déconnexion : ce n'est pas un réglage, c'est une lecture, et il se
+        // place naturellement entre ce que l'on saisit et ce que cela donne.
+        //
+        // C'est ce quatrième onglet qui rend css/nav.css nécessaire.
+        href: './calendrier.html', match: ['calendrier.html'],
+        label: 'Mon calendrier', labelOther: 'Son calendrier',
+        // « Agenda » et non « Calendrier » sur la barre du bas : cinq éléments
+        // à se partager 320 px, il reste 56 px de texte par élément.
+        short: 'Calendrier', mini: 'Agenda', icon: '🗓️',
+        when: p => isContributor(p)
+    },
+    {
         href: './dashboard.html', match: ['dashboard.html'],
         label: 'Mes performances', labelOther: 'Ses performances',
         short: 'Performances', mini: 'Perfs', icon: '📊',
@@ -91,18 +144,10 @@ const MENU = [
     // parce qu'on ne s'y rend que deux fois par an, et que la règle des trois
     // onglets vaut plus que la visibilité d'un réglage.
     { href: './compte.html', label: 'Mon compte', icon: '🔑', when: () => true },
-    // Le calendrier (v23) : la relecture d'une semaine ou d'un mois, jour par
-    // jour. Dans le menu et non dans la barre du haut, parce que la règle des
-    // trois onglets vaut plus que la visibilité d'un écran, et parce qu'un
-    // quatrième onglet obligerait à faire basculer la barre en mode réduit plus
-    // tôt, donc à retoucher app.css. Un second chemin, plus visible, part du
-    // tableau détaillé de la page Performances, là où le besoin se fait sentir.
+    // Le calendrier n'est plus ici : il est passé dans la barre du haut en v24.
+    // Il reste en bas de ce menu, avec les autres doublons d'onglets, pour le
+    // téléphone en portrait.
     //
-    // Miroir : quand on consulte quelqu'un, l'entrée mène à SON calendrier, pas
-    // au sien. Un écran de relecture qui change de personne en silence ferait
-    // lire les chiffres d'un autre sans le dire.
-    { href: './calendrier.html', label: 'Mon calendrier', labelOther: 'Son calendrier',
-      icon: '🗓️', when: p => isContributor(p), miroir: true },
     // Le carnet d'entreprises : ouvert à tous ceux qui y écrivent, et non aux
     // seuls administrateurs. Celui qui se trompe en tapant un nom est celui qui
     // saisit, le soir, seul : faire passer la correction par un administrateur
@@ -130,6 +175,11 @@ const MENU = [
       onlyCollapsed: true },
     { href: './dashboard.html', label: 'Mes performances', labelOther: 'Ses performances',
       icon: '📊', when: p => isContributor(p), onlyCollapsed: true, miroir: true },
+    // Miroir : en consultation, l'entrée mène au calendrier de la personne
+    // regardée. Un écran de relecture qui change de personne en silence ferait
+    // lire les chiffres d'un autre sans le dire.
+    { href: './calendrier.html', label: 'Mon calendrier', labelOther: 'Son calendrier',
+      icon: '🗓️', when: p => isContributor(p), onlyCollapsed: true, miroir: true },
     { href: './index.html', label: 'Ma journée', labelOther: 'Sa journée',
       icon: '✍️', when: p => isContributor(p), onlyCollapsed: true, miroir: true }
 ];
@@ -185,7 +235,10 @@ export function renderNav() {
     const sections = SECTIONS.filter(s => s.when(profilNav));
     const menu = MENU.filter(m => m.when(m.miroir ? profilNav : me));
 
-    nav.className = 'topbar';
+    /* Quatre onglets ou plus : les libellés passeront en version courte entre
+       1024 et 1180 px. Le seuil est dans css/nav.css, la décision est ici,
+       parce que seul ce fichier sait combien d'onglets cette personne voit. */
+    nav.className = `topbar${sections.length >= 4 ? ' topbar--dense' : ''}`;
     nav.innerHTML = `
     <div class="topbar-inner">
 

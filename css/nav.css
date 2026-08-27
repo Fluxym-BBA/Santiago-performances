@@ -1,0 +1,73 @@
+/* ==========================================================================
+   NAV.CSS — Le quatrième onglet.
+
+   Chargée APRÈS css/app.css, qui n'est jamais modifiée. Le <link> n'est pas
+   déclaré dans les pages : c'est js/nav.js qui le pose, parce que la barre est
+   présente sur les huit écrans et qu'ajouter une ligne dans huit fichiers HTML
+   pour deux règles CSS multiplie les occasions de se contredire d'une page à
+   l'autre. Le propriétaire de la barre est nav.js, la feuille le suit.
+
+   POURQUOI CE FICHIER EXISTE (v24)
+
+   « Mon calendrier » est passé du menu de droite à la barre du haut, juste
+   après « Ma journée ». Un responsable qui saisit ses propres chiffres a donc
+   désormais quatre onglets : Ma journée, Mon calendrier, Mes performances,
+   Équipe. Or app.css est calibrée pour trois, et ne raccourcit les libellés
+   qu'en dessous de 1024 px.
+
+   Largeurs mesurées, libellés longs, quatre onglets, écran de 1024 px :
+
+       marque       146 px
+       onglets      631 px   (142 + 172 + 199 + 107, plus les écarts)
+       compte       220 px   (avatar, « Bruno B. », « RESPONSABLE ET BDR »)
+       écarts       56 px
+       ------------------
+       total       1053 px   pour 968 px disponibles
+
+   Il manque environ 85 px. La règle du projet est écrite dans le handover :
+   « au-delà de trois onglets, la barre doit passer en mode réduit plus tôt,
+   pas comprimer ». C'est exactement ce que fait ce fichier, et rien d'autre.
+
+   CE QU'IL NE FAUT PAS FAIRE À LA PLACE
+
+   Laisser filer : .tabs porte min-width: 0 et .tab porte white-space: nowrap.
+   Les onglets ne se couperaient pas, ils déborderaient sous le bouton du
+   compte. Le texte reste lisible mais se retrouve caché, ce qui est pire
+   qu'une troncature parce que rien ne le signale.
+
+   Raccourcir les libellés pour tout le monde : « Journée / Calendrier /
+   Performances » sur un écran de 1600 px perdrait le possessif, et donc la
+   distinction « Ma journée » / « Sa journée » qui indique, en consultation,
+   que l'on regarde l'écran de quelqu'un d'autre.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Mode dense
+
+   .topbar--dense est posée par nav.js quand, et seulement quand, la barre
+   compte quatre onglets ou plus. Un BDR simple en a trois et n'est pas
+   concerné : ses libellés longs restent affichés jusqu'à 1024 px, comme avant.
+
+   Bornes : à partir de 1180 px les quatre libellés longs tiennent (1053 px de
+   contenu pour 1124 px disponibles). En dessous de 1024 px, app.css bascule
+   déjà tout le monde en libellés courts, il n'y a rien à ajouter.
+
+   La sélection sur .topbar--dense donne deux composantes de spécificité contre
+   une à .tab-short { display: none } d'app.css : l'ordre de chargement des
+   feuilles ne suffirait pas, la spécificité, si.
+   -------------------------------------------------------------------------- */
+
+@media (min-width: 1024px) and (max-width: 1179px) {
+
+    /* Les mêmes valeurs que le palier « moins de 1024 px » d'app.css, pour ne
+       pas inventer un troisième réglage d'espacement. La hauteur, elle, ne
+       bouge pas : la barre est collante et plusieurs pages calent leur
+       en-tête dessus. */
+    .topbar--dense .topbar-inner { gap: 18px; }
+    .topbar--dense .tab { padding: 0 11px; }
+
+    /* Le libellé raccourcit, il ne se coupe pas. « Mes performances » devient
+       « Performances », jamais « Mes perfor… ». */
+    .topbar--dense .tab-full { display: none; }
+    .topbar--dense .tab-short { display: inline; }
+}
