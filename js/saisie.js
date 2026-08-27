@@ -82,6 +82,10 @@ let myMetrics = METRICS;
    personne n'a déclaré, ce que cet écran ne fait nulle part ailleurs.
    -------------------------------------------------------------------------- */
 
+/* Valeur de départ écrasée par init() avant tout rendu, avec la préférence de la
+   personne ou le défaut de scaleOf, qui est le mois depuis le 27/08. Elle n'est
+   donc jamais à l'écran ; elle vaut 'day' pour que les fonctions appelées avant
+   init, s'il en apparaissait un jour, ne demandent pas de cumul de période. */
 let scale = 'day';           // 'day' | 'week' | 'month'
 let periode = null;          // { from, to } de l'échelle en cours, null en mode jour
 let cumulHorsJour = null;    // { metrique: nombre|null } sur la période, jour affiché exclu

@@ -31,9 +31,15 @@
 -- qu'on répare. Elle EFFACE les exceptions, ce qui rend les gens à nouveau
 -- sensibles au défaut, maintenant et à chaque changement futur.
 --
--- ORDRE DE DÉPLOIEMENT : cette migration passe AVANT le code. Le code sait
--- vivre sans elle (l'échelle retombe sur le jour et le bouton d'application se
--- masque), mais il n'y a aucune raison de s'en priver.
+-- ORDRE DE DÉPLOIEMENT : cette migration passe AVANT le code. Le code sait vivre
+-- sans elle — l'échelle retombe sur le défaut, les préférences ne sont pas
+-- retenues d'une session à l'autre et le bouton d'application se masque — mais il
+-- n'y a aucune raison de s'en priver.
+--
+-- NOTE DU 27/08, APRÈS PASSAGE. Le défaut de lecture a été porté du jour au mois
+-- dans js/api.js (scaleOf) : c'est l'échelle à laquelle les objectifs sont
+-- réellement discutés ici. Rien à rejouer dans ce script, aucun DDL n'a changé ;
+-- seuls deux commentaires ci-dessous ont été mis à jour pour ne pas mentir.
 -- ============================================================================
 
 begin;
@@ -46,10 +52,12 @@ begin;
 -- le profil, et une table séparée coûterait une requête de plus à chaque page
 -- pour stocker un mot de cinq lettres.
 --
--- Nullable à dessein. NULL veut dire « personne n'a choisi », et le code affiche
--- alors le jour. Un DEFAULT 'day' aurait affirmé un choix que personne n'a fait,
--- et aurait empêché de distinguer plus tard « n'a jamais touché au sélecteur »
--- de « a explicitement remis le jour ».
+-- Nullable à dessein, et sans DEFAULT. NULL veut dire « personne n'a choisi », et
+-- le code applique alors son défaut — le mois depuis le 27/08. Écrire ce défaut
+-- dans la colonne aurait affirmé un choix que personne n'a fait, empêché de
+-- distinguer « n'a jamais touché au sélecteur » de « a explicitement demandé le
+-- mois », et surtout figé le défaut en base : le changer aurait alors demandé une
+-- migration de données au lieu d'une ligne de code.
 -- ----------------------------------------------------------------------------
 
 alter table public.profiles

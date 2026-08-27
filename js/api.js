@@ -575,7 +575,7 @@ function normalize(p) {
            permises plutôt que recopiée telle quelle : avant la migration la
            colonne n'existe pas et vaut undefined, ce qui donnerait un
            `if (scale)` vrai et une échelle inconnue à afficher. NULL veut dire
-           « personne n'a choisi », et le jour s'applique alors. */
+           « personne n'a choisi », et le mois s'applique alors (voir scaleOf). */
         gauge_scale: ['day', 'week', 'month'].includes(p.gauge_scale) ? p.gauge_scale : null
     };
 }
@@ -2022,8 +2022,30 @@ export function periodBounds(scale, iso) {
     return { from: iso, to: iso };
 }
 
-/** Échelle de lecture d'un profil, le jour à défaut de choix. */
-export const scaleOf = p => (p && p.gauge_scale) || 'day';
+/**
+ * Échelle de lecture d'un profil, LE MOIS à défaut de choix.
+ *
+ * Le mois et non le jour, décidé le 27/08 : c'est l'échelle à laquelle les
+ * objectifs sont réellement discutés ici. Dominique suit un nombre de
+ * rendez-vous dans le mois, pas dans la journée, et un défaut journalier
+ * obligeait chacun à trouver le sélecteur pour voir le chiffre qui l'intéresse.
+ * Un défaut est ce que voit quelqu'un qui n'a rien demandé : autant que ce soit
+ * la bonne réponse.
+ *
+ * CE QUE ÇA COÛTE, ET C'EST ASSUMÉ. Un métier sans objectif mensuel affiche des
+ * jauges vides à l'ouverture. C'est le cas des commerciaux au 27/08 : rien n'est
+ * posé sur sales/month, donc Christophe et Damien liront « non défini » jusqu'à
+ * ce que ces objectifs soient fixés. L'écran le dit en clair, distingue « aucune
+ * décision prise » d'une panne de lecture, et le sélecteur reste à un clic. Le
+ * repli automatique sur le jour a été écarté sciemment : deux personnes lisant
+ * deux échelles différentes sans savoir pourquoi coûte plus cher en confusion
+ * qu'une jauge vide qui explique pourquoi elle est vide.
+ *
+ * NULL veut toujours dire « personne n'a choisi ». Ce n'est pas la même chose
+ * qu'un choix explicite du mois, et la distinction resservira si le défaut
+ * change encore : on saura qui subit le défaut et qui a décidé.
+ */
+export const scaleOf = p => (p && p.gauge_scale) || 'month';
 
 /**
  * Enregistre MON échelle de lecture. Jamais celle de quelqu'un d'autre : la
