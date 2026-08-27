@@ -1,0 +1,93 @@
+/* ============================================================================
+   Cockpit BDR — page « Mes performances », complément du rythme attendu (v21)
+
+   Pourquoi une feuille séparée : css/app.css n'est jamais modifiée, c'est une
+   règle du projet. Celle-ci est chargée après elle et ne contient que les
+   classes nouvelles. Aucune classe d'app.css n'est redéfinie ici : chaque nom
+   ci-dessous a été vérifié absent du fichier principal avant d'être écrit.
+   ========================================================================= */
+
+/* --- La ligne « attendu / retard » sous une carte de KPI ----------------- */
+
+/* Elle est séparée du reste par un filet plutôt que par une marge : la carte
+   est déjà dense, et le filet dit « ceci est d'une autre nature que ce qui est
+   au-dessus » sans consommer de hauteur. */
+.kpi-goal {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px dashed var(--gray-200, #e2e8f0);
+}
+
+.kpi-goal-txt {
+    font-size: 11.5px;
+    line-height: 1.3;
+    color: var(--gray-500, #64748b);
+}
+
+/* Le retard n'est pas une faute : il est signalé, jamais crié. Pas de fond
+   rouge, pas de gras sur toute la ligne, seulement la couleur du texte. */
+.kpi-goal--late  { color: var(--danger, #dc2626); }
+.kpi-goal--ahead { color: var(--success, #16a34a); }
+.kpi-goal--none  { font-style: italic; opacity: 0.75; }
+
+/* --- Le segment des quatre lettres, sur une carte ------------------------ */
+
+.ref-seg {
+    display: inline-flex;
+    flex: 0 0 auto;
+    border: 1px solid var(--gray-200, #e2e8f0);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #fff;
+}
+
+/* 18 px : assez pour rester cliquable au doigt sans déséquilibrer la carte.
+   En dessous, la cible devient trop petite sur mobile. */
+.ref-btn {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid var(--gray-200, #e2e8f0);
+    background: transparent;
+    color: var(--gray-500, #64748b);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+    cursor: pointer;
+}
+.ref-btn:first-child { border-left: 0; }
+.ref-btn:hover { background: var(--gray-100, #f1f5f9); }
+
+.ref-btn.is-on {
+    background: var(--navy, #0B2046);
+    color: #fff;
+}
+
+/* --- La phrase de rythme, sous la phrase de contexte --------------------- */
+
+/* Un liseré à gauche plutôt qu'un encadré : la phrase appartient à la synthèse,
+   elle ne doit pas devenir un bloc concurrent. */
+.summary-sentence--goal {
+    margin-top: 6px;
+    padding-left: 10px;
+    border-left: 3px solid var(--navy, #0B2046);
+    color: var(--gray-900, #0f172a);
+}
+
+/* --- Écrans étroits ------------------------------------------------------ */
+
+/* Sous 420 px, la ligne d'attendu et son segment ne tiennent plus côte à côte :
+   on repasse en colonne plutôt que de laisser le texte se couper en trois. */
+@media (max-width: 420px) {
+    .kpi-goal {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+}

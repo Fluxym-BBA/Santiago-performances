@@ -12,7 +12,9 @@ import {
     endOfMonth, addMonthsISO, startOfQuarter, endOfQuarter, periodLength,
     previousPeriod, samePeriodLastYear, periodLabel, periodLabelShort, minISO,
     maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS,
-    isViewingOther, viewedProfile, canWriteViewed, linkFor, scoreWeightsMeta, metricsFor
+    isViewingOther, viewedProfile, canWriteViewed, linkFor, scoreWeightsMeta, metricsFor,
+    loadSettings, loadTargets, loadVisibility, targetFor, targetVisible,
+    joursOuvres, fiscalBounds
 } from './api.js';
 import {
     num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
@@ -76,6 +78,213 @@ function effMode() {
    Périodes : raccourcis et recherche de la meilleure période équivalente
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   L'ATTENDU : LE RYTHME NÉCESSAIRE POUR TENIR L'OBJECTIF (v21)
+
+   Jusqu'ici la page ne savait comparer qu'une période à une autre période. Elle
+   disait « tu fais mieux que le mois dernier », jamais « tu es en retard ». Ce
+   sont deux questions différentes, et la seconde est celle qui fait agir. On
+   ajoute donc une troisième référence SANS retirer la période B : les deux
+   réponses se complètent plus qu'elles ne se remplacent, et remplacer B aurait
+   fait perdre la moitié de l'information pour gagner l'autre.
+
+   LA RÈGLE DE CALCUL, et c'est tout le lot :
+
+       l'attendu d'une période est une SOMME, jamais une division.
+       Pour chaque maille (semaine, mois, exercice) qui recouvre la période, on
+       prend l'objectif de cette maille et on en retient la part correspondant
+       aux jours ouvrés réellement compris dans la période.
+
+   Quatre raisons de procéder ainsi plutôt qu'avec une règle de trois :
+
+   1. ça marche sur n'importe quelle période, sept jours glissants comme un
+      trimestre, sans un seul cas particulier à écrire ;
+   2. le prorata à date se fait tout seul puisqu'on ne somme que les jours déjà
+      passés. Sans lui, on serait en retard tous les jours du mois sauf le
+      dernier, et l'écran deviendrait un générateur d'angoisse inutile ;
+   3. on compte les jours ouvrés avec les fériés, via joursOuvres(), donc
+      exactement comme la page de saisie. Deux écrans qui comptent les jours
+      différemment finissent toujours par s'accuser mutuellement de mentir ;
+   4. une période à cheval sur deux mois reste juste, ce qu'une division par 30
+      ne sait pas faire.
+
+   D'OÙ VIENT L'OBJECTIF. De l'exercice par défaut, décidé par Bruno le 27/08 :
+   l'engagement annuel est la vérité, les échelles plus fines ne sont que des
+   repères de rythme. Les quatre lettres permettent d'en changer, pour la page
+   entière ou pour un compteur en particulier.
+
+   PAS DE REPLI AUTOMATIQUE. Si l'objectif de la maille choisie n'existe pas, on
+   ne va pas chercher la maille voisine : l'écran dit qu'il n'y a pas d'objectif
+   et laisse le sélecteur à un clic. Même raison qu'en v17 : deux personnes qui
+   lisent deux références différentes sans le savoir coûtent plus cher en
+   confusion qu'une case vide qui s'explique.
+
+   ON RESPECTE LA VISIBILITÉ (v16). Un objectif masqué sur la page de saisie
+   reste masqué ici, sinon le réglage ne veut rien dire.
+   -------------------------------------------------------------------------- */
+
+/* Le bleu est la période A, le violet la période B, le gris ne porte jamais de
+   sens : l'attendu avait besoin d'une troisième identité. Le navy de la marque
+   est le seul ton disponible qui ne signifie ni bon ni mauvais. Écarté : l'ambre,
+   trop proche des pastilles d'avertissement, qui aurait fait lire « alerte » là
+   où il n'y a qu'une référence. Sur la course cumulée, la période B est déjà en
+   pointillés : c'est la couleur, et elle seule, qui distingue les deux traits. */
+const REF_MAIN = '#0B2046';
+
+const REF_SCALES = [
+    { v: 'day',   l: 'J', mot: 'journalier' },
+    { v: 'week',  l: 'S', mot: 'hebdomadaire' },
+    { v: 'month', l: 'M', mot: 'mensuel' },
+    { v: 'year',  l: 'A', mot: "de l'exercice" }
+];
+
+/* 'off' masque tous les traits. Le défaut est l'exercice. Rien n'est mémorisé :
+   la page ne persiste ni ses dates, ni sa granularité, ni son mode, et ajouter
+   une colonne en base pour ce seul réglage aurait été incohérent. */
+let refDefaut = 'year';
+const refExceptions = new Map();   // compteur → maille forcée
+
+const refDe = key => refExceptions.get(key) || refDefaut;
+const motDe = v => (REF_SCALES.find(s => s.v === v) || {}).mot || '';
+
+/**
+ * Pose la maille d'un compteur. Comme en v20 : revenir sur le défaut de la page
+ * EFFACE l'exception au lieu de la recopier. Sans ça, le forçage serait
+ * rétroactif une fois puis figé pour toujours.
+ */
+function poserRef(key, val) {
+    if (val === refDefaut) refExceptions.delete(key);
+    else refExceptions.set(key, val);
+}
+
+/** Bornes de la maille qui contient ce jour. L'année est l'exercice, pas l'an civil. */
+function mailleDe(scale, iso) {
+    if (scale === 'week')  return { from: startOfWeek(iso), to: endOfWeek(iso) };
+    if (scale === 'month') return { from: startOfMonth(iso), to: endOfMonth(iso) };
+    if (scale === 'year')  return fiscalBounds(iso);
+    return { from: iso, to: iso };
+}
+
+/* joursOuvres() reboucle sur chaque jour. Sur un exercice, l'appeler pour
+   chaque compteur de chaque carte ferait plusieurs milliers de tours pour
+   toujours retomber sur les mêmes bornes. Le cache est vidé à chaque
+   rafraîchissement, les fériés d'une année ne changeant pas en cours de page. */
+let _ouvres = new Map();
+function ouvres(de, a) {
+    const k = de + '|' + a;
+    if (!_ouvres.has(k)) _ouvres.set(k, joursOuvres(de, a));
+    return _ouvres.get(k);
+}
+const videCacheOuvres = () => { _ouvres = new Map(); };
+
+/**
+ * Attendu d'UN compteur sur une période, ou null s'il n'y a pas d'objectif.
+ *
+ * null n'est pas zéro. Un compteur sans objectif ne doit afficher aucun trait,
+ * surtout pas un trait à zéro qui ferait croire à un objectif atteint. C'est la
+ * distinction tenue depuis la v12.
+ */
+function cibleDe(key, scale) {
+    const prof = viewedProfile();
+    if (!prof || scale === 'off') return null;
+    if (!targetVisible(prof, key)) return null;
+    const v = targetFor(prof, key, scale).value;
+    return v == null ? null : v;
+}
+
+function attenduUn(key, de, a, scale) {
+    const cible = cibleDe(key, scale);
+    if (cible == null) return null;
+
+    // La maille du jour se passe de découpage : chaque jour ouvré pèse la cible.
+    if (scale === 'day') return cible * ouvres(de, a);
+
+    let total = 0, cur = de, garde = 0;
+    while (cur <= a && garde++ < 3000) {
+        const m = mailleDe(scale, cur);
+        const jm = ouvres(m.from, m.to);
+        if (jm > 0) {
+            const from = m.from > de ? m.from : de;
+            const to   = m.to   < a  ? m.to   : a;
+            total += (cible * ouvres(from, to)) / jm;
+        }
+        cur = addDaysISO(m.to, 1);
+    }
+    return total;
+}
+
+/**
+ * Attendu d'une carte, qui peut porter plusieurs compteurs (les fiches CRM sont
+ * la somme des entreprises et des contacts).
+ *
+ * Si UN SEUL des compteurs n'a pas d'objectif, on renvoie null. Une somme
+ * partielle serait pire que pas de chiffre du tout : elle afficherait un objectif
+ * anormalement bas et donnerait l'illusion d'une avance.
+ */
+function attendu(keys, de, a, scale) {
+    const liste = Array.isArray(keys) ? keys : [keys];
+    let total = 0;
+    for (const k of liste) {
+        const v = attenduUn(k, de, a, scale);
+        if (v == null) return null;
+        total += v;
+    }
+    return total;
+}
+
+/* Les cartes ne portent pas toutes une clé de compteur : le score n'a pas
+   d'objectif, et les fiches CRM sont la somme de deux compteurs. */
+const KPI_GOAL = {
+    meetings_booked: 'meetings_booked',
+    calls_made: 'calls_made',
+    calls_connected: 'calls_connected',
+    emails_sent: 'emails_sent',
+    crm: ['companies_created', 'contacts_created']
+};
+
+/**
+ * La ligne « attendu / retard » d'une carte de KPI.
+ *
+ * En mode moyenne, l'attendu devient une CADENCE par jour ouvré : comparer un
+ * cumul à une moyenne ne voudrait rien dire. Attention, le réalisé est lui
+ * divisé par les jours ACTIFS, pas ouvrés. C'est volontaire et c'est dit à
+ * l'écran : un jour ouvré non saisi reste un jour où de la production était
+ * attendue, l'escamoter reviendrait à récompenser l'absence de saisie.
+ */
+function goalHtml(cardKey, realise, mode) {
+    const goal = KPI_GOAL[cardKey];
+    if (!goal) return '';
+    const sc = refDe(cardKey);
+    if (sc === 'off') return '';
+
+    const brut = attendu(goal, state.a.from, state.a.to, sc);
+    const jo = ouvres(state.a.from, state.a.to);
+    const att = brut == null ? null : (mode === 'avg' ? (jo ? brut / jo : null) : brut);
+
+    let txt, cls = '';
+    if (att == null) {
+        txt = `aucun objectif ${motDe(sc)}`;
+        cls = ' kpi-goal--none';
+    } else {
+        const montre = v => mode === 'avg' ? fmtDec(v) : fmtInt(Math.round(v));
+        const ecart = realise - att;
+        const rond = mode === 'avg' ? Math.round(ecart * 10) / 10 : Math.round(ecart);
+        if (rond === 0)      { txt = `attendu ${montre(att)} · au rythme`; }
+        else if (rond > 0)   { txt = `attendu ${montre(att)} · avance de ${montre(Math.abs(ecart))}`; cls = ' kpi-goal--ahead'; }
+        else                 { txt = `attendu ${montre(att)} · retard de ${montre(Math.abs(ecart))}`; cls = ' kpi-goal--late'; }
+    }
+    return `<div class="kpi-goal"><span class="kpi-goal-txt${cls}">${escapeHtml(txt)}</span>${refSegHtml(cardKey)}</div>`;
+}
+
+/** Le segment des quatre lettres, pour une carte. Jamais de data-act ici. */
+function refSegHtml(key) {
+    const cur = refDe(key);
+    return `<span class="ref-seg" role="group" aria-label="Objectif de référence">${
+        REF_SCALES.map(s => `<button type="button" class="ref-btn${s.v === cur ? ' is-on' : ''}"
+            data-ref="${s.v}" data-ref-key="${escapeHtml(key)}"
+            title="Objectif ${s.mot}">${s.l}</button>`).join('')}</span>`;
+}
+
 const PRESETS = [
     { id: 'today', label: "Aujourd'hui vs hier", make: () => ({
         a: { from: T, to: T }, b: { from: addDaysISO(T, -1), to: addDaysISO(T, -1) } }) },
@@ -94,6 +303,14 @@ const PRESETS = [
     { id: 'monthY', label: 'Ce mois vs le même mois un an avant', make: () =>
         toDate({ from: startOfMonth(T), to: endOfMonth(T) },
                startOfMonth(addMonthsISO(T, -12)), endOfMonth(addMonthsISO(T, -12))) },
+    /* L'exercice manquait, alors que c'est la maille sur laquelle les objectifs
+       annuels sont posés. On le compare au précédent, tronqué à la même durée
+       écoulée par toDate() pour que la comparaison ne soit pas perdue d'avance. */
+    { id: 'fiscal', label: "Cet exercice vs le précédent", make: () => {
+        const f = fiscalBounds(T);
+        const p = fiscalBounds(addDaysISO(f.from, -1));
+        return toDate({ from: f.from, to: f.to }, p.from, p.to);
+    } },
     { id: 'quarter', label: 'Ce trimestre vs le précédent', make: () =>
         toDate({ from: startOfQuarter(T), to: endOfQuarter(T) },
                startOfQuarter(addMonthsISO(startOfQuarter(T), -1)),
@@ -451,7 +668,10 @@ const CHARTS = [
         },
         legend: ctx => [
             { color: A_MAIN, shape: 'line', label: `Période analysée · ${pLab(ctx.aP)}` },
-            { color: B_MAIN, shape: 'dash', label: `Référence · ${pLab(ctx.bP)}` }
+            { color: B_MAIN, shape: 'dash', label: `Référence · ${pLab(ctx.bP)}` },
+            ...(cibleDe(state.cumulMetric, refDe(state.cumulMetric)) != null
+                ? [{ color: REF_MAIN, shape: 'dash', label: `Objectif ${motDe(refDe(state.cumulMetric))}` }]
+                : [])
         ],
         note: () => `Chaque courbe additionne les résultats jour après jour depuis le début de sa période. ` +
             `Tant que la courbe bleue reste <b>au-dessus</b> de la violette, vous faites mieux qu'à la référence ` +
@@ -478,6 +698,29 @@ const CHARTS = [
             const n = Math.max(ca.length, cb.length);
             const pad = arr => Array.from({ length: n }, (_, i) => (i < arr.length ? arr[i] : null));
             const pa = pad(ca), pb = pad(cb);
+
+            /* Le trait de rythme. On l'accumule jour après jour au lieu de
+               rappeler attendu() pour chaque point : la boucle des jours ouvrés
+               serait relancée à chaque abscisse, soit plusieurs dizaines de
+               milliers de tours sur un exercice, pour un résultat identique. */
+            const scRef = refDe(key);
+            const cibleRef = cibleDe(key, scRef);
+            let paRef = null;
+            if (cibleRef != null) {
+                let acc = 0;
+                paRef = pad(ctx.aRows.map(r => {
+                    const d = r.activity_date;
+                    if (ouvres(d, d) > 0) {
+                        if (scRef === 'day') acc += cibleRef;
+                        else {
+                            const m = mailleDe(scRef, d);
+                            const jm = ouvres(m.from, m.to);
+                            if (jm > 0) acc += cibleRef / jm;
+                        }
+                    }
+                    return acc;
+                }));
+            }
             const metricLabel = { meetings_booked: 'Rendez-vous', calls_made: 'Appels',
                 calls_connected: 'Appels aboutis', calls_engaged: 'Appels avec échange',
                 emails_sent: 'E-mails', productivity_score: 'Score' }[key];
@@ -486,7 +729,8 @@ const CHARTS = [
                 labels: Array.from({ length: n }, (_, i) => `J${i + 1}`),
                 series: [
                     { name: `analysée (${label})`, color: A_MAIN, values: pa, area: true },
-                    { name: `référence (${label})`, color: B_MAIN, values: pb, dashed: true }
+                    { name: `référence (${label})`, color: B_MAIN, values: pb, dashed: true },
+                    ...(paRef ? [{ name: `objectif (${label})`, color: REF_MAIN, values: paRef, dashed: true }] : [])
                 ],
                 height: ctx.big ? 440 : 260,
                 // L'axe des abscisses porte « J1, J2… » : l'info-bulle rétablit
@@ -1048,6 +1292,50 @@ function renderControls() {
             lengthsDiffer() ? 'Activé automatiquement car les deux périodes n\'ont pas la même durée.' : ''} Les week-ends et jours d\'absence ne diluent pas le résultat.`;
 }
 
+/**
+ * La phrase de rythme ne porte QUE sur le compteur pivot, celui choisi sur la
+ * course cumulée. C'est la conséquence directe du réglage par carte : agréger
+ * plusieurs compteurs calés sur des mailles différentes produirait un
+ * pourcentage littéralement faux. Un seul compteur, une seule référence.
+ */
+function phraseRythme(aA) {
+    const key = state.cumulMetric;
+    const sc = refDe(key);
+    if (sc === 'off') return '';
+    const att = attendu(key, state.a.from, state.a.to, sc);
+    if (att == null || att <= 0) return '';
+
+    const fait = Number(aA[key] || 0);
+    const pct = Math.round((fait / att) * 100);
+    const nom = (METRICS.find(m => m.key === key) || {}).label || key;
+    const retard = Math.round(att - fait);
+    const queue = retard > 0
+        ? `il en manque <b>${fmtInt(retard)}</b> pour être au rythme`
+        : `soit <b>${fmtInt(-retard)}</b> d'avance sur le rythme`;
+
+    return `<div class="summary-sentence summary-sentence--goal">
+        Sur cette période, <b>${fmtInt(fait)}</b> ${escapeHtml(String(nom).toLowerCase())}
+        pour <b>${fmtInt(Math.round(att))}</b> attendu(s) au titre de l'objectif
+        ${escapeHtml(motDe(sc))}, soit <b>${pct} %</b> du rythme nécessaire : ${queue}.
+    </div>`;
+}
+
+/** Le segment de la zone de lecture, celui qui donne le défaut de toute la page. */
+function renderRefSeg() {
+    const host = $('#seg-ref');
+    if (!host) return;
+    host.querySelectorAll('button').forEach(b =>
+        b.classList.toggle('is-on', b.dataset.refAll === refDefaut));
+
+    const ex = $('#explain-ref');
+    if (!ex) return;
+    const n = refExceptions.size;
+    ex.innerHTML = refDefaut === 'off'
+        ? 'Aucun trait de rythme : la page ne compare que les deux périodes.'
+        : `Le rythme attendu est déduit de l'objectif ${escapeHtml(motDe(refDefaut))}, étalé sur les jours ouvrés.`
+          + (n ? ` <b>${n} compteur(s)</b> lisent une autre maille.` : '');
+}
+
 function renderSummary(aA, aB) {
     const mode = effMode();
     const warn = [];
@@ -1085,6 +1373,7 @@ function renderSummary(aA, aB) {
             comparé à <b>${escapeHtml(periodLabel(state.b.from, state.b.to))}</b>
             (${aB.activeDays} sur ${aB.workdays}).
         </div>
+        ${phraseRythme(aA)}
         ${warn.join(' ')}`;
 }
 
@@ -1122,6 +1411,7 @@ function renderKpis(aA, aB) {
             <div class="kpi-value">${show(v)}${unit ? ` <small>${unit}</small>` : ''}</div>
             ${delta(Math.round(v * 10) / 10, Math.round(r * 10) / 10).html}
             <div class="kpi-sub">${it.extra ? `${escapeHtml(it.extra)}<br>` : ''}Référence : ${show(r)} ${unit}</div>
+            ${goalHtml(it.key, v, mode)}
         </div>`;
     }).join('');
 
@@ -1469,10 +1759,36 @@ function normalize(p) {
     return p;
 }
 
+/**
+ * Redessine la page à partir des données DÉJÀ chargées.
+ *
+ * Séparé de refresh() pour une raison précise : changer la maille de référence
+ * ne change aucune donnée, seulement la façon de les lire. Passer par refresh()
+ * relancerait les treize mois d'historique à chaque clic sur une lettre, soit
+ * une requête réseau complète pour repositionner un trait déjà calculable.
+ */
+function repaint() {
+    if (!loaded.from) return;   // rien n'a encore été chargé
+    videCacheOuvres();
+    renderRefSeg();
+
+    const aRows = rowsFor(state.a);
+    const aA = agg(aRows), aB = agg(rowsFor(state.b));
+
+    renderSummary(aA, aB);
+    renderKpis(aA, aB);
+    renderScorePanel(aA);
+    renderCharts();
+    renderTable(aRows);
+    if (openKey) paintModal();
+}
+
 async function refresh() {
+    videCacheOuvres();
     normalize(state.a); normalize(state.b);
     renderPresets();
     renderControls();
+    renderRefSeg();
 
     const status = txt => { $('#control-summary').innerHTML = `<span class="pill pill--info">${txt}</span>`; };
     status('Chargement…');
@@ -1488,15 +1804,7 @@ async function refresh() {
         loaded = { from, to };
         bestEver = best;
 
-        const aRows = rowsFor(state.a);
-        const aA = agg(aRows), aB = agg(rowsFor(state.b));
-
-        renderSummary(aA, aB);
-        renderKpis(aA, aB);
-        renderScorePanel(aA);
-        renderCharts();
-        renderTable(aRows);
-        if (openKey) paintModal();
+        repaint();
     } catch (e) {
         status('⚠ Lecture impossible');
         toast(humanError(e), 'error', 6000);
@@ -1529,6 +1837,24 @@ async function refresh() {
     });
     bind('#a-from', 'a', 'from'); bind('#a-to', 'a', 'to');
     bind('#b-from', 'b', 'from'); bind('#b-to', 'b', 'to');
+
+    /* Le sélecteur de rythme. data-ref-all pilote la page entière, data-ref plus
+       data-ref-key ne pilote qu'une carte. Deux attributs distincts pour que le
+       clic sur une carte ne soit jamais confondu avec le réglage global. */
+    document.addEventListener('click', ev => {
+        const b = ev.target.closest('[data-ref-all], [data-ref-key]');
+        if (!b) return;
+        if (b.dataset.refAll) {
+            /* Changer le défaut EFFACE les exceptions. Sans ça, le forçage
+               d'hier resterait collé à un compteur sans que personne ne sache
+               pourquoi il ne suit plus le réglage de la page. */
+            refDefaut = b.dataset.refAll;
+            refExceptions.clear();
+        } else {
+            poserRef(b.dataset.refKey, b.dataset.ref);
+        }
+        repaint();
+    });
 
     // Raccourcis de la zone A
     document.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => {
@@ -1588,6 +1914,19 @@ async function refresh() {
     // pour une largeur donnée, il faut les refaire. Seuls les graphiques sont
     // reconstruits, pas les données, donc aucune requête n'est relancée.
     onResize(() => { renderCharts(); if (openKey) paintModal(); });
+
+    /* Les objectifs, la visibilité et le mois d'ouverture de l'exercice ne
+       servaient à rien tant que la page ne comparait que deux périodes. Ils lui
+       sont maintenant indispensables : sans eux, targetFor renverrait null
+       partout et l'écran annoncerait « aucun objectif » sur des compteurs qui en
+       ont un, ce qui est pire que pas de trait du tout. Un échec réseau ne doit
+       pas pour autant empêcher la page de s'afficher : on prévient en console et
+       la page vit sans rythme. */
+    try {
+        await Promise.all([loadSettings(), loadTargets(), loadVisibility()]);
+    } catch (e) {
+        console.warn('Objectifs indisponibles : la page s\'affiche sans trait de rythme.', e);
+    }
 
     await refresh();
     hideVeil();

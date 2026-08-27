@@ -10,6 +10,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="./css/app.css">
+    <!-- Chargée après app.css, qui n'est jamais modifiée : cette feuille ne
+         contient que ce qu'ajoute le rythme attendu (v21). -->
+    <link rel="stylesheet" href="./css/performances.css">
 </head>
 <body>
 
@@ -107,6 +110,15 @@
                         <button data-mode="avg" type="button">Moyenne / jour actif</button>
                     </div>
                     <div class="seg-explain" id="explain-mode"></div>
+                    <div class="seg-label">Objectif de référence</div>
+                    <div class="seg" id="seg-ref">
+                        <button data-ref-all="off" type="button">Aucun</button>
+                        <button data-ref-all="day" type="button" title="Objectif journalier">J</button>
+                        <button data-ref-all="week" type="button" title="Objectif hebdomadaire">S</button>
+                        <button data-ref-all="month" type="button" title="Objectif mensuel">M</button>
+                        <button data-ref-all="year" type="button" title="Objectif de l'exercice">A</button>
+                    </div>
+                    <div class="seg-explain" id="explain-ref"></div>
                 </div>
             </div>
 
