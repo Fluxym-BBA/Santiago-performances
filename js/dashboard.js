@@ -1967,6 +1967,11 @@ async function refresh() {
 
     $('#btn-export').addEventListener('click', exportCsv);
 
+    /* Le calendrier suit la personne consultée : linkFor ajoute le ?u= quand il
+       le faut, et ne l'ajoute pas quand on regarde ses propres chiffres. */
+    $('#btn-calendar').href = './' + linkFor('calendrier.html',
+        viewedProfile() ? viewedProfile().user_id : null);
+
     // Rotation du téléphone ou redimensionnement : les graphiques sont dessinés
     // pour une largeur donnée, il faut les refaire. Seuls les graphiques sont
     // reconstruits, pas les données, donc aucune requête n'est relancée.

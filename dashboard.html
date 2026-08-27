@@ -157,6 +157,13 @@
                    le meilleur jour de la période est surligné en vert.</p>
             </div>
             <div class="section-head-actions">
+                <!-- Second chemin vers le calendrier (v23), le principal étant
+                     l'entrée du menu de droite. Il est ici parce que c'est en
+                     parcourant ce tableau qu'on se demande à quoi ressemblait
+                     le mois. Son href est posé par dashboard.js, avec linkFor :
+                     écrit en dur, il ramènerait au calendrier du lecteur quand
+                     celui-ci consulte quelqu'un d'autre. -->
+                <a class="btn btn--ghost" id="btn-calendar" href="./calendrier.html">🗓️ Voir en calendrier</a>
                 <button class="btn btn--ghost" id="btn-export" type="button">⬇ Exporter en CSV</button>
             </div>
         </div>

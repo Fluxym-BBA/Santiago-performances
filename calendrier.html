@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Mon calendrier | Cockpit BDR — Fluxym</title>
+    <link rel="icon" href="./assets/favicon-Fluxym-V2.png" sizes="32x32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./css/app.css">
+    <!-- Les couleurs des cinq catégories de profil sont partagées avec la page
+         de saisie et le tableau détaillé : même feuille, donc aucune dérive
+         possible entre les trois écrans. -->
+    <link rel="stylesheet" href="./css/profil-journee.css">
+    <!-- Chargée après app.css, qui n'est jamais modifiée. -->
+    <link rel="stylesheet" href="./css/calendrier.css">
+</head>
+<body>
+
+<div class="loading-veil">Chargement du calendrier…</div>
+
+<nav id="main-nav"></nav>
+
+<header class="page-hero">
+    <div class="page-container">
+        <span class="hero-badge">Relecture</span>
+        <h1>Retracer ma <em>semaine</em></h1>
+        <p>Une case par jour, un chiffre, une couleur. Ce qui a été fait, ce qui a occupé
+           la journée, et surtout les jours qui n'ont jamais été saisis.</p>
+    </div>
+</header>
+
+<main class="page-main page-main--pulled">
+    <div class="page-container">
+
+        <!-- ==============================================================
+             PILOTAGE
+             Trois réglages, pas un de plus : la période, la densité, et le
+             compteur qui remplit les cases. Cette page ne compare rien et ne
+             calcule aucun écart : c'est le rôle de Mes performances, et
+             dupliquer la mécanique de comparaison ici la rendrait illisible.
+             ============================================================== -->
+        <section class="control-panel cal-panel">
+
+            <div class="cal-nav">
+                <button type="button" class="cal-arrow" id="cal-prev"
+                        aria-label="Période précédente">‹</button>
+                <div class="cal-period">
+                    <strong id="cal-label">—</strong>
+                    <span id="cal-sub"></span>
+                </div>
+                <button type="button" class="cal-arrow" id="cal-next"
+                        aria-label="Période suivante">›</button>
+                <button type="button" class="cal-today" id="cal-today">Aujourd'hui</button>
+            </div>
+
+            <div class="cal-tools">
+                <div class="seg" id="seg-vue" role="group" aria-label="Densité d'affichage">
+                    <button type="button" data-vue="week">Semaine</button>
+                    <button type="button" data-vue="month" class="is-on">Mois</button>
+                </div>
+
+                <label class="cal-pivot">
+                    <span>Chiffre affiché</span>
+                    <select id="cal-metric" aria-label="Compteur affiché dans les cases"></select>
+                </label>
+            </div>
+        </section>
+
+        <!-- Synthèse de la période affichée. Trois nombres, dont le premier est
+             le plus important de la page : combien de jours ouvrés ont été
+             saisis. Le reste de l'outil ne sert à rien si celui-là décroche. -->
+        <section class="cal-summary" id="cal-summary"></section>
+
+        <!-- ==============================================================
+             LA GRILLE
+             ============================================================== -->
+        <section class="cal-board">
+            <div class="cal-dows" id="cal-dows"></div>
+            <div class="cal-grid" id="cal-grid"></div>
+        </section>
+
+        <!-- ==============================================================
+             LE JOUR SÉLECTIONNÉ
+
+             Un panneau sous la grille plutôt qu'une info-bulle au survol. Une
+             bulle ne survit pas au tactile : le pointerdown la referme avant
+             qu'on ait lu quoi que ce soit, et il aurait fallu deux mécaniques,
+             une par type d'écran. Un panneau se comporte pareil partout, se lit
+             au clavier, et laisse le temps de lire.
+             ============================================================== -->
+        <section class="cal-detail" id="cal-detail"></section>
+
+        <!-- La légende explique sa propre lecture, comme tous les graphiques de
+             cet outil : sans elle, l'intensité du fond est un dégradé
+             décoratif. -->
+        <section class="cal-legend" id="cal-legend"></section>
+
+    </div>
+</main>
+
+<footer class="app-footer">
+    Cockpit BDR · Fluxym — cette page ne modifie rien, elle relit ce qui a été saisi.
+</footer>
+
+<script src="./js/config.js"></script>
+<script type="module" src="./js/calendrier.js"></script>
+</body>
+</html>

@@ -91,6 +91,18 @@ const MENU = [
     // parce qu'on ne s'y rend que deux fois par an, et que la règle des trois
     // onglets vaut plus que la visibilité d'un réglage.
     { href: './compte.html', label: 'Mon compte', icon: '🔑', when: () => true },
+    // Le calendrier (v23) : la relecture d'une semaine ou d'un mois, jour par
+    // jour. Dans le menu et non dans la barre du haut, parce que la règle des
+    // trois onglets vaut plus que la visibilité d'un écran, et parce qu'un
+    // quatrième onglet obligerait à faire basculer la barre en mode réduit plus
+    // tôt, donc à retoucher app.css. Un second chemin, plus visible, part du
+    // tableau détaillé de la page Performances, là où le besoin se fait sentir.
+    //
+    // Miroir : quand on consulte quelqu'un, l'entrée mène à SON calendrier, pas
+    // au sien. Un écran de relecture qui change de personne en silence ferait
+    // lire les chiffres d'un autre sans le dire.
+    { href: './calendrier.html', label: 'Mon calendrier', labelOther: 'Son calendrier',
+      icon: '🗓️', when: p => isContributor(p), miroir: true },
     // Le carnet d'entreprises : ouvert à tous ceux qui y écrivent, et non aux
     // seuls administrateurs. Celui qui se trompe en tapant un nom est celui qui
     // saisit, le soir, seul : faire passer la correction par un administrateur

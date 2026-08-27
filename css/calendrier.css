@@ -1,0 +1,437 @@
+/* ============================================================================
+   MON CALENDRIER (v23)
+
+   Feuille dédiée, chargée après app.css, qui n'est jamais modifiée. Elle
+   n'utilise que les variables de :root déjà déclarées là-bas.
+
+   Les couleurs des catégories de profil ne sont pas ici : elles viennent de
+   DAY_PROFILE_KINDS dans js/api.js, écrites en style en ligne, pour que la
+   saisie, le tableau détaillé et le calendrier ne puissent pas diverger.
+   ========================================================================== */
+
+/* ----------------------------------------------------------------------------
+   PILOTAGE
+   -------------------------------------------------------------------------- */
+
+.cal-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px 20px;
+}
+
+.cal-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.cal-arrow {
+    width: 38px;
+    height: 38px;
+    font-size: 1.3rem;
+    line-height: 1;
+    color: var(--gray-600);
+    background: var(--white);
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.cal-arrow:hover { border-color: var(--cyan); color: var(--cyan); }
+
+.cal-period {
+    display: flex;
+    flex-direction: column;
+    min-width: 210px;
+    text-align: center;
+}
+
+.cal-period strong {
+    font-size: 1.05rem;
+    color: var(--gray-900);
+    text-transform: capitalize;
+}
+
+.cal-period span {
+    font-size: 0.76rem;
+    color: var(--gray-500);
+}
+
+.cal-today {
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--cyan);
+    background: transparent;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-md);
+    padding: 9px 14px;
+    cursor: pointer;
+}
+
+.cal-today:hover { border-color: var(--cyan); }
+
+.cal-tools {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.cal-pivot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--gray-500);
+}
+
+.cal-pivot select {
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--gray-900);
+    background: var(--white);
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-md);
+    padding: 9px 11px;
+    cursor: pointer;
+}
+
+/* ----------------------------------------------------------------------------
+   SYNTHÈSE
+   -------------------------------------------------------------------------- */
+
+.cal-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    margin: 18px 0 14px;
+    padding: 14px 18px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.cal-stat { display: flex; flex-direction: column; gap: 2px; }
+.cal-stat b { font-size: 1.25rem; color: var(--gray-900); line-height: 1.1; }
+.cal-stat span { font-size: 0.76rem; color: var(--gray-500); }
+
+/* Le compte des jours saisis est le seul chiffre de la page qui puisse virer à
+   l'avertissement : c'est le seul dont dépend tout le reste de l'outil. */
+.cal-stat--alert b { color: #92400e; }
+
+/* ----------------------------------------------------------------------------
+   LA GRILLE
+   -------------------------------------------------------------------------- */
+
+.cal-board { margin-bottom: 18px; }
+
+.cal-dows,
+.cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.cal-dows {
+    margin-bottom: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gray-500);
+    text-align: center;
+}
+
+.cal-cell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 84px;
+    padding: 8px 9px 12px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    overflow: hidden;
+    text-align: left;
+    font-family: inherit;
+}
+
+.cal-cell:hover { border-color: var(--cyan); }
+
+.cal-cell.is-sel {
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 2px var(--cyan-glow);
+}
+
+/* Case hors de la période affichée : présente pour que la grille reste une
+   grille, mais effacée. Elle n'est pas cliquable. */
+.cal-cell--out {
+    background: transparent;
+    border-color: transparent;
+    cursor: default;
+    pointer-events: none;
+}
+
+.cal-cell--out .cal-num { color: var(--gray-300); }
+
+/* Week-end : atténué, jamais masqué. Une journée de samedi saisie doit se voir,
+   sinon on efface une information réelle. */
+.cal-cell--we { background: var(--gray-50); }
+
+/* Jour jamais saisi : hachuré. Pas un fond gris uni, qui se confondrait avec un
+   volume faible, et pas de rouge, qui transformerait un oubli en faute. */
+.cal-cell--empty {
+    background: repeating-linear-gradient(
+        45deg, var(--white), var(--white) 5px, var(--gray-50) 5px, var(--gray-50) 10px);
+}
+
+.cal-cell--today { border-color: var(--navy); }
+
+.cal-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.cal-num {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--gray-600);
+}
+
+.cal-cell--today .cal-num {
+    color: var(--white);
+    background: var(--navy);
+    border-radius: var(--radius-full);
+    padding: 1px 7px;
+}
+
+.cal-flag { font-size: 0.72rem; line-height: 1; }
+
+/* Le chiffre du compteur choisi. Il occupe le centre de la case, c'est lui
+   qu'on vient chercher. */
+.cal-val {
+    margin-top: auto;
+    font-size: 1.45rem;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--gray-900);
+}
+
+.cal-val--zero { color: var(--gray-400); }
+.cal-val--none { font-size: 0.72rem; font-weight: 600; color: var(--gray-400); }
+
+/* Le fond d'intensité est un calque séparé, sous le texte : teinter directement
+   le fond de la case obligerait à recalculer la couleur du texte pour garder le
+   contraste à chaque niveau. */
+.cal-fill {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+.cal-cell > .cal-head,
+.cal-cell > .cal-val,
+.cal-cell > .cal-lines,
+.cal-cell > .cal-band { position: relative; }
+
+/* La bande de profil, en bas de la case, découpée aux pourcentages déclarés. */
+.cal-band {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    height: 5px;
+}
+
+.cal-band i { display: block; height: 100%; }
+
+/* ----------------------------------------------------------------------------
+   VUE SEMAINE
+   Sept cases sur toute la largeur : chacune est cinq fois plus grande, donc on
+   y écrit tous les compteurs en clair. Ce n'est pas la vue mois agrandie, c'est
+   la même grille à une densité que la place autorise enfin.
+   -------------------------------------------------------------------------- */
+
+.cal-grid--week .cal-cell { min-height: 210px; }
+
+.cal-lines {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.cal-linerow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.74rem;
+    color: var(--gray-600);
+}
+
+.cal-linerow b { font-size: 0.82rem; color: var(--gray-900); }
+.cal-linerow.is-zero, .cal-linerow.is-zero b { color: var(--gray-400); }
+
+.cal-week-profile {
+    margin-top: 8px;
+    font-size: 0.72rem;
+    color: var(--gray-600);
+    line-height: 1.35;
+}
+
+/* ----------------------------------------------------------------------------
+   PANNEAU DU JOUR
+   -------------------------------------------------------------------------- */
+
+.cal-detail {
+    padding: 16px 20px 18px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.cal-detail-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin-bottom: 12px;
+}
+
+.cal-detail-head h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--gray-900);
+    text-transform: capitalize;
+}
+
+.cal-detail-open {
+    margin-left: auto;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--white);
+    background: var(--cyan);
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 9px 14px;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.cal-detail-open:hover { background: var(--navy); }
+
+.cal-values {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px 18px;
+}
+
+.cal-valrow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 5px 0;
+    border-bottom: 1px dashed var(--gray-200);
+    font-size: 0.82rem;
+    color: var(--gray-600);
+}
+
+.cal-valrow b { font-size: 0.95rem; color: var(--gray-900); }
+.cal-valrow.is-zero, .cal-valrow.is-zero b { color: var(--gray-400); }
+
+.cal-detail-note {
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: var(--gray-50);
+    border-radius: var(--radius-md);
+    font-size: 0.82rem;
+    color: var(--gray-600);
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.cal-detail-empty {
+    font-size: 0.85rem;
+    color: var(--gray-500);
+    line-height: 1.5;
+}
+
+/* ----------------------------------------------------------------------------
+   LÉGENDE
+   -------------------------------------------------------------------------- */
+
+.cal-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 20px;
+    margin: 16px 0 8px;
+    font-size: 0.75rem;
+    color: var(--gray-500);
+}
+
+.cal-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+
+.cal-legend-box {
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    border: 1px solid var(--gray-200);
+}
+
+.cal-legend-scale { display: inline-flex; gap: 2px; }
+.cal-legend-scale i { width: 15px; height: 15px; border-radius: 3px; display: block; }
+
+/* ----------------------------------------------------------------------------
+   TABLETTE ET TÉLÉPHONE COUCHÉ
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1023px) {
+    .cal-grid--week { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cal-grid--week .cal-cell { min-height: 0; }
+    .cal-dows--week { display: none; }
+}
+
+/* ----------------------------------------------------------------------------
+   TÉLÉPHONE DEBOUT
+
+   La grille du mois reste une grille de sept colonnes : c'est elle qui donne
+   la forme du mois, et la casser en liste supprimerait la seule chose que
+   cette page apporte. Ce sont les cases qui maigrissent, pas la structure. La
+   vue semaine, elle, passe en colonne unique : sept cases détaillées côte à
+   côte n'ont jamais tenu sur 360 pixels.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    .cal-panel { flex-direction: column; align-items: stretch; }
+    .cal-nav { justify-content: space-between; }
+    .cal-today { min-height: 44px; }
+    .cal-arrow { width: 44px; height: 44px; }
+    .cal-tools { justify-content: space-between; }
+    .cal-pivot { flex: 1 1 100%; }
+    .cal-pivot select { flex: 1 1 auto; min-height: 44px; }
+
+    .cal-dows, .cal-grid { gap: 4px; }
+    .cal-dows { font-size: 0.6rem; }
+    .cal-cell { min-height: 58px; padding: 5px 4px 9px; }
+    .cal-num { font-size: 0.7rem; }
+    .cal-val { font-size: 0.95rem; }
+    .cal-cell--today .cal-num { padding: 1px 5px; }
+
+    .cal-grid--week { grid-template-columns: minmax(0, 1fr); }
+    .cal-grid--week .cal-cell { min-height: 0; padding: 10px 12px 14px; }
+
+    .cal-detail-open { margin-left: 0; width: 100%; text-align: center; min-height: 44px; line-height: 26px; }
+}
