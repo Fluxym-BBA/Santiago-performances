@@ -14,7 +14,7 @@ import {
     maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS,
     isViewingOther, viewedProfile, canWriteViewed, linkFor, scoreWeightsMeta, metricsFor,
     loadSettings, loadTargets, loadVisibility, targetFor, targetVisible,
-    joursOuvres, fiscalBounds
+    joursOuvres, fiscalBounds, fetchProfilesRange, profileText, PROFILE_BY_KIND
 } from './api.js';
 import {
     num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
@@ -32,6 +32,12 @@ import { renderNav } from './nav.js';
    -------------------------------------------------------------------------- */
 
 const T = todayISO();
+
+/* Profil de la journée (v22), indexé par date ISO. Rempli par refresh, jamais
+   par repaint : c'est une lecture réseau, elle n'a rien à faire dans un
+   redessin déclenché par un clic sur une lettre. Vide si la migration v22 n'est
+   pas passée, et dans ce cas rien n'apparaît nulle part. */
+let profils = new Map();
 
 const state = {
     a: { from: addDaysISO(T, -6), to: T },
@@ -506,6 +512,46 @@ function editLink(iso) {
    que déclencher l'affichage.
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   RAPPEL DU PROFIL DE LA JOURNÉE (v22)
+
+   Ce tableau de bord dit ce qui a été produit ; le profil dit à quoi la journée
+   a servi. Les deux se lisent ensemble ou pas du tout : une journée à quatre
+   appels n'est interprétable qu'en sachant qu'elle s'est passée en salon.
+
+   Le rappel n'apparaît QUE SUR UNE JOURNÉE. Sur une semaine ou un mois, il
+   faudrait additionner des profils de jours différents, et « 30 % de salon sur
+   le mois » ne veut plus rien dire pour qui cherche à comprendre un creux
+   précis. Agréger les profils sur une période est un sujet à part entière, avec
+   sa propre visualisation, pas une ligne d'info-bulle.
+   -------------------------------------------------------------------------- */
+
+/** La pastille compacte du tableau détaillé. Chaîne vide si rien n'est déclaré. */
+function profilChip(iso) {
+    const l = profils.get(iso);
+    if (!l || !l.length) return '';
+    const m = PROFILE_BY_KIND[l[0].kind];
+    return `<span class="dp-chip"><span class="dp-dot" style="background:${m ? m.color : 'var(--gray-300)'}"></span>`
+        + `${escapeHtml(profileText(l))}</span>`;
+}
+
+/**
+ * La ligne ajoutée au pied des info-bulles journalières. Elle prend la place
+ * qu'il faut : sur une journée à trois activités, la phrase complète est plus
+ * utile qu'une abréviation qui obligerait à aller vérifier ailleurs.
+ */
+function profilFoot(bk, gran) {
+    if (gran !== 'day' || !bk || !bk.key) return '';
+    const l = profils.get(bk.key);
+    if (!l || !l.length) return '';
+    const pastilles = l.map(x => {
+        const m = PROFILE_BY_KIND[x.kind];
+        return `<span class="dp-dot" style="background:${m ? m.color : 'var(--gray-300)'}"></span>`;
+    }).join('');
+    return `<span class="dp-tip">${pastilles}<span>Journée déclarée : `
+        + `<b>${escapeHtml(profileText(l, { long: true }))}</b></span></span>`;
+}
+
 /** Titre riche d'un paquet : date longue pour un jour, plage de dates sinon. */
 function bucketTitle(b, gran) {
     if (!b || !b.rows.length) return '—';
@@ -845,10 +891,10 @@ const CHARTS = [
                             ...(i > 0 ? [{ label: `vs ${granWord(ctx.gran)} précédent`,
                                            html: dl(values[i], values[i - 1]).html }] : [])
                         ],
-                        foot: top
+                        foot: profilFoot(bk, ctx.gran) + (top
                             ? `Poste dominant : <b>${escapeHtml(top.w.plural)}</b>, ` +
                               `${Math.round((top.pts / Math.max(1, values[i])) * 100)} % des points.`
-                            : 'Aucune action enregistrée sur ce ' + granWord(ctx.gran) + '.'
+                            : 'Aucune action enregistrée sur ce ' + granWord(ctx.gran) + '.')
                     };
                 }
             });
@@ -995,11 +1041,11 @@ const CHARTS = [
                                 ? [{ label: 'RDV / échange vs réf.',
                                      html: ppl(a.meeting_rate_engaged, aB.meeting_rate_engaged) }] : [])
                         ],
-                        foot: a.calls_made < 10
+                        foot: profilFoot(bk, ctx.gran) + (a.calls_made < 10
                             ? '<b>Peu d\u2019appels</b> sur ce ' + granWord(ctx.gran) + ' : le taux est très sensible, à lire avec prudence.'
                             : !a.fullyMeasured && a.activeDays > 0
                             ? escapeHtml(measureGap(a)) + ' : le taux de RDV après échange n\u2019est pas calculé sur ce ' + granWord(ctx.gran) + '.'
-                            : 'Écarts en <b>points</b> de pourcentage, pas en pourcentage d\u2019un pourcentage.'
+                            : 'Écarts en <b>points</b> de pourcentage, pas en pourcentage d\u2019un pourcentage.')
                     };
                 }
             });
@@ -1214,7 +1260,8 @@ function renderPanelPair(host, ctx, metrics) {
                 html: gA && gB ? dl(gA[m.key], gB[m.key]).html
                     : '<span class="delta delta--flat">= non comparable</span>'
             })),
-            foot: `Les deux panneaux partagent la même échelle verticale (maximum ${fmtInt(shared)}).`
+            foot: profilFoot(bA, ctx.gran)
+                + `Les deux panneaux partagent la même échelle verticale (maximum ${fmtInt(shared)}).`
         };
     };
 
@@ -1695,7 +1742,8 @@ function renderTable(aRows) {
         <tr class="${cls.join(' ')}">
             <td data-th="Jour" class="td-day">${escapeHtml(formatLong(r.activity_date).replace(/ \d{4}$/, ''))}
                 ${r.notes ? `<span title="${escapeHtml(r.notes)}" style="cursor:help"> 📝</span>` : ''}
-                ${r.is_correction ? '<b class="tag tag--fix" title="Dernière écriture faite par un administrateur, pas par le titulaire du compte">corrigé</b>' : ''}</td>
+                ${r.is_correction ? '<b class="tag tag--fix" title="Dernière écriture faite par un administrateur, pas par le titulaire du compte">corrigé</b>' : ''}
+                ${profilChip(r.activity_date)}</td>
             <td data-th="Appels">${fmtInt(num(r, 'calls_made'))}</td>
             <td data-th="Aboutis">${fmtInt(num(r, 'calls_connected'))}</td>
             <td data-th="Échanges" class="${isMeasured(r) ? '' : 'td-muted'}">${
@@ -1799,8 +1847,17 @@ async function refresh() {
     const to = [state.a.to, state.b.to, T].reduce(maxISO);
 
     try {
-        const [rows, best] = await Promise.all([fetchRange(from, to), fetchBestDay()]);
+        /* Une requête de plus par rafraîchissement, jamais une par graphique ni
+           une par ligne de tableau. Elle ne peut pas faire échouer la page : un
+           tableau de bord sans les profils reste un tableau de bord juste, il
+           lui manque seulement l'explication des jours creux. */
+        const [rows, best, profs] = await Promise.all([
+            fetchRange(from, to),
+            fetchBestDay(),
+            fetchProfilesRange(from, to).catch(() => new Map())
+        ]);
         byDate = new Map(rows.map(r => [r.activity_date, r]));
+        profils = profs;
         loaded = { from, to };
         bestEver = best;
 

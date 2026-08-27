@@ -16,6 +16,11 @@
          Il n'utilise que les variables de :root définies dans app.css et pourra
          y être fondu quand le sujet sera clos. -->
     <link rel="stylesheet" href="./css/saisie-events.css">
+    <!-- Styles du profil de la journée (v22). Même raison que ci-dessus : une
+         feuille par sujet, chargée après app.css, jamais de retouche à app.css.
+         Elle est partagée avec le tableau de bord, qui rappelle le profil dans
+         son tableau détaillé. -->
+    <link rel="stylesheet" href="./css/profil-journee.css">
 </head>
 <body>
 
@@ -84,6 +89,29 @@
         <div class="period-hint" id="period-hint" hidden></div>
 
         <div id="past-warning"></div>
+
+        <!-- PROFIL DE LA JOURNÉE (v22)
+
+             À QUOI A SERVI LA JOURNÉE. Une journée à quatre appels ressemble à
+             une journée ratée ; si elle s'est passée en salon, elle est
+             normale. La note du jour le dit déjà, mais en texte libre : aucune
+             moyenne, aucune jauge ne sait la lire. Ce bloc rend calculable ce
+             que la note raconte, et ne remplace pas la note.
+
+             PLACÉ ICI, avant les compteurs, et non en bas de page à côté de la
+             note : en bas il ne serait jamais rempli. Il tient sur une ligne
+             les jours ordinaires, un clic suffit.
+
+             CE N'EST PAS UNE FEUILLE DE TEMPS. Facultatif, absent du score,
+             sans effet sur aucun compteur ni aucun objectif. Le jour où il se
+             lit comme un contrôle horaire, il cesse d'être rempli, et tout
+             l'outil repose sur le fait qu'il le soit.
+
+             Le contenu est construit par saisie.js : cinq catégories, un ordre
+             d'affichage et une palette qui vivent dans DAY_PROFILE_KINDS
+             (js/api.js), pour que la saisie et le tableau de bord ne puissent
+             pas diverger. -->
+        <section class="dayprofile" id="day-profile" hidden></section>
 
         <!-- CARTES DE SAISIE
 

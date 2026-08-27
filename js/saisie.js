@@ -37,7 +37,8 @@ import {
     TARGET_SCALES, scaleOf, saveGaugeScale, periodBounds, periodLabel,
     fetchRange, joursOuvres, loadSettings,
     loadVisibility, targetVisible, setVisibility,
-    fmtCible, auDixieme, canWriteViewed, metricScalesOf, saveMetricScales
+    fmtCible, auDixieme, canWriteViewed, metricScalesOf, saveMetricScales,
+    DAY_PROFILE_KINDS, PROFILE_BY_KIND, profileTotal, fetchDayProfile, saveDayProfile
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -1881,11 +1882,16 @@ async function load(iso) {
            compteur du cycle de vente : un BDR ne paie rien pour cette v10. La
            quatrième ne part qu'en lecture semaine ou mois, et loadPeriode ne
            lève pas : le cumul est un confort, la saisie du jour est l'essentiel. */
-        const [current, previous, evts] = await Promise.all([
+        /* La cinquième lit le profil de la journée (v22). Elle ne peut pas
+           faire échouer le chargement : une base où la migration v22 n'est pas
+           passée doit continuer à saisir ses chiffres, et le profil se met
+           simplement en retrait. C'est la même logique que loadPeriode. */
+        const [current, previous, evts, prof] = await Promise.all([
             fetchDay(iso),
             fetchDay(addDaysISO(iso, -1)),
             hasEvents ? fetchDayEvents(iso) : Promise.resolve([]),
-            loadPeriode()
+            loadPeriode(),
+            fetchDayProfile(iso).catch(() => null)
         ]);
         row = current || { ...EMPTY_DAY, activity_date: iso, notes: '' };
         prevRow = previous;
@@ -1894,8 +1900,11 @@ async function load(iso) {
            les laisser en place après un changement de date les ferait lire comme
            s'ils concernaient le jour affiché. */
         SALES_EVENT_KINDS.forEach(hideWarn);
+        profilLisible = prof !== null;
+        profil = prof || [];
         paint();
         paintEventLists();
+        paintProfil();
         status(current ? '✓ À jour' : 'Aucune saisie pour ce jour', current ? 'saved' : '');
     } catch (e) {
         status('⚠ Lecture impossible', 'error');
@@ -2112,6 +2121,340 @@ function buildTargets() {
    Démarrage
    -------------------------------------------------------------------------- */
 
+/* ==========================================================================
+   LE PROFIL DE LA JOURNÉE (v22)
+
+   POURQUOI. Une journée à quatre appels ressemble à une journée ratée. Si elle
+   s'est passée en salon, elle est normale. La note du jour dit déjà ce genre de
+   chose, mais en texte libre : aucune moyenne, aucune jauge, aucun graphique ne
+   sait la lire. Ce bloc rend calculable ce que la note raconte. Il ne la
+   remplace pas, elle reste en place pour tout le reste.
+
+   CE QU'IL N'EST PAS. Une feuille de temps. Facultatif, absent du score, sans
+   effet sur aucun compteur ni aucun objectif. Le jour où il se lit comme un
+   contrôle horaire, il cesse d'être rempli, et l'application entière repose sur
+   le fait qu'elle soit remplie tous les jours.
+
+   TROIS RÈGLES D'ERGONOMIE, tenues partout dans ce module :
+
+   1. UNE SEULE ACTIVITÉ VAUT 100 %, SANS RIEN SAISIR. Tant qu'il n'y a qu'une
+      ligne, aucun pourcentage n'apparaît. La journée de salon complète se
+      déclare en un clic, et c'est le cas le plus fréquent après la journée de
+      prospection complète.
+
+   2. UNE SOMME QUI NE FAIT PAS 100 N'EST NI BLOQUÉE NI CORRIGÉE EN SILENCE.
+      Cette page n'a pas de bouton valider, tout part au fil de la frappe :
+      bloquer y serait un corps étranger. L'écran écrit ce qui manque et laisse
+      finir. Normaliser d'office fabriquerait un chiffre que personne n'a
+      déclaré, ce que cette application ne fait nulle part.
+
+   3. RIEN N'EST PRÉ-REMPLI. Une journée sans profil veut dire « non renseigné »,
+      pas « journée normale ». Conséquence assumée : au début, seuls les jours
+      atypiques seront décrits. C'est suffisant pour l'usage visé, et plus
+      honnête que d'inventer cent pour cent de prospection sur tous les jours
+      déjà passés.
+
+   ÉCRITURE. Tout le profil part en une seule fois, par set_day_profile.
+   Ajouter une deuxième activité fait passer la première de 100 % à 50 % : deux
+   lignes changent d'un seul geste, et trois requêtes PostgREST dont la deuxième
+   échoue laisseraient un profil à 150 % en base.
+   ========================================================================== */
+
+/* La liste affichée. Une entrée dont kind vaut '' est une ligne en attente :
+   elle existe à l'écran, elle n'existe pas en base. */
+let profil = [];
+
+/* Faux quand la lecture a échoué, typiquement une migration v22 non passée. Le
+   bloc se met alors en retrait au lieu de crier : la saisie du jour, elle,
+   fonctionne parfaitement sans lui. */
+let profilLisible = true;
+
+/* 25, 50 et 75 couvrent la quasi-totalité des journées réellement partagées.
+   Un pas de 10 offrirait dix boutons pour une précision que personne ne possède
+   sur son propre emploi du temps ; ce qui n'entre pas dans ces trois valeurs se
+   tape dans le champ à côté. */
+const PARTS_RAPIDES = [25, 50, 75];
+
+/** Les lignes réellement déclarées. Une ligne sans catégorie n'existe pas encore. */
+const profilVrai = () => profil.filter(l => l.kind);
+
+/**
+ * Part attribuée à une ligne qui vient de recevoir sa catégorie. Deux cas, et
+ * deux seulement :
+ *
+ *  - c'est la seule activité : 100 %, et le pourcentage reste invisible ;
+ *  - il y en avait exactement une, à 100 % : on partage en deux. C'est le seul
+ *    endroit où une ligne existante est modifiée sans qu'on l'ait touchée, et
+ *    c'est défendable : ce 100 % n'a jamais été choisi, il était implicite.
+ *
+ * Sinon la nouvelle ligne prend ce qui reste, ou 25 % s'il ne reste rien.
+ */
+function attribuePart(i) {
+    const autres = profil.filter((x, k) => k !== i && x.kind);
+    if (!autres.length) { profil[i].share = 100; return; }
+    if (autres.length === 1 && autres[0].share === 100) {
+        autres[0].share = 50;
+        profil[i].share = 50;
+        return;
+    }
+    const reste = 100 - profileTotal(autres);
+    profil[i].share = reste > 0 ? reste : 25;
+}
+
+/** Une ligne, en HTML. `parts` dit si les pourcentages sont visibles. */
+function profilLigneHtml(l, i, parts) {
+    const meta = PROFILE_BY_KIND[l.kind] || null;
+    const pris = new Set(profil.filter((x, k) => k !== i && x.kind).map(x => x.kind));
+
+    /* Chaque liste déroulante masque ce que les autres lignes ont déjà pris :
+       le doublon de catégorie devient impossible par construction, plutôt que
+       refusé après coup par une contrainte de base que personne ne comprend. */
+    const options = DAY_PROFILE_KINDS
+        .filter(k => !pris.has(k.key))
+        .map(k => `<option value="${k.key}"${k.key === l.kind ? ' selected' : ''}>`
+            + `${escapeHtml(k.label)}</option>`)
+        .join('');
+
+    const boutons = PARTS_RAPIDES.map(p =>
+        `<button type="button" class="dp-part${l.share === p ? ' is-on' : ''}" `
+        + `data-dp-part="${p}">${p} %</button>`).join('');
+
+    const part = parts && l.kind
+        ? `<span class="dp-parts">${boutons}</span>`
+          + `<input type="text" class="dp-pct" data-dp-pct inputmode="numeric" maxlength="3" `
+          + `value="${l.share == null ? '' : l.share}" aria-label="Part de la journée, en pourcentage">`
+          + `<span class="dp-pct-unit">%</span>`
+        : '';
+
+    /* La précision libre n'apparaît que sur Webinar, Salon et Autre : nommer un
+       salon apporte quelque chose, « préciser la prospection » ferait doublon
+       avec la note du jour, qui est juste en dessous. */
+    const precision = meta && meta.named
+        ? `<input type="text" class="dp-label" data-dp-label maxlength="80" `
+          + `value="${escapeHtml(l.label || '')}" `
+          + `placeholder="${escapeHtml(meta.key === 'autre' ? 'Préciser (facultatif)' : 'Nom de l\'événement (facultatif)')}" `
+          + `aria-label="Précision">`
+        : '';
+
+    return `<li class="dp-line" data-i="${i}">`
+        + `<span class="dp-dot" style="background:${meta ? meta.color : 'var(--gray-300)'}"></span>`
+        + `<select class="dp-kind" data-dp-kind aria-label="Type d'activité">`
+        + `<option value="">Choisir une activité…</option>${options}</select>`
+        + part + precision
+        + `<button type="button" class="dp-del" data-dp-del aria-label="Retirer cette activité">×</button>`
+        + `</li>`;
+}
+
+/** Le bloc entier. Reconstruit à chaque changement de structure, jamais pendant une frappe. */
+function paintProfil() {
+    const box = $('#day-profile');
+    if (!box) return;
+
+    if (!profilLisible) {
+        box.hidden = false;
+        box.innerHTML = `<div class="dp-head"><span class="dp-title">🕘 Profil de la journée</span>`
+            + `<span class="dp-sub">Indisponible pour le moment. La saisie du jour, elle, `
+            + `fonctionne normalement.</span></div>`;
+        return;
+    }
+
+    const vraies = profilVrai();
+    const parts = vraies.length >= 2;
+    const complet = vraies.length >= DAY_PROFILE_KINDS.length || profil.some(l => !l.kind);
+
+    box.hidden = false;
+    box.innerHTML =
+        `<div class="dp-head">`
+        + `<span class="dp-title">🕘 Profil de la journée</span>`
+        + `<span class="dp-sub">À quoi la journée a servi. Facultatif, sans effet sur le score.</span>`
+        + `<span class="dp-state" data-dp-state></span>`
+        + `</div>`
+        + `<div class="dp-bar" data-dp-bar hidden></div>`
+        + `<ul class="dp-lines">${profil.map((l, i) => profilLigneHtml(l, i, parts)).join('')}</ul>`
+        + `<button type="button" class="dp-add" data-dp-add${complet ? ' hidden' : ''}>`
+        + `${profil.length ? '+ Ajouter une activité' : '+ Décrire cette journée'}</button>`
+        + `<p class="dp-rest" data-dp-rest></p>`;
+
+    paintProfilMeta();
+}
+
+/**
+ * La barre, le reste et l'état. Séparés du reste du rendu parce qu'ils changent
+ * à chaque frappe dans le champ des pourcentages : reconstruire les lignes
+ * ferait perdre le focus au caractère près.
+ */
+function paintProfilMeta() {
+    const box = $('#day-profile');
+    if (!box || !profilLisible) return;
+
+    const vraies = profilVrai();
+    const total = profileTotal(vraies);
+
+    const bar = box.querySelector('[data-dp-bar]');
+    if (bar) {
+        /* Une barre d'une seule couleur n'apprend rien que le libellé ne dise
+           déjà : elle n'apparaît qu'à partir de deux activités. */
+        bar.hidden = vraies.length < 2;
+        bar.innerHTML = vraies.map(l => {
+            const m = PROFILE_BY_KIND[l.kind];
+            return `<span class="dp-seg" style="width:${Math.max(0, Math.min(100, l.share))}%;`
+                + `background:${m ? m.color : 'var(--gray-300)'}"></span>`;
+        }).join('') + (total < 100
+            ? `<span class="dp-seg dp-seg--rest" style="width:${100 - total}%"></span>` : '');
+    }
+
+    const rest = box.querySelector('[data-dp-rest]');
+    if (rest) {
+        if (vraies.length < 2 || total === 100) {
+            rest.className = 'dp-rest';
+            rest.innerHTML = vraies.length === 1
+                ? 'Une seule activité : elle occupe toute la journée.'
+                : (vraies.length ? 'La journée est répartie en entier.' : '');
+        } else if (total < 100) {
+            rest.className = 'dp-rest';
+            rest.innerHTML = `Il reste <b>${100 - total} %</b> de la journée non affectés. `
+                + `Rien n'oblige à arriver à cent.`;
+        } else {
+            rest.className = 'dp-rest dp-rest--over';
+            rest.innerHTML = `<b>${total} %</b> déclarés, soit ${total - 100} de plus qu'une journée.`;
+        }
+    }
+
+    const st = box.querySelector('[data-dp-state]');
+    if (st) st.textContent = vraies.length ? '' : 'Non renseigné';
+}
+
+/**
+ * Envoi du profil complet. Anti-rebond court : cliquer trois fois de suite sur
+ * les boutons de part ne doit pas produire trois écritures, et la date est
+ * capturée à la programmation pour qu'un envoi en retard n'atterrisse jamais
+ * sur la journée suivante.
+ */
+function pousseProfil(ms = 500) {
+    if (!allowWrite()) return;
+    const iso = day;
+    const lignes = profilVrai().map(l => ({ kind: l.kind, share: l.share, label: l.label }));
+
+    schedule('profil', () => {
+        inflight++;
+        status('Enregistrement…', 'saving');
+        enqueue(async () => {
+            try {
+                await saveDayProfile(iso, lignes);
+                inflight--;
+                settle();
+            } catch (e) {
+                inflight--;
+                settle();
+                toast(humanError(e), 'error', 6000);
+                /* On ne sait plus ce que contient la base : on relit plutôt que
+                   de laisser à l'écran une répartition qui n'y est pas. */
+                if (iso === day) {
+                    try { profil = await fetchDayProfile(iso); paintProfil(); }
+                    catch { /* la relecture a échoué aussi, l'écran garde son état */ }
+                }
+            }
+        });
+    }, ms);
+}
+
+function ajouteProfilLigne() {
+    if (profil.some(l => !l.kind)) return;                       // déjà une ligne en attente
+    if (profilVrai().length >= DAY_PROFILE_KINDS.length) return; // les cinq sont prises
+    profil.push({ kind: '', share: null, label: '' });
+    paintProfil();
+    const sels = $('#day-profile').querySelectorAll('.dp-kind');
+    if (sels.length) sels[sels.length - 1].focus();
+}
+
+function poseProfilKind(i, kind) {
+    const l = profil[i];
+    if (!l) return;
+    if (!kind) { retireProfilLigne(i); return; }
+    if (!allowWrite()) { paintProfil(); return; }
+
+    const nouvelle = !l.kind;
+    l.kind = kind;
+    if (nouvelle || l.share == null) attribuePart(i);
+    // Changer Salon en Prospection efface la précision : elle nommait le salon.
+    if (!PROFILE_BY_KIND[kind].named) l.label = '';
+    paintProfil();
+    pousseProfil();
+}
+
+function retireProfilLigne(i) {
+    const l = profil[i];
+    if (!l) return;
+    if (l.kind && !allowWrite()) { paintProfil(); return; }
+
+    const avaitUneCategorie = !!l.kind;
+    profil.splice(i, 1);
+
+    /* Quand il ne reste qu'une activité, elle reprend toute la journée. Laisser
+       une ligne unique à 50 % obligerait à lire « il reste 50 % » sur une
+       journée qui n'a plus qu'une seule chose dedans. */
+    const restantes = profilVrai();
+    if (restantes.length === 1) restantes[0].share = 100;
+
+    paintProfil();
+    if (avaitUneCategorie) pousseProfil(200);
+}
+
+/** Valeur tapée dans le champ. Une frappe intermédiaire vide ne remet rien à zéro. */
+function poseProfilPart(i, brut, { repeint = false } = {}) {
+    const l = profil[i];
+    if (!l || !l.kind) return;
+    const n = parseInt(String(brut).replace(/[^\d]/g, ''), 10);
+    if (!Number.isFinite(n) || n <= 0) return;
+    l.share = Math.min(100, n);
+    if (repeint) paintProfil(); else paintProfilMeta();
+    pousseProfil(repeint ? 300 : 800);
+}
+
+function poseProfilLabel(i, v) {
+    const l = profil[i];
+    if (!l || !l.kind) return;
+    l.label = String(v).slice(0, 80);
+    pousseProfil(1000);
+}
+
+/** Branchements. Une seule délégation sur le conteneur, qui est reconstruit sans arrêt. */
+function brancheProfil() {
+    const box = $('#day-profile');
+    if (!box) return;
+    const rang = el => {
+        const li = el.closest('.dp-line');
+        return li ? Number(li.dataset.i) : -1;
+    };
+
+    box.addEventListener('click', ev => {
+        if (ev.target.closest('[data-dp-add]')) { ajouteProfilLigne(); return; }
+        const del = ev.target.closest('[data-dp-del]');
+        if (del) { retireProfilLigne(rang(del)); return; }
+        const part = ev.target.closest('[data-dp-part]');
+        if (part) { poseProfilPart(rang(part), part.dataset.dpPart, { repeint: true }); }
+    });
+
+    box.addEventListener('change', ev => {
+        const sel = ev.target.closest('[data-dp-kind]');
+        if (sel) poseProfilKind(rang(sel), sel.value);
+    });
+
+    box.addEventListener('input', ev => {
+        const pct = ev.target.closest('[data-dp-pct]');
+        if (pct) { poseProfilPart(rang(pct), pct.value); return; }
+        const lab = ev.target.closest('[data-dp-label]');
+        if (lab) poseProfilLabel(rang(lab), lab.value);
+    });
+
+    /* À la sortie du champ, la valeur est remise au propre : « 007 » redevient
+       7, un champ vidé retrouve sa valeur, et les boutons se rallument sur la
+       bonne part. Pendant la frappe, on ne touche à rien. */
+    box.addEventListener('focusout', ev => {
+        if (ev.target.closest('[data-dp-pct]')) paintProfil();
+    });
+}
+
 (async function init() {
     session = await requireAuth({ needs: 'bdr' });
 
@@ -2171,6 +2514,12 @@ function buildTargets() {
        échec laisse tous les objectifs affichés, ce qui est le bon défaut. */
     appliqueVisibilite();
     buildTargets();
+
+    /* Le profil de la journée (v22). La délégation est posée une bonne fois sur
+       le conteneur, qui n'est jamais remplacé : seul son contenu est reconstruit,
+       et il l'est à chaque geste. Poser les écouteurs sur les boutons eux-mêmes
+       obligerait à les reposer à chaque rendu. */
+    brancheProfil();
 
     const wanted = new URLSearchParams(location.search).get('date');
     const valid = wanted && /^\d{4}-\d{2}-\d{2}$/.test(wanted) && diffDays(todayISO(), wanted) >= 0;

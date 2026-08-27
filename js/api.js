@@ -2657,3 +2657,159 @@ export const minISO = (a, b) => (diffDays(b, a) >= 0 ? a : b);
 
 /** Renvoie la plus récente des deux dates. */
 export const maxISO = (a, b) => (diffDays(b, a) >= 0 ? b : a);
+
+/* ==========================================================================
+   PROFIL DE LA JOURNÉE (v22)
+
+   À quoi la journée a-t-elle servi ? Cinq catégories, une répartition en
+   pourcentages, et rien d'autre. Ce bloc ne touche à aucun compteur, à aucun
+   score, à aucun objectif : il donne le contexte qui manquait pour lire un
+   jour creux, pas une mesure de plus.
+
+   L'ORDRE DE LA LISTE EST CELUI DE LA FRÉQUENCE ATTENDUE, du plus courant au
+   plus rare. Le premier de la liste sera choisi neuf fois sur dix ; « Autre »
+   reste en dernier, sinon il devient la poubelle par facilité.
+
+   Cet ordre sert aussi d'ordre d'affichage partout, y compris dans la barre de
+   répartition : les couleurs se retrouvent au même endroit d'un jour à l'autre,
+   ce qui est ce qui rend la barre lisible sans la lire.
+   ========================================================================== */
+
+export const DAY_PROFILE_KINDS = [
+    {
+        key: 'prospection', label: 'Prospection', short: 'Prospection',
+        color: '#00A7E1', named: false,
+        hint: 'Appels, e-mails, relances : le cœur du métier.'
+    },
+    {
+        key: 'crm_cleansing', label: 'Cleansing du CRM', short: 'Cleansing',
+        color: '#0369a1', named: false,
+        hint: 'Nettoyage, dédoublonnage, mise à jour des fiches existantes.'
+    },
+    {
+        key: 'webinar', label: 'Webinar', short: 'Webinar',
+        color: '#8b5cf6', named: true,
+        hint: 'Préparation, animation ou suivi d\'un webinar marketing.'
+    },
+    {
+        key: 'salon', label: 'Salon', short: 'Salon',
+        color: '#f59e0b', named: true,
+        hint: 'Présence sur un salon, déplacement compris.'
+    },
+    {
+        key: 'autre', label: 'Autre', short: 'Autre',
+        color: '#0B2046', named: true,
+        hint: 'Réunion interne, formation, administratif.'
+    }
+];
+
+export const PROFILE_BY_KIND = Object.fromEntries(DAY_PROFILE_KINDS.map(k => [k.key, k]));
+export const isProfileKind = k => Object.prototype.hasOwnProperty.call(PROFILE_BY_KIND, k);
+
+/** Rang d'une catégorie dans l'ordre canonique. Inconnue : rejetée à la fin. */
+const profileRank = k => {
+    const i = DAY_PROFILE_KINDS.findIndex(x => x.key === k);
+    return i < 0 ? 99 : i;
+};
+
+/** Trie une liste de lignes dans l'ordre canonique des catégories. */
+const sortProfile = lines =>
+    (lines || []).slice().sort((a, b) => profileRank(a.kind) - profileRank(b.kind));
+
+/**
+ * Phrase courte décrivant une journée : « Salon », « Prospection 50 % ·
+ * Cleansing 50 % ». Le pourcentage disparaît quand il n'y a qu'une seule
+ * activité : « Salon 100 % » n'apprend rien de plus que « Salon », et une
+ * répartition à une seule part n'est pas une répartition.
+ *
+ * Renvoie du TEXTE BRUT, jamais du HTML : c'est à l'appelant d'échapper, comme
+ * partout ailleurs.
+ */
+export function profileText(lines, { long = false } = {}) {
+    const l = sortProfile(lines);
+    if (!l.length) return '';
+    const nom = x => {
+        const m = PROFILE_BY_KIND[x.kind];
+        const base = long ? (m ? m.label : x.kind) : (m ? m.short : x.kind);
+        return x.label ? `${base} (${x.label})` : base;
+    };
+    if (l.length === 1) return nom(l[0]);
+    return l.map(x => `${nom(x)} ${x.share} %`).join(' · ');
+}
+
+/** Somme des parts déclarées. 100 attendu, mais jamais imposé. */
+export const profileTotal = lines =>
+    (lines || []).reduce((t, l) => t + (Number(l.share) || 0), 0);
+
+/** Le profil d'un jour, dans l'ordre canonique. Liste vide si rien n'est déclaré. */
+export async function fetchDayProfile(iso) {
+    const { data, error } = await supabase
+        .from('day_profile')
+        .select('kind,share,label,activity_date')
+        .eq('user_id', target())
+        .eq('activity_date', iso);
+    if (error) throw error;
+    return sortProfile(data || []);
+}
+
+/**
+ * Remplace le profil d'une journée en une seule écriture.
+ *
+ * POURQUOI UNE FONCTION EN BASE ET NON TROIS APPELS POSTGREST. Ajouter une
+ * deuxième activité fait passer la première de 100 % à 50 % : deux lignes
+ * changent d'un seul geste. Trois requêtes dont la deuxième échoue laisseraient
+ * un profil à 150 % enregistré. set_day_profile fait le remplacement dans une
+ * transaction : ou tout passe, ou rien ne bouge.
+ *
+ * La fonction est SECURITY INVOKER, donc la RLS s'applique : écrire chez
+ * quelqu'un d'autre sans en avoir le droit échoue ici exactement comme un
+ * INSERT direct, et non silencieusement.
+ */
+export async function saveDayProfile(iso, lines) {
+    const propre = (lines || [])
+        .filter(l => l && isProfileKind(l.kind))
+        .map(l => ({
+            kind: l.kind,
+            share: Math.max(1, Math.min(100, Math.round(Number(l.share) || 100))),
+            label: (l.label || '').trim().slice(0, 80) || null
+        }));
+
+    /* Un doublon de catégorie violerait la contrainte d'unicité et ferait
+       échouer toute la journée. L'écran ne le permet pas — chaque liste
+       déroulante masque ce que les autres lignes ont déjà pris — mais une
+       écriture ne se repose pas sur la discipline de l'écran. */
+    const vues = new Set();
+    const final = propre.filter(l => (vues.has(l.kind) ? false : vues.add(l.kind)));
+
+    const { data, error } = await supabase.rpc('set_day_profile', {
+        p_user: target(),
+        p_date: iso,
+        p_lines: final
+    });
+    if (error) throw error;
+    return sortProfile(data || []);
+}
+
+/**
+ * Profils d'une plage de dates, indexés par date ISO.
+ *
+ * Une seule requête pour toute la période : le tableau de bord en charge une
+ * par rafraîchissement, jamais une par graphique ni une par ligne de tableau.
+ */
+export async function fetchProfilesRange(fromIso, toIso) {
+    const { data, error } = await supabase
+        .from('day_profile')
+        .select('activity_date,kind,share,label')
+        .eq('user_id', target())
+        .gte('activity_date', fromIso)
+        .lte('activity_date', toIso);
+    if (error) throw error;
+
+    const par = new Map();
+    (data || []).forEach(l => {
+        if (!par.has(l.activity_date)) par.set(l.activity_date, []);
+        par.get(l.activity_date).push(l);
+    });
+    par.forEach((v, k) => par.set(k, sortProfile(v)));
+    return par;
+}

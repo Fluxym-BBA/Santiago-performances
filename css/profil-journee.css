@@ -1,0 +1,335 @@
+/* ============================================================================
+   PROFIL DE LA JOURNÉE (v22)
+
+   Feuille à part, et non ajout à app.css : app.css est retouché par plusieurs
+   chantiers en parallèle et deux livraisons qui le réécrivent en entier
+   s'effacent l'une l'autre. Elle n'utilise que les variables de :root déclarées
+   dans app.css, et pourra y être fondue quand le sujet sera clos.
+
+   Chargée par index.html (la saisie) et par dashboard.html (le rappel dans le
+   tableau détaillé et dans les info-bulles).
+
+   Les couleurs des cinq catégories ne sont PAS ici : elles vivent dans
+   DAY_PROFILE_KINDS, dans js/api.js, parce que les info-bulles et la barre de
+   répartition les écrivent en style en ligne. Une seule source, sinon la
+   pastille du tableau de bord et la barre de la saisie divergent au premier
+   changement de palette.
+   ========================================================================== */
+
+/* ----------------------------------------------------------------------------
+   LE BLOC, DANS LA PAGE DE SAISIE
+
+   Placé entre la barre de date et les cartes de compteurs. En bas de page il ne
+   serait jamais rempli ; en haut, il donne le contexte de tout ce qui suit et
+   se remplit en un clic les jours ordinaires.
+   -------------------------------------------------------------------------- */
+
+.dayprofile {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 14px 18px 16px;
+    margin-bottom: 22px;
+}
+
+.dp-head {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+}
+
+.dp-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--gray-900);
+}
+
+/* Le sous-titre dit « facultatif » et le dit toujours. Cet écran vit du fait
+   qu'on le remplit tous les jours : un champ qui a l'air obligatoire et qu'on
+   ne sait pas remplir est une raison de fermer l'onglet. */
+.dp-sub {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+}
+
+.dp-state {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--gray-500);
+    white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------------------
+   LA BARRE DE RÉPARTITION
+   Un seul trait, les couleurs dans l'ordre canonique des catégories. Elle
+   n'apparaît qu'à partir de deux activités : une barre d'une seule couleur
+   n'apprend rien que le libellé ne dise déjà.
+   -------------------------------------------------------------------------- */
+
+.dp-bar {
+    display: flex;
+    height: 10px;
+    margin: 12px 0 4px;
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    background: var(--gray-100);
+}
+
+.dp-seg {
+    height: 100%;
+    transition: width 0.18s ease;
+}
+
+/* Le blanc restant quand la somme n'atteint pas 100. Hachuré et non gris uni :
+   un gris plein se lirait comme une sixième catégorie. */
+.dp-seg--rest {
+    background: repeating-linear-gradient(
+        45deg, var(--gray-200), var(--gray-200) 4px, var(--gray-100) 4px, var(--gray-100) 8px);
+}
+
+/* ----------------------------------------------------------------------------
+   LES LIGNES
+   -------------------------------------------------------------------------- */
+
+.dp-lines {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dp-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* La puce de couleur devant la ligne : c'est elle qui relie la ligne au segment
+   de la barre au-dessus. Sans elle, la barre est un dégradé décoratif. */
+.dp-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: var(--gray-300);
+}
+
+.dp-kind {
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--gray-900);
+    background: var(--white);
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    min-width: 172px;
+    cursor: pointer;
+}
+
+.dp-kind:focus-visible,
+.dp-pct:focus-visible,
+.dp-label:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 1px;
+}
+
+/* Les trois boutons de part. Ils ne remplacent pas le champ, ils l'accélèrent :
+   25, 50 et 75 couvrent la quasi-totalité des journées réellement partagées, et
+   ce qui n'y entre pas se tape. */
+.dp-parts {
+    display: inline-flex;
+    gap: 4px;
+}
+
+.dp-part {
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    background: var(--gray-100);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 7px 9px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.dp-part:hover { background: var(--gray-200); }
+
+.dp-part.is-on {
+    background: var(--navy);
+    border-color: var(--navy);
+    color: var(--white);
+}
+
+.dp-pct {
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-align: right;
+    color: var(--gray-900);
+    width: 56px;
+    padding: 8px 6px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+}
+
+.dp-pct-unit {
+    font-size: 0.8rem;
+    color: var(--gray-500);
+    margin-left: -4px;
+}
+
+/* La précision libre n'apparaît que sur Webinar, Salon et Autre : sur
+   Prospection elle ferait doublon avec la note du jour, qui reste en place. */
+.dp-label {
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: var(--gray-900);
+    background: var(--white);
+    border: 1px solid var(--gray-300);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    flex: 1 1 200px;
+    min-width: 140px;
+}
+
+.dp-label::placeholder { color: var(--gray-400); }
+
+.dp-del {
+    margin-left: auto;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--gray-500);
+    background: transparent;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.dp-del:hover { color: var(--danger); border-color: var(--danger); background: #fee2e2; }
+
+.dp-add {
+    margin-top: 10px;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--cyan);
+    background: transparent;
+    border: 1px dashed var(--gray-300);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    cursor: pointer;
+}
+
+.dp-add:hover { border-color: var(--cyan); background: rgba(0, 167, 225, 0.06); }
+.dp-add[hidden] { display: none; }
+
+/* ----------------------------------------------------------------------------
+   LE RESTE
+
+   Ni bloquant, ni corrigé en silence. L'écran dit ce qu'il manque et laisse
+   finir : cette page n'a pas de bouton valider, tout part au fil de la frappe,
+   et une somme partielle est un état de saisie normal, pas une faute.
+   -------------------------------------------------------------------------- */
+
+.dp-rest {
+    margin: 10px 0 0;
+    font-size: 0.8rem;
+    color: var(--gray-500);
+}
+
+.dp-rest b { color: var(--gray-900); }
+
+.dp-rest--over {
+    color: #92400e;
+    background: #fef3c7;
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    display: inline-block;
+}
+
+.dp-note {
+    margin: 8px 0 0;
+    font-size: 0.78rem;
+    color: var(--gray-500);
+}
+
+/* ----------------------------------------------------------------------------
+   RAPPEL DANS LE TABLEAU DE BORD
+
+   Une pastille dans la colonne Jour du tableau détaillé, et une ligne dans les
+   info-bulles journalières. Pas de treizième colonne : douze ne tiennent déjà
+   pas sur un téléphone.
+   -------------------------------------------------------------------------- */
+
+.dp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--gray-600);
+    background: var(--gray-100);
+    border-radius: var(--radius-full);
+    padding: 2px 8px 2px 6px;
+    margin-left: 6px;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.dp-chip .dp-dot { width: 7px; height: 7px; }
+
+.dp-tip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.dp-tip .dp-dot { width: 8px; height: 8px; }
+
+/* ----------------------------------------------------------------------------
+   TÉLÉPHONE DEBOUT
+
+   Sous 640 pixels la ligne passe en colonne et les cibles tactiles montent à
+   44 pixels. Rien n'est tronqué : le libellé d'une catégorie tient en entier
+   ou la ligne s'allonge.
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+    .dayprofile { padding: 12px 14px 14px; }
+
+    .dp-line {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
+        border-left: 3px solid var(--gray-200);
+        padding-left: 10px;
+    }
+
+    .dp-dot { align-self: flex-start; }
+    .dp-kind { min-width: 0; width: 100%; min-height: 44px; }
+    .dp-parts { width: 100%; }
+    .dp-part { flex: 1 1 0; min-height: 44px; }
+    .dp-pct { width: 72px; min-height: 44px; }
+    .dp-label { width: 100%; min-height: 44px; }
+
+    .dp-del {
+        margin-left: 0;
+        width: 100%;
+        min-height: 44px;
+    }
+
+    .dp-add { width: 100%; min-height: 44px; }
+}
