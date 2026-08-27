@@ -27,7 +27,7 @@
 
 import {
     requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY, todayISO,
-    addDaysISO, formatLong, relativeLabel, diffDays, fetchDay,
+    addDaysISO, formatLong, relativeLabel, diffDays, minISO, maxISO, fetchDay,
     saveDay, bump, setMetric, loadTargets, targetFor, targetsLoaded, humanError,
     SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor,
     SALES_EVENT_KINDS, isEventMetric, cleanAccountName, accountKey,
@@ -37,7 +37,7 @@ import {
     TARGET_SCALES, scaleOf, saveGaugeScale, periodBounds, periodLabel,
     fetchRange, joursOuvres, loadSettings,
     loadVisibility, targetVisible, setVisibility,
-    fmtCible, auDixieme, canWriteViewed
+    fmtCible, auDixieme, canWriteViewed, metricScalesOf, saveMetricScales
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -88,9 +88,49 @@ let myMetrics = METRICS;
    personne ou le défaut de scaleOf, qui est le mois depuis le 27/08. Elle n'est
    donc jamais à l'écran ; elle vaut 'day' pour que les fonctions appelées avant
    init, s'il en apparaissait un jour, ne demandent pas de cumul de période. */
-let scale = 'day';           // 'day' | 'week' | 'month'
-let periode = null;          // { from, to } de l'échelle en cours, null en mode jour
-let cumulHorsJour = null;    // { metrique: nombre|null } sur la période, jour affiché exclu
+let scale = 'day';           // 'day' | 'week' | 'month' | 'year' — le défaut de la page
+let periodes = {};           // { échelle: { from, to } } pour les échelles réellement utilisées
+let cumuls = {};             // { échelle: { métrique: nombre|null } }, jour affiché exclu
+
+/* --------------------------------------------------------------------------
+   UNE ÉCHELLE PAR COMPTEUR (v20)
+
+   Le bandeau du haut donne le défaut, `echelles` porte les exceptions. Les
+   appels se pilotent à la semaine, les rendez-vous au mois, le chiffre
+   d'affaires à l'exercice : une échelle unique obligeait à choisir la moins
+   mauvaise pour treize compteurs qui n'ont pas le même rythme.
+
+   CONSÉQUENCE SUR LES DONNÉES. Il ne suffit plus d'un cumul, il en faut un par
+   échelle affichée. Ils sont calculés en une SEULE requête, sur la plage qui
+   englobe toutes les périodes en jeu, puis découpés en mémoire : demander
+   quatre fois la base pour quatre échelles qui se chevauchent presque
+   entièrement serait absurde, et l'exercice fiscal représente environ deux cent
+   cinquante lignes, soit quelques dizaines de kilo-octets.
+   -------------------------------------------------------------------------- */
+
+let echelles = {};           // { métrique: échelle } — exceptions au défaut de la page
+
+/** L'échelle de lecture d'un compteur : la sienne si elle existe, sinon celle de la page. */
+function echelleDe(key) {
+    return echelles[key] || scale;
+}
+
+/**
+ * Les échelles réellement à l'écran, hors jour.
+ *
+ * Le jour n'a pas de cumul à calculer : la valeur affichée est celle de `row`,
+ * qui suit la frappe en cours.
+ */
+function echellesAffichees() {
+    const s = new Set();
+    myMetrics.forEach(m => { const e = echelleDe(m.key); if (e !== 'day') s.add(e); });
+    return [...s];
+}
+
+/** Combien de compteurs s'écartent du défaut de la page, parmi ceux affichés. */
+function nbExceptions() {
+    return myMetrics.filter(m => echelles[m.key] && echelles[m.key] !== scale).length;
+}
 
 /* Trois états à distinguer, sans quoi l'écran et la base finissent par
    raconter deux histoires différentes :
@@ -139,6 +179,33 @@ const ask = {};
    gauge-*, target-* et gauge-pct-* sont lus par paintGauge(), et deux gabarits
    qui les composent chacun de leur côté finiraient par ne plus les écrire
    pareil. */
+/**
+ * Les quatre lettres qui règlent l'échelle d'UN compteur : J, S, M, A.
+ *
+ * POURQUOI À LA PLACE DU TEXTE. La légende disait « Objectif : 40 du mois ».
+ * Le texte est remplacé plutôt que complété : quatre lettres ET « du mois » sur
+ * la même ligne, à côté de l'objectif et du pourcentage, ne tiennent pas dans
+ * les colonnes étroites de l'entonnoir. Chaque lettre porte donc son intitulé
+ * complet en info-bulle, et le bandeau du haut continue d'écrire l'échelle de
+ * la page en toutes lettres.
+ *
+ * POURQUOI PAS data-act. La page branche l'incrémentation sur tout élément
+ * portant data-act : une lettre d'échelle qui le porterait ajouterait un appel
+ * au compteur à chaque changement de vue. Même précaution que pour l'œil de la
+ * v16, et un test le vérifie.
+ *
+ * Ces boutons ne sont pas rendus quand l'objectif est masqué (v16), puisque
+ * toute la jauge disparaît avec lui : sans objectif affiché, l'échelle de
+ * lecture de l'objectif n'a plus d'objet.
+ */
+function echSegHtml(m) {
+    const btn = sc => `<button type="button" class="ech-btn" data-ech="${sc.key}"
+        data-ech-key="${m.key}" aria-pressed="false"
+        title="Objectif ${escapeHtml(sc.article)}">${escapeHtml(sc.label[0])}</button>`;
+    return `<span class="ech-seg" id="ech-${m.key}"
+                  role="group" aria-label="Échelle de l'objectif">${TARGET_SCALES.map(btn).join('')}</span>`;
+}
+
 function gaugeHtml(m) {
     if (!m.target) return '';
     /* L'identifiant sur le conteneur, et pas seulement sur la barre : depuis la
@@ -151,7 +218,7 @@ function gaugeHtml(m) {
                 <i class="gauge-mark" id="gaugemark-${m.key}" hidden></i>
             </div>
             <div class="gauge-legend">
-                <span>Objectif : <b id="target-${m.key}">–</b><span id="gauge-scale-${m.key}"></span></span>
+                <span>Objectif : <b id="target-${m.key}">–</b>${echSegHtml(m)}</span>
                 <span id="gauge-pct-${m.key}">0 %</span>
             </div>
             <div class="gauge-rest" id="gauge-rest-${m.key}" hidden></div>
@@ -449,6 +516,13 @@ function buildCards() {
        qui porte data-act, un œil ainsi nommé aurait incrémenté le compteur. */
     document.querySelectorAll('[data-oeil]').forEach(btn => {
         btn.addEventListener('click', () => basculeObjectif(btn.dataset.oeil));
+    });
+
+    /* Les quatre lettres d'échelle. Même précaution que pour l'œil : l'attribut
+       n'est pas data-act, sans quoi chaque changement de vue passerait un appel
+       de plus au compteur. */
+    document.querySelectorAll('[data-ech]').forEach(btn => {
+        btn.addEventListener('click', () => setEchelleMetrique(btn.dataset.echKey, btn.dataset.ech));
     });
 
     // Saisie directe au clavier
@@ -1294,13 +1368,13 @@ function periodValue(key) {
            réadditionner ferait disparaître deux cent dix-huit rendez-vous. Seule
            la journée affichée est recalculée depuis l'écran, pour suivre la frappe. */
         const jourEcran = sommeDe(meta);
-        if (scale === 'day') return jourEcran;
-        const hors = cumulHorsJour ? cumulHorsJour[key] : null;
+        if (echelleDe(key) === 'day') return jourEcran;
+        const hors = cumuls[echelleDe(key)] ? cumuls[echelleDe(key)][key] : null;
         return (hors || 0) + jourEcran;
     }
     const jour = row[key] != null ? Number(row[key]) : null;
-    if (scale === 'day') return jour;
-    const hors = cumulHorsJour ? cumulHorsJour[key] : null;
+    if (echelleDe(key) === 'day') return jour;
+    const hors = cumuls[echelleDe(key)] ? cumuls[echelleDe(key)][key] : null;
     if (hors == null && jour == null) return null;
     return (hors || 0) + (jour || 0);
 }
@@ -1315,8 +1389,9 @@ function periodValue(key) {
  * devant elle le dit aussi — un objectif de semaine consulté le dimanche soir
  * n'est plus rattrapable, et l'écran vaut mieux qu'un silence.
  */
-function restLine(v, t) {
-    if (scale === 'day' || !periode) return '';
+function restLine(v, t, ech) {
+    const periode = periodes[ech];
+    if (ech === 'day' || !periode) return '';
 
     const finie = diffDays(todayISO(), periode.to) > 0;
     // joursOuvres compte aujourd'hui s'il est ouvré : la journée n'est pas
@@ -1392,21 +1467,25 @@ function parJour(reste, jo) {
    et par peinture, soit quatre mille pour un simple clic sur un bouton plus.
    -------------------------------------------------------------------------- */
 
-let _rythme = { cle: null, pct: 0, faits: 0, total: 0 };
+/* Depuis la v20 il y a jusqu'à quatre échelles à l'écran en même temps, donc
+   jusqu'à quatre repères différents : le cache est une table indexée par
+   échelle et par jour, et non plus une seule entrée. Il se vide de lui-même à
+   chaque changement de journée, puisque la clé en tient compte. */
+const _rythme = new Map();
 
-function rythme() {
-    const cle = `${scale}|${day}`;
-    if (_rythme.cle === cle) return _rythme;
-    const b = periodBounds(scale, day);
+function rythme(ech) {
+    const cle = `${ech}|${day}`;
+    if (_rythme.has(cle)) return _rythme.get(cle);
+    const b = periodBounds(ech, day);
     const total = joursOuvres(b.from, b.to);
     const faits = joursOuvres(b.from, day);
-    _rythme = {
-        cle,
+    const r = {
         total,
         faits,
         pct: total > 0 ? Math.min(100, (faits / total) * 100) : 0
     };
-    return _rythme;
+    _rythme.set(cle, r);
+    return r;
 }
 
 function paintGauge(m) {
@@ -1421,7 +1500,8 @@ function paintGauge(m) {
        Depuis la v13 l'objectif est demandé à l'échelle de lecture : un objectif
        mensuel n'est pas douze fois l'objectif du jour, et il n'est pas déduit
        ici. Ce qui n'a pas été posé pour l'échelle affichée reste « non défini ». */
-    const t = Number(targetFor(viewedProfile(), m.key, scale).value) || 0;
+    const ech = echelleDe(m.key);
+    const t = Number(targetFor(viewedProfile(), m.key, ech).value) || 0;
     const v = periodValue(m.key);
     const mesure = v != null;
     const val = v || 0;
@@ -1432,12 +1512,22 @@ function paintGauge(m) {
     fill.classList.toggle('gauge-fill--done', mesure && t > 0 && val >= t);
     document.getElementById(`target-${m.key}`).textContent = t > 0 ? fmtCible(t) : 'non défini';
 
-    /* L'échelle est écrite à côté de l'objectif, et pas seulement en haut de la
+    /* L'échelle est marquée à côté de l'objectif, et pas seulement en haut de la
        page : sans elle, « Objectif : 40 » se lit comme un objectif du jour, et
-       quarante appels dans le mois se prendraient pour une catastrophe. */
-    const sc = TARGET_SCALES.find(x => x.key === scale);
-    document.getElementById(`gauge-scale-${m.key}`).textContent =
-        t > 0 && scale !== 'day' ? ` ${sc.article}` : '';
+       quarante appels dans le mois se prendraient pour une catastrophe. Depuis
+       la v20 ce n'est plus un texte mais les quatre lettres, dont celle en
+       cours est allumée. */
+    const seg = document.getElementById(`ech-${m.key}`);
+    if (seg) {
+        seg.querySelectorAll('button[data-ech]').forEach(b => {
+            const on = b.dataset.ech === ech;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        // Un compteur qui s'écarte du défaut de la page mérite d'être repérable
+        // sans avoir à comparer les quatre lettres avec le bandeau du haut.
+        seg.classList.toggle('ech-seg--part', ech !== scale);
+    }
 
     // Période non mesurée : ni pourcentage ni barre, sinon l'écran affirmerait
     // un zéro que personne n'a déclaré.
@@ -1445,7 +1535,7 @@ function paintGauge(m) {
         !mesure ? 'non mesuré' : t > 0 ? `${Math.round((val / t) * 100)} %` : '—';
 
     const rest = document.getElementById(`gauge-rest-${m.key}`);
-    const txt = t > 0 ? restLine(v, t) : '';
+    const txt = t > 0 ? restLine(v, t, ech) : '';
     rest.textContent = txt;
     rest.hidden = !txt;
 
@@ -1454,12 +1544,12 @@ function paintGauge(m) {
        comparer : un trait seul sur une barre vide n'informe de rien. */
     const mark = document.getElementById(`gaugemark-${m.key}`);
     if (mark) {
-        const montrer = scale !== 'day' && t > 0;
+        const montrer = ech !== 'day' && t > 0;
         mark.hidden = !montrer;
         if (montrer) {
-            const r = rythme();
+            const r = rythme(ech);
             mark.style.left = `${r.pct}%`;
-            const sc2 = TARGET_SCALES.find(x => x.key === scale);
+            const sc2 = TARGET_SCALES.find(x => x.key === ech);
             mark.title = `${Math.round(r.pct)} % du temps écoulé : `
                 + `${r.faits} jours ouvrés sur ${r.total} ${sc2 ? sc2.article : ''}`.trim();
         }
@@ -1587,13 +1677,27 @@ function paintScaleBar() {
 
     const hint = $('#period-hint');
     if (!hint) return;
-    if (scale === 'day') { hint.hidden = true; hint.innerHTML = ''; return; }
 
-    const b = periodBounds(scale, day);
+    /* Le compte des compteurs à part n'est pas cosmétique : sans lui, la phrase
+       « Jauges du mois » serait fausse pour ceux qui regardent l'exercice, et
+       un chiffre inexpliqué sur une jauge est pire qu'un chiffre absent. */
+    const ex = nbExceptions();
+    if (scale === 'day' && !ex) { hint.hidden = true; hint.innerHTML = ''; return; }
+
     const sc = TARGET_SCALES.find(x => x.key === scale);
+    const bouts = [];
+    if (scale === 'day') {
+        bouts.push(`Jauges ${escapeHtml(sc.article)}`);
+    } else {
+        const b = periodBounds(scale, day);
+        bouts.push(`Jauges ${escapeHtml(sc.article)}, <b>${escapeHtml(periodLabel(b.from, b.to))}</b>`);
+        bouts.push(`la saisie ci-dessous reste celle du <b>${escapeHtml(formatLong(day))}</b>`);
+    }
+    if (ex) {
+        bouts.push(`<b>${ex} compteur${ex > 1 ? 's' : ''}</b> à ${ex > 1 ? 'leur' : 'sa'} propre échelle`);
+    }
     hint.hidden = false;
-    hint.innerHTML = `Jauges ${escapeHtml(sc.article)}, <b>${escapeHtml(periodLabel(b.from, b.to))}</b>`
-        + ` · la saisie ci-dessous reste celle du <b>${escapeHtml(formatLong(day))}</b>`;
+    hint.innerHTML = bouts.join(' · ');
 }
 
 /**
@@ -1607,8 +1711,25 @@ function paintScaleBar() {
  * préférence d'affichage non retenue n'est pas une panne.
  */
 async function setScale(next) {
-    if (next === scale || !TARGET_SCALES.some(x => x.key === next)) return;
+    if (!TARGET_SCALES.some(x => x.key === next)) return;
+
+    /* Compté AVANT de toucher à `scale`, et sur la totalité des exceptions et
+       non sur celles qui s'écartent du défaut : après l'affectation, une
+       exception « semaine » deviendrait invisible au comptage sur un passage à
+       la semaine, et l'écran l'effacerait sans l'enregistrer. L'écran et la base
+       auraient alors divergé jusqu'au prochain rechargement. */
+    const avait = Object.keys(echelles).length;
+    if (next === scale && !avait) return;
+
     scale = next;
+
+    /* LE BANDEAU EFFACE LES EXCEPTIONS. C'est ce que Bruno a demandé : le
+       réglage du haut est le défaut de tout le monde. C'est aussi, et surtout,
+       le seul moyen simple de revenir à un écran homogène quand treize
+       compteurs ont fini par regarder quatre périodes différentes. Sans cela,
+       il faudrait treize clics pour se remettre d'aplomb, et le réglage du haut
+       donnerait l'impression d'être cassé. */
+    echelles = {};
     paintScaleBar();
     buildTargets();
     paint();                    // les jauges affichent tout de suite la bonne échelle
@@ -1624,7 +1745,51 @@ async function setScale(next) {
        écrire le gauge_scale d'un tiers, l'appel échouerait en silence — et
        surtout, regarder la semaine de quelqu'un ne doit pas lui changer son
        écran pour le lendemain matin. */
-    if (!isViewingOther()) saveGaugeScale(scale);
+    if (!isViewingOther()) {
+        saveGaugeScale(scale);
+        if (avait) saveMetricScales({});
+    }
+    if (avait) {
+        toast(`${avait} compteur${avait > 1 ? 's' : ''} ${avait > 1 ? 'suivaient' : 'suivait'} `
+            + `sa propre échelle : tout est revenu ${TARGET_SCALES.find(x => x.key === next).article}.`,
+            'info', 5000);
+    }
+}
+
+/**
+ * Change l'échelle d'UN compteur.
+ *
+ * Revenir sur le défaut de la page EFFACE l'exception au lieu de l'enregistrer
+ * à l'identique. Sans cela, un compteur remis « au mois » alors que la page est
+ * au mois resterait figé au mois pour toujours, et ne suivrait plus le bandeau
+ * du haut : le réglage aurait l'air de fonctionner une fois, puis plus jamais.
+ * Même principe que le forçage des objectifs, où l'on efface l'exception plutôt
+ * que de recopier le défaut.
+ */
+async function setEchelleMetrique(key, next) {
+    if (!TARGET_SCALES.some(x => x.key === next)) return;
+    if (echelleDe(key) === next) return;
+
+    if (next === scale) delete echelles[key];
+    else echelles[key] = next;
+
+    paintScaleBar();
+    buildTargets();
+    paint();                    // la bonne échelle tout de suite, le cumul ensuite
+
+    const avant = JSON.stringify(cumuls);
+    const ok = await loadPeriode();
+    if (avant !== JSON.stringify(cumuls)) paint();
+
+    if (!ok) {
+        toast('Le cumul de la période n\'a pas pu être lu : cette jauge reste vide, '
+            + 'la saisie du jour fonctionne normalement.', 'error', 6000);
+    }
+
+    /* Chez quelqu'un d'autre, c'est un coup d'œil et non un réglage : même
+       raisonnement que pour l'échelle de la page. La colonne metric_scales
+       n'est de toute façon accessible en écriture que sur sa propre ligne. */
+    if (!isViewingOther()) saveMetricScales(echelles);
 }
 
 /* --------------------------------------------------------------------------
@@ -1643,27 +1808,51 @@ async function setScale(next) {
  * désagréable mais honnête, là où une exception aurait vidé l'écran.
  */
 async function loadPeriode() {
-    if (scale === 'day') { periode = null; cumulHorsJour = null; return true; }
+    const utiles = echellesAffichees();
+    periodes = {};
+    utiles.forEach(e => { periodes[e] = periodBounds(e, day); });
 
-    periode = periodBounds(scale, day);
+    if (!utiles.length) { cumuls = {}; return true; }
+
+    /* UNE seule requête, sur la plage qui contient toutes les périodes. Une
+       semaine à cheval sur deux mois, ou un exercice fiscal qui commence en
+       octobre, font que les bornes ne s'emboîtent pas toujours proprement :
+       prendre le minimum des débuts et le maximum des fins est plus sûr que de
+       supposer que la plus large contient les autres. */
+    let from = null, to = null;
+    utiles.forEach(e => {
+        from = from === null ? periodes[e].from : minISO(from, periodes[e].from);
+        to = to === null ? periodes[e].to : maxISO(to, periodes[e].to);
+    });
+
     try {
-        const rows = await fetchRange(periode.from, periode.to);
-        const somme = {};
-        myMetrics.forEach(m => {
-            let acc = null;
-            rows.forEach(r => {
-                // La journée affichée est écartée : sa valeur vient de `row`, qui
-                // suit la frappe en cours. La compter deux fois doublerait chaque
-                // chiffre saisi aujourd'hui.
-                if (r.activity_date === day) return;
-                if (r[m.key] != null) acc = (acc || 0) + Number(r[m.key]);
+        const rows = await fetchRange(from, to);
+        const parEchelle = {};
+        utiles.forEach(e => {
+            const b = periodes[e];
+            const somme = {};
+            myMetrics.forEach(m => {
+                let acc = null;
+                rows.forEach(r => {
+                    // La journée affichée est écartée : sa valeur vient de `row`,
+                    // qui suit la frappe en cours. La compter deux fois doublerait
+                    // chaque chiffre saisi aujourd'hui.
+                    if (r.activity_date === day) return;
+                    /* Hors des bornes de CETTE échelle : la même requête sert
+                       quatre découpages, chacun ne prend que ce qui le concerne.
+                       diffDays(a, b) est positif quand a est postérieur à b. */
+                    if (diffDays(b.from, r.activity_date) > 0) return;   // avant le début
+                    if (diffDays(r.activity_date, b.to) > 0) return;     // après la fin
+                    if (r[m.key] != null) acc = (acc || 0) + Number(r[m.key]);
+                });
+                somme[m.key] = acc;
             });
-            somme[m.key] = acc;
+            parEchelle[e] = somme;
         });
-        cumulHorsJour = somme;
+        cumuls = parEchelle;
         return true;
     } catch (e) {
-        cumulHorsJour = null;
+        cumuls = {};
         console.warn('Cumul de période non chargé :', e.message);
         return false;
     }
@@ -1858,8 +2047,14 @@ function majCompteMasques() {
     const qui = viewedProfile();
     const n = myMetrics.filter(m => m.target && !targetVisible(qui, m.key)).length;
     const sc = TARGET_SCALES.find(x => x.key === scale);
+    /* Le volet du bas reste à l'échelle de la PAGE, même quand des compteurs
+       s'en écartent : c'est le rappel de ce que le propriétaire attend, sur une
+       période unique et comparable. Les exceptions sont signalées à part, sinon
+       la liste dirait « objectifs du mois » au-dessus de valeurs annuelles. */
+    const ex = nbExceptions();
     somme.textContent = `🎚️ Mes objectifs ${sc ? sc.article : ''}`.trim()
-        + (n ? ` · ${n} masqué${n > 1 ? 's' : ''}` : '');
+        + (n ? ` · ${n} masqué${n > 1 ? 's' : ''}` : '')
+        + (ex ? ` · ${ex} à part` : '');
 }
 
 function buildTargets() {
@@ -1944,6 +2139,10 @@ function buildTargets() {
        les voir afficher le jour une fraction de seconde avant de sauter au mois
        serait le genre de clignotement qui fait douter de ce qu'on lit. */
     scale = scaleOf(viewedProfile());
+
+    /* Les exceptions par compteur suivent la même règle que l'échelle de la
+       page : ce sont celles de la personne regardée, pas celles du lecteur. */
+    echelles = metricScalesOf(viewedProfile());
     renderNav();
     renderIdentity();
     buildCards();

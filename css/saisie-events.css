@@ -882,3 +882,65 @@
     border-radius: 1px;
     pointer-events: none;         /* ne vole pas le survol de la barre */
 }
+
+/* ============================================================================
+   L'ÉCHELLE, COMPTEUR PAR COMPTEUR (v20)
+
+   Quatre lettres dans la légende de la jauge, à la place du « du mois » qui s'y
+   trouvait. Le texte n'a pas été conservé à côté : la légende porte déjà
+   l'objectif à gauche et le pourcentage à droite, et dans les colonnes étroites
+   de l'entonnoir il ne reste pas la place pour les deux. Chaque lettre porte
+   son intitulé complet en info-bulle.
+
+   Taille volontairement discrète. Ces boutons servent quelques fois par
+   semaine, alors que le « + » du compteur sert vingt fois par jour : ils ne
+   doivent pas lui disputer le regard. C'est aussi pourquoi la lettre allumée
+   est marquée par un fond plein plutôt que par une couleur vive.
+   ========================================================================== */
+
+.ech-seg {
+    display: inline-flex;
+    gap: 2px;
+    margin-left: 7px;
+    vertical-align: middle;
+}
+
+.ech-btn {
+    width: 17px;
+    height: 17px;
+    padding: 0;
+    font: inherit;
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--gray-400);
+    background: transparent;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
+}
+
+.ech-btn:hover { color: var(--gray-600); border-color: var(--gray-300); }
+
+.ech-btn.is-on {
+    color: var(--white);
+    background: var(--gray-500);
+    border-color: var(--gray-500);
+}
+
+/* Un compteur qui s'écarte du défaut de la page. Le liseré remplace le mot
+   « à part » qu'on ne peut pas écrire ici faute de place, et il évite d'avoir
+   à comparer les quatre lettres avec le bandeau du haut pour comprendre
+   pourquoi cette jauge ne parle pas de la même période que sa voisine. */
+.ech-seg--part .ech-btn.is-on {
+    background: var(--navy);
+    border-color: var(--navy);
+}
+
+/* Colonnes étroites de l'entonnoir : la légende passe à la ligne plutôt que de
+   comprimer les lettres, qui deviendraient illisibles et intouchables au doigt. */
+.metric--col .gauge-legend {
+    flex-wrap: wrap;
+    row-gap: 2px;
+}

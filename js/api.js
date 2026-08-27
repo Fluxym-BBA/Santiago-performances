@@ -2591,6 +2591,67 @@ export async function saveGaugeScale(scale) {
     return true;
 }
 
+/* --------------------------------------------------------------------------
+   UNE ÉCHELLE PAR COMPTEUR (v20)
+
+   gauge_scale fixe l'échelle de TOUTE la page. metric_scales porte les
+   exceptions : { "calls_made": "week" }. Un compteur absent de l'objet suit la
+   page, ce qui veut dire que l'objet est vide dans le cas ordinaire.
+
+   POURQUOI DES EXCEPTIONS ET NON UNE VALEUR PAR COMPTEUR. Si chaque compteur
+   portait son échelle en dur, changer le réglage du haut n'aurait plus aucun
+   effet sur les treize compteurs déjà réglés, et il faudrait treize clics pour
+   revenir en arrière. Avec des exceptions, le bandeau reste ce que Bruno a
+   décrit : le défaut de tout le monde, et le moyen de tout remettre d'équerre.
+   -------------------------------------------------------------------------- */
+
+/**
+ * Les exceptions d'échelle d'un profil, nettoyées.
+ *
+ * Toute valeur inconnue est ignorée plutôt que corrigée : si une échelle
+ * disparaissait dans une version future, les compteurs qui la portaient
+ * retomberaient sur le défaut de la page sans un mot et sans écran cassé. C'est
+ * aussi pour cela que la base ne contraint pas les valeurs de ce champ.
+ */
+export function metricScalesOf(p) {
+    const brut = p && p.metric_scales;
+    if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return {};
+    const out = {};
+    Object.keys(brut).forEach(k => {
+        if (TARGET_SCALES.some(x => x.key === brut[k])) out[k] = brut[k];
+    });
+    return out;
+}
+
+/**
+ * Enregistre MES exceptions d'échelle. Jamais celles de quelqu'un d'autre, pour
+ * la même raison que saveGaugeScale : le privilège d'écriture de profiles est
+ * accordé colonne par colonne, sur sa propre ligne seulement.
+ *
+ * Ne lève pas, et renvoie vrai quand la base a confirmé. Un confort de lecture
+ * qui ne s'enregistre pas ne doit pas empêcher la saisie du jour.
+ */
+export async function saveMetricScales(map) {
+    const me = myProfile();
+    if (!me) return false;
+
+    // On ne renvoie que ce qui est valable : une clé inconnue de la base ne
+    // gêne personne, une échelle inventée ferait diverger l'écran et la colonne.
+    const propre = {};
+    Object.keys(map || {}).forEach(k => {
+        if (TARGET_SCALES.some(x => x.key === map[k])) propre[k] = map[k];
+    });
+
+    const { error } = await supabase
+        .from('profiles').update({ metric_scales: propre }).eq('user_id', me.user_id);
+    if (error) {
+        console.warn('Échelles par compteur non enregistrées :', error.message);
+        return false;
+    }
+    me.metric_scales = propre;
+    return true;
+}
+
 /** Renvoie la plus ancienne des deux dates. */
 export const minISO = (a, b) => (diffDays(b, a) >= 0 ? a : b);
 
