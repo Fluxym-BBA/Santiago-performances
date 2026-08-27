@@ -1890,8 +1890,12 @@ async function load(iso) {
             fetchDay(iso),
             fetchDay(addDaysISO(iso, -1)),
             hasEvents ? fetchDayEvents(iso) : Promise.resolve([]),
-            loadPeriode(),
-            fetchDayProfile(iso).catch(() => null)
+            fetchDayProfile(iso).catch(() => null),
+            /* En dernier, et son résultat n'est pas déstructuré : loadPeriode
+               écrit dans ses propres variables et ne rend qu'un booléen. Toute
+               nouvelle lecture se place AVANT elle, jamais après, sinon la
+               variable déstructurée récupère ce booléen. */
+            loadPeriode()
         ]);
         row = current || { ...EMPTY_DAY, activity_date: iso, notes: '' };
         prevRow = previous;
