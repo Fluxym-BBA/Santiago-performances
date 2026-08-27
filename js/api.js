@@ -1782,6 +1782,175 @@ export function targetFor(profil, metricKey, scale = 'day') {
     return vide;
 }
 
+/* --------------------------------------------------------------------------
+   AFFICHER OU MASQUER UN OBJECTIF, COMPTEUR PAR COMPTEUR (v16)
+
+   Table target_visibility. Le modèle est exactement celui des objectifs, pour
+   qu'il n'y ait qu'une règle à retenir dans tout l'outil :
+
+       une ligne « user » pour la personne   l'emporte sur
+       une ligne « job » pour son métier     l'emporte sur
+       rien, et l'objectif est alors AFFICHÉ
+
+   Le défaut est donc « visible » : tant que personne n'a rien réglé, l'écran se
+   comporte comme avant la v16.
+
+   DEUX DIFFÉRENCES AVEC LES OBJECTIFS, toutes deux voulues. Chacun écrit sa
+   propre ligne, sinon « à la main de chacun » n'existe pas ; c'est la RLS qui
+   l'autorise, pas ce fichier. Et il n'y a pas de dimension d'échelle : un
+   objectif se montre ou se cache, ce choix ne dépend pas de le lire au jour, à
+   la semaine ou au mois.
+
+   Comme pour les objectifs, la table est chargée en entier : quelques dizaines
+   de lignes, et un manager qui ouvre l'écran de quelqu'un doit voir ce que cette
+   personne voit.
+   -------------------------------------------------------------------------- */
+
+let _vis = null;            // toutes les lignes de target_visibility
+let _visOk = false;         // la table a bien répondu
+
+/**
+ * Charge les réglages d'affichage. Ne lève pas : une migration non passée doit
+ * laisser l'outil parfaitement utilisable, tous objectifs affichés.
+ */
+export async function loadVisibility() {
+    const { data, error } = await supabase
+        .from('target_visibility')
+        .select('scope, job, user_id, metric, visible');
+    if (error) {
+        _vis = [];
+        _visOk = false;
+        return false;
+    }
+    _vis = data || [];
+    _visOk = true;
+    return true;
+}
+
+/** Vrai si la table a pu être lue. */
+export function visibilityLoaded() { return _visOk; }
+
+/** Force un rechargement au prochain besoin. */
+export function invalidateVisibility() { _vis = null; _visOk = false; }
+
+/**
+ * L'objectif de ce compteur doit-il être affiché à cette personne ?
+ *
+ * Renvoie true quand rien n'est réglé, quand la table n'a pas répondu et quand
+ * le profil est inconnu. Un réglage absent ne doit jamais faire disparaître un
+ * objectif : dans le doute, on montre.
+ */
+export function targetVisible(profil, metricKey) {
+    if (!_vis || !_vis.length || !profil) return true;
+
+    const perso = _vis.find(v => v.scope === 'user' && v.user_id === profil.user_id
+                              && v.metric === metricKey);
+    if (perso) return perso.visible !== false;
+
+    const job = targetJobOf(profil);
+    if (!job) return true;
+    const parMetier = _vis.find(v => v.scope === 'job' && v.job === job
+                                  && v.metric === metricKey);
+    if (parMetier) return parMetier.visible !== false;
+
+    return true;
+}
+
+/** Vrai si cette personne a ses propres réglages, donc ne suit plus son métier. */
+export function hasVisibilityExceptions(userId) {
+    return (_vis || []).some(v => v.scope === 'user' && v.user_id === userId);
+}
+
+/** Les personnes qui ont leurs propres réglages. */
+export function visibilityExceptionUsers() {
+    const out = [];
+    (_vis || []).forEach(v => {
+        if (v.scope === 'user' && !out.includes(v.user_id)) out.push(v.user_id);
+    });
+    return out;
+}
+
+/** Les réglages d'un métier, sous la forme { metrique: booléen }. Absent = affiché. */
+export function jobVisibility(job) {
+    const out = {};
+    (_vis || []).forEach(v => {
+        if (v.scope === 'job' && v.job === job) out[v.metric] = v.visible !== false;
+    });
+    return out;
+}
+
+/** Les réglages d'une personne, sous la forme { metrique: booléen }. */
+export function userVisibility(userId) {
+    const out = {};
+    (_vis || []).forEach(v => {
+        if (v.scope === 'user' && v.user_id === userId) out[v.metric] = v.visible !== false;
+    });
+    return out;
+}
+
+/**
+ * Pose un réglage d'affichage.
+ *
+ * Passe par une fonction et non par un upsert PostgREST, pour la même raison que
+ * les objectifs : l'unicité repose sur des index PARTIELS (« where scope = … »),
+ * que l'inférence d'upsert de PostgREST ne sait pas retrouver.
+ *
+ * Met à jour le cache local au lieu de le vider, pour que l'écran se repeigne
+ * sans aller-retour réseau : masquer une jauge doit être instantané.
+ */
+export async function setVisibility({ scope, job = null, userId = null, metric, visible }) {
+    const { error } = await supabase.rpc('set_target_visibility', {
+        p_scope: scope, p_job: job, p_user: userId,
+        p_metric: metric, p_visible: visible
+    });
+    if (error) throw error;
+
+    if (!_vis) _vis = [];
+    const i = _vis.findIndex(v => v.scope === scope && v.metric === metric
+        && (scope === 'job' ? v.job === job : v.user_id === userId));
+    if (i >= 0) _vis[i].visible = visible;
+    else _vis.push({ scope, job, user_id: userId, metric, visible });
+    _visOk = true;
+}
+
+/**
+ * Retire un réglage : le compteur revient à ce que dit l'échelon du dessus, le
+ * métier pour une ligne personnelle, « affiché » pour un défaut de métier.
+ *
+ * Une suppression et non un « visible = true » : les deux donnent la même image
+ * aujourd'hui, mais seule la suppression fait que la personne suivra le métier
+ * le jour où le métier changera d'avis.
+ */
+export async function removeVisibility({ scope, job = null, userId = null, metric }) {
+    let q = supabase.from('target_visibility').delete()
+        .eq('scope', scope).eq('metric', metric);
+    q = scope === 'job' ? q.eq('job', job) : q.eq('user_id', userId);
+    const { error } = await q;
+    if (error) throw error;
+    _vis = (_vis || []).filter(v => !(v.scope === scope && v.metric === metric
+        && (scope === 'job' ? v.job === job : v.user_id === userId)));
+}
+
+/**
+ * Rend une personne à son métier : ses réglages personnels sont EFFACÉS, pas
+ * recopiés. Recopier rendrait le forçage vrai une fois puis figé, et le jour où
+ * le défaut du métier changerait, cette personne ne suivrait plus.
+ */
+export async function clearUserVisibility(userId) {
+    const { data, error } = await supabase.rpc('clear_user_visibility', { p_user: userId });
+    if (error) throw error;
+    _vis = (_vis || []).filter(v => !(v.scope === 'user' && v.user_id === userId));
+    return Number(data) || 0;
+}
+
+/** Même chose pour tout un métier, ou pour tout le monde quand job vaut null. */
+export async function clearVisibilityExceptions(job) {
+    const { data, error } = await supabase.rpc('clear_visibility_exceptions', { p_job: job });
+    if (error) throw error;
+    invalidateVisibility();
+    return Number(data) || 0;
+}
+
 /** Toutes les valeurs posées pour un métier, sous la forme { metrique: valeur }. */
 export function jobTargets(job, scale) {
     const out = {};
@@ -1958,6 +2127,13 @@ export function humanError(error) {
     if (msg.includes('sales_events') && (error.code === '42P01' || error.code === 'PGRST205')) {
         return "La base n'a pas encore les tables du cycle de vente : exécutez "
              + 'sql/accounts-events-migration-v10.sql.';
+    }
+    if ((msg.includes('target_visibility') || msg.includes('set_target_visibility')
+         || msg.includes('clear_visibility_exceptions') || msg.includes('clear_user_visibility'))
+        && ['42P01', 'PGRST205', 'PGRST202', '42883'].includes(error.code)) {
+        return "La base n'a pas encore le réglage d'affichage des objectifs : exécutez "
+             + 'sql/target-visibility-migration-v16.sql. Tout le reste fonctionne, '
+             + 'et les objectifs restent affichés pour tout le monde.';
     }
     if ((msg.includes('activity_targets') || msg.includes('set_activity_target')
          || msg.includes('clear_activity_target'))

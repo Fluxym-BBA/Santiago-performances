@@ -782,3 +782,76 @@
     .etage-tot-num b { font-size: 22px; }
     .metric-total-val b { font-size: 19px; }
 }
+
+/* ==========================================================================
+   MONTRER OU MASQUER UN OBJECTIF (v16)
+
+   Un œil par compteur pourvu d'un objectif. Il reste visible une fois
+   l'objectif masqué, barré d'un trait : c'est le seul chemin de retour, et un
+   réglage sans marche arrière n'est pas un réglage.
+
+   Discret au repos — gris clair, sans fond ni bordure — parce qu'il y en a
+   jusqu'à dix sur l'écran et qu'aucun ne doit disputer l'attention aux boutons
+   plus et moins, qui sont la raison d'être de la page.
+   ========================================================================== */
+
+.oeil {
+    order: 3;                 /* toujours en bout de ligne, après le stepper */
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--gray-300);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.oeil:hover {
+    color: var(--navy);
+    background: var(--gray-50);
+    border-color: var(--gray-200);
+}
+
+.oeil:focus-visible {
+    outline: 2px solid var(--cyan);
+    outline-offset: 2px;
+}
+
+.oeil svg {
+    width: 17px;
+    height: 17px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* La barre oblique est toujours dans le SVG, seulement rendue transparente :
+   basculer une opacité coûte moins qu'un second dessin, et la transition se
+   fait toute seule. */
+.oeil .oeil-barre { opacity: 0; transition: opacity 0.15s ease; }
+
+.oeil--off { color: var(--gray-400); }
+.oeil--off .oeil-barre { opacity: 1; }
+
+/* En colonne, le coin haut droit est libre : l'œil s'y pose sans toucher à la
+   pile libellé / stepper / jauge, qui reste un simple flex vertical. */
+.metric--col { position: relative; }
+.metric--col .oeil { position: absolute; top: 8px; right: 8px; }
+.metric--col .metric-label { padding-right: 26px; }
+
+/* Dans l'en-tête d'un étage, l'œil du total va au bout de la ligne du chiffre. */
+.etage-tot-num .oeil { margin-left: auto; align-self: center; }
+
+/* Un objectif masqué reste listé dans le volet du bas, en retrait : c'est le
+   rappel de ce que le propriétaire attend, qui ne dépend pas de ce qu'on a
+   choisi de voir sur les cartes. */
+.target-read--off { opacity: 0.55; }
+.target-read--off .target-read-src { font-style: italic; }

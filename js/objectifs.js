@@ -53,7 +53,10 @@ import {
     METRICS, TARGET_SCALES, TARGET_JOBS,
     loadTargets, targetsLoaded, jobTargets, userTargets, targetJobOf,
     setTarget, clearTarget, applyJobTargets, humanError,
-    listProfiles, todayISO, joursOuvres, fromISO, toISO
+    listProfiles, todayISO, joursOuvres, fromISO, toISO,
+    loadVisibility, visibilityLoaded, jobVisibility, userVisibility,
+    setVisibility, removeVisibility, clearUserVisibility, clearVisibilityExceptions,
+    visibilityExceptionUsers
 } from './api.js';
 import { escapeHtml, toast, fmtInt } from './ui.js';
 
@@ -156,6 +159,10 @@ function renderJobGrid() {
     const autres = {};
     TARGET_SCALES.forEach(sc => { autres[sc.key] = jobTargets(jobKey, sc.key); });
 
+    /* L'affichage de la jauge ne dépend pas de l'échelle : une seule valeur par
+       compteur, la même sur les trois onglets. */
+    const vis = jobVisibility(jobKey);
+
     document.getElementById('obj-grid').innerHTML = `
         <div class="obj-grid">
             ${metriques.map(m => {
@@ -171,6 +178,12 @@ function renderJobGrid() {
                            inputmode="numeric" placeholder="pas d'objectif"
                            value="${v == null ? '' : v}">
                     <div class="obj-hint">${escapeHtml(rappel)}</div>
+                    ${!visibilityLoaded() ? '' : `
+                    <label class="obj-vis" for="vj-${m.key}">
+                        <input type="checkbox" id="vj-${m.key}" data-vis-job="${m.key}"
+                               ${vis[m.key] === false ? '' : 'checked'}>
+                        <span>jauge affichée</span>
+                    </label>`}
                 </div>`;
             }).join('')}
         </div>`;
@@ -378,6 +391,12 @@ function renderUserGrid() {
     const perso = userTargets(whoId, scaleKey);
     const metier = jobTargets(job, scaleKey);
 
+    /* Trois états et non deux : « suit le métier » n'est pas la même chose que
+       « affiché ». Une case à cocher les aurait confondus, et le jour où le
+       défaut du métier change, seule la première suit. */
+    const visPerso = userVisibility(whoId);
+    const visMetier = jobVisibility(job);
+
     zone.innerHTML = `
         <div class="obj-grid">
             ${metriquesDe(job).map(m => {
@@ -393,6 +412,15 @@ function renderUserGrid() {
                     <div class="obj-hint">${d == null
                         ? 'le métier n\'en a pas'
                         : `métier ${fmtInt(d)}`}${v != null ? ' · exception en place' : ''}</div>
+                    ${!visibilityLoaded() ? '' : `
+                    <select class="obj-vis-sel" data-vis-user="${m.key}"
+                            aria-label="Affichage de la jauge : ${escapeHtml(m.short)}">
+                        <option value=""${visPerso[m.key] === undefined ? ' selected' : ''}>
+                            suit le métier (${visMetier[m.key] === false ? 'masquée' : 'affichée'})
+                        </option>
+                        <option value="1"${visPerso[m.key] === true ? ' selected' : ''}>jauge affichée</option>
+                        <option value="0"${visPerso[m.key] === false ? ' selected' : ''}>jauge masquée</option>
+                    </select>`}
                 </div>`;
             }).join('')}
         </div>`;
@@ -478,11 +506,130 @@ async function saveUser() {
    Démarrage du volet
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   AFFICHER OU MASQUER LES JAUGES (v16)
+
+   POURQUOI CES RÉGLAGES S'ENREGISTRENT AU CLIC, alors que les valeurs attendent
+   le bouton « Enregistrer ». Une valeur d'objectif se réfléchit, se compare aux
+   autres échelles, se corrige avant d'être publiée : la retenir jusqu'au clic
+   final a du sens. Un affichage de jauge n'a pas d'état intermédiaire, et
+   surtout il ne dépend PAS de l'échelle : le retenir aurait perdu le réglage
+   sans un mot dès qu'on passe de l'onglet Mois à l'onglet Semaine, qui redessine
+   la grille.
+   -------------------------------------------------------------------------- */
+
+/** Le défaut d'affichage d'un métier. */
+async function basculeVisJob(metric, affichee) {
+    const statut = document.getElementById('obj-status');
+    try {
+        await setVisibility({ scope: 'job', job: jobKey, metric, visible: affichee });
+        statut.style.color = '';
+        statut.textContent = `Jauge ${affichee ? 'affichée' : 'masquée'} par défaut pour `
+            + `${jobKey === 'bdr' ? 'les BDR' : 'les commerciaux'}. `
+            + 'Les personnes qui ont leur propre réglage gardent le leur.';
+        renderVisForce();
+        renderUserGrid();
+    } catch (e) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = humanError(e);
+        renderJobGrid();      // remet la case sur ce que dit vraiment la base
+    }
+}
+
+/** Le réglage d'une personne : suit le métier, forcé affiché, forcé masqué. */
+async function basculeVisUser(metric, valeur) {
+    const statut = document.getElementById('obj-user-status');
+    const cible = profils.find(p => p.user_id === whoId);
+    if (!cible) return;
+    try {
+        if (valeur === '') {
+            await removeVisibility({ scope: 'user', userId: whoId, metric });
+            statut.textContent = `${cible.display_name} suit de nouveau son métier sur ce compteur.`;
+        } else {
+            await setVisibility({ scope: 'user', userId: whoId, metric, visible: valeur === '1' });
+            statut.textContent = `Jauge ${valeur === '1' ? 'affichée' : 'masquée'} pour `
+                + `${cible.display_name}, quoi que fasse son métier.`;
+        }
+        statut.style.color = '';
+        renderUserGrid();
+        renderVisForce();
+    } catch (e) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = humanError(e);
+        renderUserGrid();
+    }
+}
+
+/**
+ * Le bouton de forçage ne s'affiche que s'il a quelque chose à faire, et il dit
+ * combien de personnes il va toucher : « forcer » sans savoir sur qui, c'est le
+ * genre de bouton qu'on ne clique jamais.
+ */
+function renderVisForce() {
+    const bouton = document.getElementById('obj-vis-force');
+    if (!bouton) return;
+    if (!visibilityLoaded()) {
+        bouton.hidden = true;
+        const r = document.getElementById('obj-user-vis-reset');
+        if (r) r.hidden = true;
+        return;
+    }
+    const concernes = visibilityExceptionUsers()
+        .map(id => profils.find(p => p.user_id === id))
+        .filter(p => p && targetJobOf(p) === jobKey);
+    bouton.hidden = concernes.length === 0;
+    if (!bouton.hidden) {
+        bouton.textContent = `Forcer l'affichage à ${concernes.length} personne`
+            + `${concernes.length > 1 ? 's' : ''} (${enumere(concernes.map(p => p.display_name))})`;
+    }
+
+    const reset = document.getElementById('obj-user-vis-reset');
+    if (reset) reset.hidden = Object.keys(userVisibility(whoId)).length === 0;
+}
+
+/** Efface les choix d'affichage de tout un métier. */
+async function forcerAffichage() {
+    const statut = document.getElementById('obj-status');
+    const quoi = jobKey === 'bdr' ? 'des BDR' : 'des commerciaux';
+    if (!confirm(`Effacer les choix d'affichage personnels ${quoi} ?\n\n`
+        + 'Tout le monde revient au réglage ci-dessus, et suivra aussi les prochains.')) return;
+    try {
+        const n = await clearVisibilityExceptions(jobKey);
+        await loadVisibility();
+        statut.style.color = '';
+        statut.textContent = `${n} réglage${n > 1 ? 's' : ''} personnel${n > 1 ? 's' : ''} `
+            + `effacé${n > 1 ? 's' : ''}.`;
+        repeindre();
+    } catch (e) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = humanError(e);
+    }
+}
+
+/** Rend une personne au défaut d'affichage de son métier. */
+async function retablirAffichage() {
+    const statut = document.getElementById('obj-user-status');
+    const cible = profils.find(p => p.user_id === whoId);
+    if (!cible) return;
+    try {
+        const n = await clearUserVisibility(whoId);
+        statut.style.color = '';
+        statut.textContent = `${n} réglage${n > 1 ? 's' : ''} effacé${n > 1 ? 's' : ''} : `
+            + `${cible.display_name} suit l'affichage de son métier.`;
+        renderUserGrid();
+        renderVisForce();
+    } catch (e) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = humanError(e);
+    }
+}
+
 function repeindre() {
     renderSegs();
     renderJobGrid();
     renderApply();
     renderUserGrid();
+    renderVisForce();
 }
 
 /**
@@ -513,6 +660,11 @@ export async function initObjectifs() {
         toast(humanError(e), 'error');
     }
 
+    /* L'affichage des jauges est facultatif : si la table n'est pas là, l'écran
+       reste utilisable pour les valeurs et les réglages d'affichage disparaissent
+       plutôt que d'afficher des cases qui ne répondraient pas. */
+    await loadVisibility();
+
     renderWho();
     repeindre();
 
@@ -533,7 +685,24 @@ export async function initObjectifs() {
     document.getElementById('obj-who').addEventListener('change', ev => {
         whoId = ev.target.value;
         renderUserGrid();
+        renderVisForce();
     });
+
+    /* Délégation plutôt qu'un écouteur par case : les grilles sont redessinées à
+       chaque changement d'échelle, de métier ou de personne, et rebrancher
+       treize écouteurs à chaque fois finit par en laisser traîner. */
+    document.getElementById('obj-grid').addEventListener('change', ev => {
+        const c = ev.target.closest('[data-vis-job]');
+        if (c) basculeVisJob(c.dataset.visJob, c.checked);
+    });
+
+    document.getElementById('obj-user-grid').addEventListener('change', ev => {
+        const sel = ev.target.closest('[data-vis-user]');
+        if (sel) basculeVisUser(sel.dataset.visUser, sel.value);
+    });
+
+    document.getElementById('obj-vis-force').addEventListener('click', forcerAffichage);
+    document.getElementById('obj-user-vis-reset').addEventListener('click', retablirAffichage);
 
     document.getElementById('obj-save').addEventListener('click', saveJob);
     document.getElementById('obj-derive').addEventListener('click', deriver);

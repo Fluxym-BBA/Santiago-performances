@@ -35,7 +35,8 @@ import {
     fetchDayEvents, addSalesEvent, deleteSalesEvent,
     accountHistory, agoLabel, formatDMY,
     TARGET_SCALES, scaleOf, saveGaugeScale, periodBounds, periodLabel,
-    fetchRange, joursOuvres, myProfile, loadSettings
+    fetchRange, joursOuvres, myProfile, loadSettings,
+    loadVisibility, targetVisible, setVisibility
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -139,8 +140,11 @@ const ask = {};
    pareil. */
 function gaugeHtml(m) {
     if (!m.target) return '';
+    /* L'identifiant sur le conteneur, et pas seulement sur la barre : depuis la
+       v16 un objectif peut être masqué, et c'est tout le bloc qui disparaît,
+       légende et ligne de reste comprises. */
     return `
-        <div class="gauge">
+        <div class="gauge" id="gaugewrap-${m.key}">
             <div class="gauge-track"><div class="gauge-fill" id="gauge-${m.key}" style="width:0%"></div></div>
             <div class="gauge-legend">
                 <span>Objectif : <b id="target-${m.key}">–</b><span id="gauge-scale-${m.key}"></span></span>
@@ -148,6 +152,36 @@ function gaugeHtml(m) {
             </div>
             <div class="gauge-rest" id="gauge-rest-${m.key}" hidden></div>
         </div>`;
+}
+
+/**
+ * L'œil qui montre ou masque l'objectif d'un compteur (v16).
+ *
+ * POURQUOI IL RESTE VISIBLE UNE FOIS L'OBJECTIF MASQUÉ. C'est le seul chemin de
+ * retour : si l'œil disparaissait avec la jauge, le réglage serait sans marche
+ * arrière et il faudrait aller le défaire ailleurs. Masqué, il se barre d'un
+ * trait et son libellé devient « Afficher cet objectif ».
+ *
+ * PAS D'ŒIL QUAND ON CONSULTE QUELQU'UN D'AUTRE. Un administrateur qui ouvre la
+ * journée d'un membre voit ce que ce membre voit, et ne peut pas régler son
+ * écran d'un clic distrait. Le forçage se fait dans l'écran « Barème et
+ * objectifs », où il est explicite et où il porte un nom.
+ *
+ * Pas d'œil non plus sur un compteur sans objectif possible : il n'y aurait rien
+ * à montrer ni à cacher.
+ */
+function oeilHtml(m) {
+    if (!m.target || isViewingOther()) return '';
+    return `
+        <button class="oeil" type="button" id="oeil-${m.key}" data-oeil="${m.key}"
+                aria-pressed="false" title="Masquer cet objectif"
+                aria-label="Masquer l'objectif : ${escapeHtml(m.label)}">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M1.8 12S5.4 5.8 12 5.8 22.2 12 22.2 12 18.6 18.2 12 18.2 1.8 12 1.8 12Z"/>
+                <circle cx="12" cy="12" r="3.1"/>
+                <line class="oeil-barre" x1="4.5" y1="19.5" x2="19.5" y2="4.5"/>
+            </svg>
+        </button>`;
 }
 
 /**
@@ -181,6 +215,7 @@ function totalHeadHtml(m) {
                 <span>${escapeHtml(m.label)}</span>
                 <small>somme des ${parts} ci-contre</small>
             </div>
+            ${oeilHtml(m)}
         </div>
         ${gaugeHtml(m)}
     </div>`;
@@ -199,6 +234,7 @@ function totalRowHtml(m) {
                 <b id="total-${m.key}">0</b>
                 <small>somme de ${parts}</small>
             </div>
+            ${oeilHtml(m)}
         </div>
         ${gaugeHtml(m)}
     </div>`;
@@ -234,6 +270,7 @@ function metricRowHtml(m, variante) {
                 <b>${escapeHtml(m.label)}</b>
                 <span>${escapeHtml(m.hint)}</span>
             </div>
+            ${oeilHtml(m)}
             <div class="stepper">
                 <button class="stepper-btn stepper-btn--minus" type="button"
                         data-act="dec" data-key="${m.key}" aria-label="Retirer 1 ${escapeHtml(m.label)}">−</button>
@@ -269,6 +306,7 @@ function eventRowHtml(m) {
                 <b>${escapeHtml(m.label)}</b>
                 <span>${escapeHtml(m.hint)}</span>
             </div>
+            ${oeilHtml(m)}
             <div class="event-count"><b id="count-${m.key}">0</b></div>
         </div>
         <ul class="event-list" id="list-${m.key}"></ul>
@@ -396,6 +434,13 @@ function buildCards() {
     // Boutons + / −
     document.querySelectorAll('[data-act]').forEach(btn => {
         btn.addEventListener('click', () => onBump(btn.dataset.key, btn.dataset.act === 'inc' ? 1 : -1));
+    });
+
+    /* L'œil qui montre ou masque un objectif. Attribut distinct de data-act, et
+       ce n'est pas un détail : la ligne au-dessus branche onBump() sur TOUT ce
+       qui porte data-act, un œil ainsi nommé aurait incrémenté le compteur. */
+    document.querySelectorAll('[data-oeil]').forEach(btn => {
+        btn.addEventListener('click', () => basculeObjectif(btn.dataset.oeil));
     });
 
     // Saisie directe au clavier
@@ -1618,6 +1663,89 @@ function buildScoreExplain() {
    objectifs », et lus ici. Ce qui reste affiché : la valeur, et d'où elle vient.
    Savoir que son objectif est celui de son métier ou un objectif personnel
    change la conversation qu'on aura à son sujet. */
+/* --------------------------------------------------------------------------
+   AFFICHER OU MASQUER SES OBJECTIFS (v16)
+
+   Le réglage est rangé en base (target_visibility) avec la règle des objectifs :
+   ce que la personne a choisi l'emporte sur le défaut de son métier, et sans
+   rien de posé l'objectif est affiché.
+
+   Rien n'est retiré du DOM, tout est masqué : les identifiants de jauge
+   continuent d'exister, donc paintGauge() n'a pas eu à apprendre qu'un objectif
+   peut être caché. Une jauge masquée est simplement peinte pour personne, ce qui
+   coûte quelques microsecondes et évite une branche de plus dans le code le plus
+   souvent exécuté de l'écran.
+   -------------------------------------------------------------------------- */
+
+/** Applique l'état d'affichage à tous les compteurs de l'écran. */
+function appliqueVisibilite() {
+    const qui = viewedProfile();
+    myMetrics.forEach(m => {
+        if (!m.target) return;
+        const visible = targetVisible(qui, m.key);
+
+        const bloc = document.getElementById(`gaugewrap-${m.key}`);
+        if (bloc) bloc.hidden = !visible;
+
+        const oeil = document.getElementById(`oeil-${m.key}`);
+        if (oeil) {
+            oeil.classList.toggle('oeil--off', !visible);
+            oeil.setAttribute('aria-pressed', String(!visible));
+            const quoi = visible ? 'Masquer' : 'Afficher';
+            oeil.title = `${quoi} cet objectif`;
+            oeil.setAttribute('aria-label', `${quoi} l'objectif : ${m.label}`);
+        }
+    });
+    majCompteMasques();
+}
+
+/**
+ * Bascule l'affichage d'un objectif.
+ *
+ * Optimiste, comme les steppers : l'écran répond au clic, et il ne revient en
+ * arrière que si la base refuse. L'inverse — attendre la réponse réseau pour
+ * cacher une jauge — donnerait l'impression d'un bouton qui ne marche pas.
+ */
+async function basculeObjectif(key) {
+    const qui = viewedProfile();
+    if (!qui || isViewingOther()) return;
+
+    const avant = targetVisible(qui, key);
+    const apres = !avant;
+
+    /* Peinture immédiate depuis la valeur voulue, sans attendre le cache. */
+    const bloc = document.getElementById(`gaugewrap-${key}`);
+    if (bloc) bloc.hidden = !apres;
+    const oeil = document.getElementById(`oeil-${key}`);
+    if (oeil) oeil.classList.toggle('oeil--off', !apres);
+
+    try {
+        await setVisibility({ scope: 'user', userId: qui.user_id, metric: key, visible: apres });
+        appliqueVisibilite();
+    } catch (err) {
+        appliqueVisibilite();   // remet l'écran sur ce que dit vraiment le cache
+        toast(humanError(err), 'error', 7000);
+    }
+}
+
+/**
+ * Rappelle discrètement le nombre d'objectifs masqués.
+ *
+ * Sans ce compte, quelqu'un qui a caché six jauges en janvier ouvre en mars un
+ * écran sans objectifs et croit que le propriétaire n'en a jamais posé. Le
+ * volet du bas continue de les lister tous : c'est le rappel de ce qui est
+ * attendu, et le second chemin de retour.
+ */
+function majCompteMasques() {
+    const somme = $('#targets-summary');
+    if (!somme) return;
+    const qui = viewedProfile();
+    const n = myMetrics.filter(m => m.target && !targetVisible(qui, m.key)).length;
+    const sc = TARGET_SCALES.find(x => x.key === scale);
+    somme.textContent = `🎚️ Mes objectifs ${sc ? sc.article : ''}`.trim()
+        + (n ? ` · ${n} masqué${n > 1 ? 's' : ''}` : '');
+}
+
 function buildTargets() {
     /* Seuls les compteurs affichés et pourvus d'un objectif : afficher un
        objectif de NO GO, ou l'objectif d'e-mails d'un commercial qui n'en saisit
@@ -1631,18 +1759,22 @@ function buildTargets() {
         const src = t.source === 'user' ? 'objectif personnel'
                   : t.source === 'job'  ? 'objectif du métier'
                   : 'non défini';
+        /* Un objectif masqué reste listé ici, marqué comme tel. Le volet du bas
+           rappelle ce que le propriétaire attend, ce qui ne dépend pas de ce
+           qu'on a choisi de voir sur les cartes, et c'est accessoirement le
+           second chemin pour se souvenir qu'on a masqué quelque chose. */
+        const cache = !targetVisible(qui, m.key);
         return `
-        <div class="target-read">
+        <div class="target-read${cache ? ' target-read--off' : ''}">
             <div class="target-read-lab">${escapeHtml(m.short)}</div>
             <div class="target-read-val">${val}</div>
-            <div class="target-read-src">${src}</div>
+            <div class="target-read-src">${cache ? 'masqué sur la carte' : src}</div>
         </div>`;
     }).join('');
 
     const absent = !targetsLoaded();
     const sc = TARGET_SCALES.find(x => x.key === scale);
-    const somme = $('#targets-summary');
-    if (somme) somme.textContent = `🎚️ Mes objectifs ${sc.article}`;
+    majCompteMasques();
 
     $('#targets-grid').innerHTML = lignes || '<p class="target-read-none">Aucun objectif ne '
         + "s'applique à ce profil.</p>";
@@ -1699,8 +1831,9 @@ function buildTargets() {
     /* Les deux lectures partent ensemble : le carnet d'entreprises n'a aucune
        raison d'attendre les objectifs. allSettled et non all, parce que l'échec
        de l'un ne doit pas emporter l'autre. */
-    const [, resAccounts] = await Promise.allSettled([
+    const [, , resAccounts] = await Promise.allSettled([
         loadTargets(),
+        loadVisibility(),
         hasEvents ? loadAccounts() : Promise.resolve([])
     ]);
     /* loadTargets ne lève pas : une migration non passée laisse les jauges
@@ -1713,6 +1846,10 @@ function buildTargets() {
         toast("Le carnet d'entreprises n'a pas pu être chargé : les suggestions sont "
             + 'indisponibles, la saisie fonctionne normalement.', 'error', 7000);
     }
+    /* Après les objectifs, jamais avant : la visibilité se peint sur des jauges
+       qui doivent déjà exister. loadVisibility() ne lève pas non plus, et son
+       échec laisse tous les objectifs affichés, ce qui est le bon défaut. */
+    appliqueVisibilite();
     buildTargets();
 
     const wanted = new URLSearchParams(location.search).get('date');

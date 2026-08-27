@@ -249,3 +249,49 @@
     .obj-apply { flex-direction: column; align-items: stretch; }
     .obj-apply .btn { width: 100%; }
 }
+
+/* ==========================================================================
+   AFFICHER OU MASQUER UNE JAUGE (v16)
+
+   Le réglage vit sous le champ de valeur du même compteur, pas dans un écran à
+   part : « combien » et « est-ce que je le montre » sont deux questions sur le
+   même objectif, et les séparer aurait obligé à chercher deux fois.
+
+   Discret : bord supérieur en pointillés, texte petit et gris. Ce n'est pas la
+   décision principale de cet écran.
+   ========================================================================== */
+
+.obj-vis {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--gray-200);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-500);
+    cursor: pointer;
+    user-select: none;
+}
+
+.obj-vis input { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--navy); }
+.obj-vis:hover { color: var(--navy); }
+
+/* Trois états côté personne, donc une liste et non une case : « suit le métier »
+   n'est pas « affichée », même quand les deux donnent la même image du jour. */
+.obj-vis-sel {
+    width: 100%;
+    margin-top: 8px;
+    padding: 5px 7px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    background: var(--white);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-600);
+    cursor: pointer;
+}
+
+.obj-vis-sel:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }

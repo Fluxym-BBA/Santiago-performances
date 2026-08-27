@@ -234,6 +234,13 @@
                     <button class="btn btn--primary" id="obj-save" type="button">
                         Enregistrer les objectifs du métier
                     </button>
+                    <!-- v16 : ramener tout le monde au défaut d'affichage du métier.
+                         Efface les choix personnels au lieu de recopier le
+                         défaut, pour que le prochain changement de défaut suive
+                         lui aussi. -->
+                    <button class="btn btn--ghost" id="obj-vis-force" type="button" hidden>
+                        Forcer l'affichage à tout le métier
+                    </button>
                     <button class="btn btn--ghost" id="obj-derive" type="button" hidden>
                         Déduire de l'objectif mensuel
                     </button>
@@ -261,6 +268,13 @@
                 <div class="obj-actions">
                     <button class="btn btn--primary" id="obj-user-save" type="button">
                         Enregistrer cet objectif personnel
+                    </button>
+                    <!-- v16 : rend cette personne au défaut d'affichage de son
+                         métier, immédiatement et sans passer par Enregistrer :
+                         les réglages d'affichage ne sont pas des valeurs à
+                         saisir, ils s'appliquent au clic. -->
+                    <button class="btn btn--ghost" id="obj-user-vis-reset" type="button" hidden>
+                        Rétablir l'affichage du métier
                     </button>
                     <button class="btn btn--ghost" id="obj-user-follow" type="button">
                         Revenir au défaut du métier
