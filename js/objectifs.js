@@ -55,11 +55,12 @@ import {
     setTarget, clearTarget, applyJobTargets, humanError,
     listProfiles, todayISO, joursOuvres, fromISO, toISO,
     fiscalBounds, fiscalStartMonth, saveSettings, knownMonths, canWriteAny, myProfile,
+    fmtCible, cibleChamp, lireCible, auDixieme, TARGET_MAX,
     loadVisibility, visibilityLoaded, jobVisibility, userVisibility,
     setVisibility, removeVisibility, clearUserVisibility, clearVisibilityExceptions,
     visibilityExceptionUsers
 } from './api.js';
-import { escapeHtml, toast, fmtInt } from './ui.js';
+import { escapeHtml, toast } from './ui.js';
 
 let jobKey = 'bdr';        // métier affiché
 let scaleKey = 'month';    // échelle affichée : le mois d'abord, c'est la demande
@@ -120,15 +121,70 @@ function exceptions(job, scale) {
     });
 }
 
-/** Valeur d'un champ : null quand il est vide, sinon un entier positif. */
+/**
+ * Ce qu'il y a dans un champ d'objectif, tel que la base l'acceptera.
+ *
+ * Renvoie l'objet de lireCible ({ etat, value, arrondi }), augmenté du champ
+ * lui-même et de ce qui y a été tapé, pour que l'appelant puisse nommer le
+ * coupable et corriger l'affichage.
+ *
+ * CE QUI A CHANGÉ EN v18, ET POURQUOI C'EST IMPORTANT. L'ancienne version
+ * renvoyait null aussi bien pour « champ vide » que pour « je n'y comprends
+ * rien » : un « 4O » avec un O majuscule effaçait donc l'objectif sans un mot.
+ * Les deux cas sont maintenant distincts, et l'enregistrement refuse de partir
+ * tant qu'un champ est illisible.
+ */
 function lireChamp(id) {
     const el = document.getElementById(id);
-    if (!el) return null;
-    const brut = String(el.value).trim();
-    if (brut === '') return null;
-    const n = parseInt(brut, 10);
-    if (Number.isNaN(n) || n < 0) return null;
-    return n;
+    if (!el) return { etat: 'vide', value: null, arrondi: false, el: null, brut: '' };
+    const brut = String(el.value);
+    return { ...lireCible(brut), el, brut: brut.trim() };
+}
+
+/**
+ * Relit tous les champs d'une grille et sépare le bon grain de l'ivraie.
+ *
+ * Les valeurs arrondies sont RÉÉCRITES dans leur champ au passage : celui qui a
+ * tapé 2,55 doit voir 2,6 apparaître sous ses yeux, pas le découvrir au
+ * rechargement de la page. Une valeur changée en silence est une valeur qu'on
+ * ne s'explique plus six mois après.
+ */
+function lireGrille(prefixe, metriques) {
+    const lues = {};
+    const fautes = [];
+    const arrondies = [];
+    metriques.forEach(m => {
+        const lu = lireChamp(`${prefixe}${m.key}`);
+        const mauvais = lu.etat === 'illisible' || lu.etat === 'trop';
+        // Le liseré rouge est reposé à chaque lecture, jamais accumulé : un champ
+        // corrigé le perd sans qu'on ait à se souvenir de l'avoir mis.
+        if (lu.el) lu.el.classList.toggle('obj-input--ko', mauvais);
+        if (mauvais) { fautes.push({ m, lu }); return; }
+        if (lu.arrondi && lu.el) {
+            lu.el.value = cibleChamp(lu.value);
+            arrondies.push({ m, lu });
+        }
+        lues[m.key] = lu.value;
+    });
+    return { lues, fautes, arrondies };
+}
+
+/** La phrase qui explique un champ refusé, sans jargon. */
+function phraseFautes(fautes) {
+    const dire = f => f.lu.etat === 'trop'
+        ? `« ${f.m.short} » dépasse le maximum de ${fmtCible(TARGET_MAX)}`
+        : `« ${f.m.short} » ne se lit pas comme un nombre (« ${f.lu.brut} »)`;
+    return fautes.map(dire).join(', ')
+        + '. Un nombre positif, avec au plus un chiffre après la virgule, '
+        + 'point ou virgule au choix. Rien n\'a été enregistré.';
+}
+
+/** La phrase qui annonce les arrondis, quand il y en a. */
+function phraseArrondis(arrondies) {
+    if (!arrondies.length) return '';
+    const dire = a => `${a.m.short} → ${fmtCible(a.lu.value)}`;
+    return ` ${arrondies.length} valeur${arrondies.length > 1 ? 's' : ''} `
+         + `arrondie${arrondies.length > 1 ? 's' : ''} au dixième (${arrondies.map(dire).join(', ')}).`;
 }
 
 /* --------------------------------------------------------------------------
@@ -170,14 +226,15 @@ function renderJobGrid() {
                 const v = actuels[m.key];
                 const rappel = TARGET_SCALES.filter(sc => sc.key !== scaleKey).map(sc => {
                     const x = autres[sc.key][m.key];
-                    return `${sc.court} ${x == null ? '—' : fmtInt(x)}`;
+                    return `${sc.court} ${x == null ? '—' : fmtCible(x)}`;
                 }).join(' · ');
                 return `
                 <div class="obj-cell">
                     <label class="obj-lab" for="oj-${m.key}">${escapeHtml(m.short)}</label>
-                    <input class="obj-input" type="number" min="0" step="1" id="oj-${m.key}"
-                           inputmode="numeric" placeholder="pas d'objectif"
-                           value="${v == null ? '' : v}">
+                    <input class="obj-input" type="text" id="oj-${m.key}"
+                           inputmode="decimal" placeholder="pas d'objectif"
+                           autocomplete="off" spellcheck="false"
+                           value="${cibleChamp(v)}">
                     <div class="obj-hint">${escapeHtml(rappel)}</div>
                     ${!visibilityLoaded() ? '' : `
                     <label class="obj-vis" for="vj-${m.key}">
@@ -256,7 +313,11 @@ function deriver() {
         const el = document.getElementById(`oj-${m.key}`);
         if (!el) return;
         if (haut == null) { el.value = ''; return; }
-        el.value = String(Math.max(0, Math.round((haut / base) * cible)));
+        /* Au dixième et non à l'entier depuis la v18 : 1 000 rendez-vous sur un
+           exercice de 252 jours ouvrés font 3,97 par jour. Arrondir à 4 ajoutait
+           sept rendez-vous sur l'exercice, soit une semaine et demie de travail
+           inventée par la division. */
+        el.value = cibleChamp(Math.max(0, auDixieme((haut / base) * cible)));
         touche++;
     });
 
@@ -417,11 +478,21 @@ async function appliquer() {
 async function saveJob() {
     const statut = document.getElementById('obj-status');
     const actuels = jobTargets(jobKey, scaleKey);
-    const travaux = [];
+    const metriques = metriquesDe(jobKey);
+    const { lues, fautes, arrondies } = lireGrille('oj-', metriques);
 
-    metriquesDe(jobKey).forEach(m => {
+    /* Un seul champ illisible et RIEN ne part. Enregistrer les autres laisserait
+       l'écran à moitié à jour, avec un message de succès par-dessus. */
+    if (fautes.length) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = phraseFautes(fautes);
+        return;
+    }
+
+    const travaux = [];
+    metriques.forEach(m => {
         const avant = actuels[m.key];
-        const apres = lireChamp(`oj-${m.key}`);
+        const apres = lues[m.key];
         if (apres === avant) return;                     // rien n'a bougé
         if (apres === null) {
             travaux.push({ quoi: 'retire', metric: m.key });
@@ -432,7 +503,7 @@ async function saveJob() {
 
     if (!travaux.length) {
         statut.style.color = '';
-        statut.textContent = 'Rien n\'a changé.';
+        statut.textContent = 'Rien n\'a changé.' + phraseArrondis(arrondies);
         return;
     }
 
@@ -461,7 +532,7 @@ async function saveJob() {
         statut.textContent = [
             poses ? `${poses} objectif${poses > 1 ? 's' : ''} enregistré${poses > 1 ? 's' : ''}` : '',
             retires ? `${retires} retiré${retires > 1 ? 's' : ''}` : ''
-        ].filter(Boolean).join(', ') + '.';
+        ].filter(Boolean).join(', ') + '.' + phraseArrondis(arrondies);
         toast('Objectifs du métier mis à jour.', 'success');
     } catch (e) {
         statut.style.color = 'var(--danger)';
@@ -518,13 +589,14 @@ function renderUserGrid() {
                 return `
                 <div class="obj-cell${v != null ? ' obj-cell--perso' : ''}">
                     <label class="obj-lab" for="ou-${m.key}">${escapeHtml(m.short)}</label>
-                    <input class="obj-input" type="number" min="0" step="1" id="ou-${m.key}"
-                           inputmode="numeric"
-                           placeholder="${d == null ? 'pas d\'objectif' : fmtInt(d)}"
-                           value="${v == null ? '' : v}">
+                    <input class="obj-input" type="text" id="ou-${m.key}"
+                           inputmode="decimal"
+                           autocomplete="off" spellcheck="false"
+                           placeholder="${d == null ? 'pas d\'objectif' : fmtCible(d)}"
+                           value="${cibleChamp(v)}">
                     <div class="obj-hint">${d == null
                         ? 'le métier n\'en a pas'
-                        : `métier ${fmtInt(d)}`}${v != null ? ' · exception en place' : ''}</div>
+                        : `métier ${fmtCible(d)}`}${v != null ? ' · exception en place' : ''}</div>
                     ${!visibilityLoaded() ? '' : `
                     <select class="obj-vis-sel" data-vis-user="${m.key}"
                             aria-label="Affichage de la jauge : ${escapeHtml(m.short)}">
@@ -572,10 +644,19 @@ async function saveUser() {
     if (!job) return;
 
     const actuels = userTargets(whoId, scaleKey);
+    const metriques = metriquesDe(job);
+    const { lues, fautes, arrondies } = lireGrille('ou-', metriques);
+
+    if (fautes.length) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = phraseFautes(fautes);
+        return;
+    }
+
     const travaux = [];
-    metriquesDe(job).forEach(m => {
+    metriques.forEach(m => {
         const avant = actuels[m.key];
-        const apres = lireChamp(`ou-${m.key}`);
+        const apres = lues[m.key];
         if (apres === avant) return;
         travaux.push(apres === null
             ? { quoi: 'retire', metric: m.key }
@@ -584,7 +665,7 @@ async function saveUser() {
 
     if (!travaux.length) {
         statut.style.color = '';
-        statut.textContent = 'Rien n\'a changé.';
+        statut.textContent = 'Rien n\'a changé.' + phraseArrondis(arrondies);
         return;
     }
 
@@ -605,9 +686,10 @@ async function saveUser() {
         renderApply();
         statut.style.color = 'var(--success)';
         const retires = travaux.filter(t => t.quoi === 'retire').length;
-        statut.textContent = retires === travaux.length
+        statut.textContent = (retires === travaux.length
             ? `${cible.display_name} suit à nouveau les objectifs de son métier.`
-            : `Objectif personnel de ${cible.display_name} mis à jour.`;
+            : `Objectif personnel de ${cible.display_name} mis à jour.`)
+            + phraseArrondis(arrondies);
         toast('Objectif personnel mis à jour.', 'success');
     } catch (e) {
         statut.style.color = 'var(--danger)';
@@ -809,6 +891,17 @@ export async function initObjectifs() {
         const c = ev.target.closest('[data-vis-job]');
         if (c) basculeVisJob(c.dataset.visJob, c.checked);
     });
+
+    /* Le champ refusé redevient normal dès la première frappe : garder le rouge
+       jusqu'au prochain clic sur Enregistrer donnerait à croire que la
+       correction n'a pas été prise. */
+    const oublieLeRouge = ev => {
+        if (ev.target.classList.contains('obj-input--ko')) {
+            ev.target.classList.remove('obj-input--ko');
+        }
+    };
+    document.getElementById('obj-grid').addEventListener('input', oublieLeRouge);
+    document.getElementById('obj-user-grid').addEventListener('input', oublieLeRouge);
 
     document.getElementById('obj-user-grid').addEventListener('change', ev => {
         const sel = ev.target.closest('[data-vis-user]');

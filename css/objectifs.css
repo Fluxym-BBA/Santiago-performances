@@ -122,6 +122,14 @@
     color: var(--gray-300);
 }
 
+/* Un champ que l'écran n'a pas su lire (v18). Le message de statut nomme le
+   compteur, mais sur une grille de treize cases un nom ne suffit pas à trouver
+   la bonne : le liseré, lui, se voit sans lire. */
+.obj-input--ko {
+    border-color: var(--danger);
+    background: #fff5f5;   /* pas de variable pour ce rose : app.css n'en déclare aucune */
+}
+
 .obj-input:focus {
     outline: none;
     border-color: var(--cyan);

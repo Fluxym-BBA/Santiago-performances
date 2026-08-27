@@ -36,7 +36,8 @@ import {
     accountHistory, agoLabel, formatDMY,
     TARGET_SCALES, scaleOf, saveGaugeScale, periodBounds, periodLabel,
     fetchRange, joursOuvres, myProfile, loadSettings,
-    loadVisibility, targetVisible, setVisibility
+    loadVisibility, targetVisible, setVisibility,
+    fmtCible, auDixieme
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -1309,19 +1310,43 @@ function restLine(v, t) {
     if (v == null) {
         if (finie) return `rien de mesuré sur la période`;
         return jo > 0
-            ? `rien de mesuré · objectif de ${fmtInt(t)}, ${nJours(jo)} devant`
+            ? `rien de mesuré · objectif de ${fmtCible(t)}, ${nJours(jo)} devant`
             : `rien de mesuré · plus de jour ouvré dans la période`;
     }
 
-    const faits = `${fmtInt(v)} sur ${fmtInt(t)}`;
+    /* Le fait reste entier — on ne passe pas 2,5 appels — mais l'objectif et le
+       reste à faire sont décimaux depuis la v18. Les mélanger dans la même
+       phrase est voulu : « 3 sur 12,5 » dit exactement la vérité des deux. */
+    const faits = `${fmtInt(v)} sur ${fmtCible(t)}`;
     if (v >= t) return `${faits} · objectif atteint`;
 
-    const reste = t - v;
-    if (finie) return `${faits} · période terminée, ${fmtInt(reste)} de moins que l'objectif`;
+    const reste = auDixieme(t - v);
+    if (finie) return `${faits} · période terminée, ${fmtCible(reste)} de moins que l'objectif`;
     if (jo <= 0) return `${faits} · plus de jour ouvré dans la période`;
 
-    return `${faits} · reste ${fmtInt(reste)} en ${nJours(jo)}`
-         + ` (${fmtInt(Math.ceil(reste / jo))} par jour)`;
+    return `${faits} · reste ${fmtCible(reste)} en ${nJours(jo)}`
+         + ` (${fmtCible(parJour(reste, jo))} par jour)`;
+}
+
+/**
+ * Le rythme à tenir : ce qui reste, réparti sur les jours ouvrés qui restent.
+ *
+ * DEUX ARRONDIS ET NON UN. Au-dessus de dix par jour, l'entier supérieur suffit
+ * et se lit d'un coup d'œil : « 49 par jour ». En dessous, l'entier supérieur
+ * ment beaucoup — un reste de 2,5 sur dix jours devient « 1 par jour », soit dix
+ * au lieu de deux et demi. On descend alors au dixième.
+ *
+ * Toujours vers le HAUT dans les deux cas : arrondir un rythme à tenir vers le
+ * bas, c'est promettre que l'objectif sera atteint en faisant moins.
+ *
+ * Le retrait d'un milliardième avant l'arrondi n'est pas une coquetterie :
+ * 0,3 en virgule flottante vaut parfois 0,30000000000000004, et sans lui la
+ * phrase afficherait « 0,4 par jour » pour un compte parfaitement rond.
+ */
+function parJour(reste, jo) {
+    const brut = reste / jo;
+    if (brut >= 10) return Math.ceil(brut - 1e-9);
+    return Math.ceil(brut * 10 - 1e-9) / 10;
 }
 
 /* --------------------------------------------------------------------------
@@ -1385,7 +1410,7 @@ function paintGauge(m) {
     if (!fill) return;
     fill.style.width = `${pct}%`;
     fill.classList.toggle('gauge-fill--done', mesure && t > 0 && val >= t);
-    document.getElementById(`target-${m.key}`).textContent = t > 0 ? fmtInt(t) : 'non défini';
+    document.getElementById(`target-${m.key}`).textContent = t > 0 ? fmtCible(t) : 'non défini';
 
     /* L'échelle est écrite à côté de l'objectif, et pas seulement en haut de la
        page : sans elle, « Objectif : 40 » se lit comme un objectif du jour, et
@@ -1814,7 +1839,7 @@ function buildTargets() {
 
     const lignes = montrables.map(m => {
         const t = targetFor(qui, m.key, scale);
-        const val = t.source ? fmtInt(t.value) : '—';
+        const val = t.source ? fmtCible(t.value) : '—';
         const src = t.source === 'user' ? 'objectif personnel'
                   : t.source === 'job'  ? 'objectif du métier'
                   : 'non défini';

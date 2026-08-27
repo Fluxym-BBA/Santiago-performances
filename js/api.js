@@ -1741,6 +1741,123 @@ export const TARGET_SCALES = [
     { key: 'year',  label: 'Année',   court: "l'exercice", article: "de l'exercice" }
 ];
 
+/* --------------------------------------------------------------------------
+   UN OBJECTIF PEUT AVOIR UN CHIFFRE APRÈS LA VIRGULE (v18)
+
+   POURQUOI ICI ET NON DANS ui.js. Lire « 2,5 » et le comprendre comme deux et
+   demi n'est pas de la mise en forme : c'est la règle qui dit ce qu'est un
+   objectif valable. Elle vit donc à côté de la table et de la fonction qui
+   l'écrivent, avec les échelles et les métiers, et non avec les graphiques.
+   L'écran des objectifs et la page de saisie s'en servent tous les deux, et ils
+   doivent en avoir exactement la même lecture : sinon l'un accepte ce que
+   l'autre affiche de travers.
+
+   UN SEUL CHIFFRE. Pas deux, pas trois. « 3,97 rendez-vous par jour » ne veut
+   rien dire de plus que « 4 », alors que « 2,5 par semaine » dit quelque chose
+   que 2 et 3 ne savent pas dire.
+
+   L'ARRONDI SE FAIT SUR LE TEXTE SAISI, pas sur le nombre. En virgule flottante,
+   2,55 vaut en réalité 2,5499999999999998 et Math.round le rabat sur 2,5, alors
+   que round(2.55, 1) côté PostgreSQL donne 2,6. Deux arrondis différents pour la
+   même valeur, c'est le genre d'écart qui finit par afficher autre chose que ce
+   qui est enregistré. Découper la chaîne évite le problème au lieu de le
+   contourner.
+   -------------------------------------------------------------------------- */
+
+/** La borne haute des objectifs, la même qu'en base (contrainte de check). */
+export const TARGET_MAX = 1000000;
+
+const _nfCible = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
+
+/**
+ * Arrondit au dixième un nombre issu d'un CALCUL (une déduction au prorata, un
+ * reste à faire). Pour une valeur SAISIE, passer par lireCible : l'arrondi y est
+ * fait sur le texte, ce qui est plus fidèle.
+ */
+export function auDixieme(n) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return null;
+    return Math.round(x * 10) / 10;
+}
+
+/**
+ * Un objectif tel qu'on le LIT : « 1 000 », « 2,5 », « 4 ».
+ *
+ * Pas de décimale inutile : un objectif entier s'affiche entier. « 4,0 » sur une
+ * jauge laisse croire à une précision qui n'existe pas, et allonge une ligne
+ * déjà serrée dans les colonnes étroites de l'entonnoir.
+ */
+export function fmtCible(v) {
+    const x = Number(v);
+    if (v === null || v === undefined || !Number.isFinite(x)) return '–';
+    return _nfCible.format(x);
+}
+
+/**
+ * Le même, pour un champ que l'on va RÉÉDITER : sans séparateur de milliers.
+ *
+ * fmtCible produit « 1 000 » avec une espace insécable étroite. Réinjectée dans
+ * un champ, elle se fait recopier, coller ailleurs, et finit par revenir sous
+ * une forme que le prochain parseur ne reconnaît plus. Un champ de saisie ne
+ * contient que des chiffres et au plus une virgule.
+ */
+export function cibleChamp(v) {
+    const x = Number(v);
+    if (v === null || v === undefined || !Number.isFinite(x)) return '';
+    return Number.isInteger(x) ? String(x) : x.toFixed(1).replace('.', ',');
+}
+
+/**
+ * Lit un objectif saisi à la main. Point ou virgule, au choix : personne ne doit
+ * avoir à se demander lequel des deux l'outil attend.
+ *
+ * Renvoie { etat, value, arrondi } où etat vaut :
+ *   'vide'      — le champ est vide, ce qui veut dire « pas d'objectif » et non
+ *                 « zéro ». Les deux ne sont pas la même chose : voir
+ *                 clear_activity_target.
+ *   'ok'        — value porte la valeur, arrondi dit si un chiffre au-delà du
+ *                 dixième a été rabattu. L'appelant DOIT le dire à
+ *                 l'utilisateur, sinon la valeur change dans son dos.
+ *   'illisible' — des lettres, un signe moins, deux virgules. Surtout pas
+ *                 traité comme un champ vide : ce serait effacer un objectif
+ *                 sur une faute de frappe.
+ *   'trop'      — au-delà de la borne que la base refusera de toute façon.
+ *
+ * Le signe moins est refusé plutôt qu'ignoré. Un objectif négatif n'existe pas,
+ * et la base le rejetterait avec un message que personne ne comprendrait.
+ */
+export function lireCible(brut) {
+    // Espaces ordinaires, insécables et fines insécables : tout ce qu'un
+    // copier-coller depuis un tableur ou depuis l'écran lui-même peut apporter.
+    const t = String(brut ?? '').replace(/[\s\u00a0\u202f]/g, '');
+    if (t === '') return { etat: 'vide', value: null, arrondi: false };
+
+    const m = /^(\d*)(?:[.,](\d*))?$/.exec(t);
+    if (!m) return { etat: 'illisible', value: null, arrondi: false };
+
+    const ent = m[1] || '';
+    const dec = m[2] || '';
+    if (ent === '' && dec === '') return { etat: 'illisible', value: null, arrondi: false };
+
+    let entier = Number(ent || '0');
+    let dixieme = dec ? Number(dec[0]) : 0;
+    let arrondi = false;
+
+    /* Au-delà du premier chiffre décimal. « 2,50 » ne change rien et ne mérite
+       aucun message ; « 2,55 » devient 2,6 et doit être annoncé. */
+    const suite = dec.slice(1);
+    if (suite !== '' && Number(suite) !== 0) {
+        arrondi = true;
+        if (Number(suite[0]) >= 5) dixieme += 1;
+    }
+    if (dixieme >= 10) { entier += 1; dixieme = 0; }
+
+    const value = Number(`${entier}.${dixieme}`);
+    if (!Number.isFinite(value)) return { etat: 'illisible', value: null, arrondi: false };
+    if (value > TARGET_MAX) return { etat: 'trop', value: null, arrondi: false };
+    return { etat: 'ok', value, arrondi };
+}
+
 /** Les deux métiers qui ont des objectifs. */
 export const TARGET_JOBS = [
     { key: 'bdr',   label: 'BDR' },
@@ -2005,9 +2122,17 @@ export function userTargets(userId, scale) {
  * PostgREST ne sait pas retrouver.
  */
 export async function setTarget({ scope, job = null, userId = null, scale, metric, value }) {
+    /* Depuis la v18 la base attend un numeric. Elle arrondirait elle-même, mais
+       une valeur non numérique arrivée jusqu'ici partirait en null et la colonne
+       la refuserait avec un message illisible : mieux vaut refuser tout de suite
+       et nommer le compteur fautif. */
+    const v = auDixieme(value);
+    if (v === null || v < 0) {
+        throw new Error(`Objectif illisible pour « ${metric} » : ${value}`);
+    }
     const { error } = await supabase.rpc('set_activity_target', {
         p_scope: scope, p_job: job, p_user: userId,
-        p_scale: scale, p_metric: metric, p_value: value
+        p_scale: scale, p_metric: metric, p_value: v
     });
     if (error) throw error;
     invalidateTargets();
