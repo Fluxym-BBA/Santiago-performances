@@ -19,9 +19,39 @@
 
 import {
     signOut, isAdmin, myProfile, viewedProfile, isViewingOther, roleLabel,
-    levelLabel, canReadAll, canManageAccounts, canWriteAny,
-    isContributor, amContributor, jobLabel
+    levelLabel, canReadAll, canManageAccounts, canWriteAny, canWriteViewed,
+    isContributor, amContributor, jobLabel, linkFor
 } from './api.js';
+
+/* --------------------------------------------------------------------------
+   QUATRIÈME RÈGLE, AJOUTÉE EN v19 : CONSULTER QUELQU'UN, C'EST VOIR SON ÉCRAN.
+
+   Jusqu'ici la barre restait celle du lecteur. Un propriétaire sans métier n'a
+   que l'onglet Équipe : en ouvrant la fiche de Santiago, il voyait ses
+   performances et n'avait aucun chemin vers sa saisie, alors que c'est
+   justement là que tout se passe. Pire, les rares onglets présents perdaient
+   le « ?u= » et le ramenaient chez lui sans prévenir.
+
+   Les onglets sont donc maintenant CEUX DE LA PERSONNE REGARDÉE, et tous les
+   liens qui restent dans son contexte le conservent. Le seul reliquat du
+   lecteur est le menu de droite : il porte son identité, ses réglages et sa
+   déconnexion, et il n'y a aucune raison de les lui retirer.
+   -------------------------------------------------------------------------- */
+
+/**
+ * Échappement minimal pour tout ce qui vient d'un profil.
+ *
+ * Le nom d'affichage est modifiable par son propriétaire depuis la page du
+ * compte, et il était jusqu'ici injecté tel quel dans la barre de contexte.
+ * Un nom contenant du balisage s'exécutait donc dans la page de son manager.
+ * Trois lignes ici plutôt qu'un import depuis ui.js : nav.js est chargé sur
+ * toutes les pages, y compris celles qui n'ont pas besoin du reste.
+ */
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
 
 /* --------------------------------------------------------------------------
    Sections
@@ -33,14 +63,16 @@ import {
 const SECTIONS = [
     {
         href: './index.html', match: ['', 'index.html'],
-        label: 'Ma journée', short: 'Journée', mini: 'Journée', icon: '✍️',
+        label: 'Ma journée', labelOther: 'Sa journée',
+        short: 'Journée', mini: 'Journée', icon: '✍️',
         // isContributor et non is_bdr : sans quoi un commercial n'aurait aucune
         // page de saisie, donc aucun usage de l'outil.
         when: p => isContributor(p)
     },
     {
         href: './dashboard.html', match: ['dashboard.html'],
-        label: 'Mes performances', short: 'Performances', mini: 'Perfs', icon: '📊',
+        label: 'Mes performances', labelOther: 'Ses performances',
+        short: 'Performances', mini: 'Perfs', icon: '📊',
         when: p => isContributor(p)
     },
     {
@@ -76,9 +108,18 @@ const MENU = [
     // global et rétroactif, il ne se règle pas à plusieurs mains. La page
     // refuserait de toute façon le formulaire, et la base l'écriture.
     { href: './bareme.html', label: 'Barème du score', icon: '⚖️', when: p => canWriteAny(p) },
-    { href: './team.html', label: 'Vue d\'équipe', icon: '👥', when: p => canReadAll(p), onlyCollapsed: true },
-    { href: './dashboard.html', label: 'Mes performances', icon: '📊', when: p => isContributor(p), onlyCollapsed: true },
-    { href: './index.html', label: 'Ma journée', icon: '✍️', when: p => isContributor(p), onlyCollapsed: true }
+    // Les trois dernières entrées doublent les onglets sur petit écran :
+    // « miroir » les fait suivre la personne regardée, comme les onglets.
+    // Volontairement NON miroir, à la différence des deux suivantes : sur petit
+    // écran, c'est le seul chemin de retour vers l'équipe quand on consulte
+    // quelqu'un qui, lui, n'a pas cet onglet. Le perdre enfermerait le lecteur
+    // dans la fiche qu'il regarde.
+    { href: './team.html', label: 'Vue d\'équipe', icon: '👥', when: p => canReadAll(p),
+      onlyCollapsed: true },
+    { href: './dashboard.html', label: 'Mes performances', labelOther: 'Ses performances',
+      icon: '📊', when: p => isContributor(p), onlyCollapsed: true, miroir: true },
+    { href: './index.html', label: 'Ma journée', labelOther: 'Sa journée',
+      icon: '✍️', when: p => isContributor(p), onlyCollapsed: true, miroir: true }
 ];
 
 const here = () => location.pathname.split('/').pop();
@@ -119,14 +160,24 @@ export function renderNav() {
     const cur = here();
     const appName = window.APP_CONFIG?.APP_NAME || 'Cockpit BDR';
 
-    const sections = SECTIONS.filter(s => s.when(me));
-    const menu = MENU.filter(m => m.when(me));
+    /* Les onglets décrivent la personne REGARDÉE, le menu décrit le lecteur.
+       Conséquence assumée : en consultant un membre, l'onglet Équipe disparaît,
+       puisque lui ne l'a pas. Le retour se fait par le bouton de la barre de
+       contexte, qui est là pour ça et qui, lui, ne bouge jamais. */
+    const autre = isViewingOther();
+    const vu = viewedProfile() || me;
+    const profilNav = autre ? vu : me;
+    const lien = href => (autre ? linkFor(href, vu.user_id) : href);
+    const nom = s => (autre && s.labelOther ? s.labelOther : s.label);
+
+    const sections = SECTIONS.filter(s => s.when(profilNav));
+    const menu = MENU.filter(m => m.when(m.miroir ? profilNav : me));
 
     nav.className = 'topbar';
     nav.innerHTML = `
     <div class="topbar-inner">
 
-        <a class="brand" href="${sections[0]?.href || './team.html'}">
+        <a class="brand" href="${lien(sections[0]?.href || './team.html')}">
             <img class="brand-logo" src="./assets/fluxym_logo_2018_sansdescriptif_blanc.png"
                  alt="Fluxym" onerror="this.style.display='none'">
             <span class="brand-name">${appName}</span>
@@ -134,10 +185,10 @@ export function renderNav() {
 
         <nav class="tabs" aria-label="Navigation principale">
             ${sections.map(s => `
-                <a class="tab${s.match.includes(cur) ? ' tab--on' : ''}" href="${s.href}"
+                <a class="tab${s.match.includes(cur) ? ' tab--on' : ''}" href="${lien(s.href)}"
                    ${s.match.includes(cur) ? 'aria-current="page"' : ''}>
                     <span class="tab-icon" aria-hidden="true">${s.icon}</span>
-                    <span class="tab-full">${s.label}</span>
+                    <span class="tab-full">${nom(s)}</span>
                     <span class="tab-short">${s.short}</span>
                 </a>`).join('')}
         </nav>
@@ -171,8 +222,8 @@ export function renderNav() {
                 ${menu.length ? `<div class="menu-group">
                     ${menu.map(m => `
                         <a class="menu-item${m.onlyCollapsed ? ' menu-item--collapsed-only' : ''}"
-                           href="${m.href}" role="menuitem">
-                            <span aria-hidden="true">${m.icon}</span>${m.label}
+                           href="${m.miroir ? lien(m.href) : m.href}" role="menuitem">
+                            <span aria-hidden="true">${m.icon}</span>${m.miroir ? nom(m) : m.label}
                         </a>`).join('')}
                 </div>` : ''}
 
@@ -193,7 +244,7 @@ export function renderNav() {
 
     <nav class="tabbar" aria-label="Navigation principale (téléphone)">
         ${sections.map(s => `
-            <a class="tabbar-item${s.match.includes(cur) ? ' tabbar-item--on' : ''}" href="${s.href}">
+            <a class="tabbar-item${s.match.includes(cur) ? ' tabbar-item--on' : ''}" href="${lien(s.href)}">
                 <span aria-hidden="true">${s.icon}</span>
                 <span>${s.mini}</span>
             </a>`).join('')}
@@ -274,18 +325,24 @@ export function renderContextBar() {
     if (!isViewingOther()) return;
 
     const v = viewedProfile();
-    const writing = ['', 'index.html'].includes(here());
-    const name = v.display_name || v.email || 'cet utilisateur';
+    const name = esc(v.display_name || v.email || 'cet utilisateur');
+
+    /* v19 : le ton de la barre suit le DROIT D'ÉCRIRE, plus la page affichée.
+       Depuis que l'écran de saisie s'ouvre à l'identique pour tout le monde,
+       « vous corrigez » affiché à un manager qui ne peut rien enregistrer
+       serait une promesse que la base ne tiendra pas. Seul le propriétaire
+       écrit chez les autres. */
+    const ecrit = canWriteViewed();
 
     const el = document.createElement('div');
     el.id = 'context-bar';
-    el.className = `ctxbar${writing ? ' ctxbar--write' : ''}`;
+    el.className = `ctxbar${ecrit ? ' ctxbar--write' : ''}`;
     el.innerHTML = `
-        <span class="ctxbar-icon" aria-hidden="true">${writing ? '✏️' : '👁️'}</span>
+        <span class="ctxbar-icon" aria-hidden="true">${ecrit ? '✏️' : '👁️'}</span>
         <span class="ctxbar-text">
-            ${writing
-                ? `Vous <b>corrigez la saisie de ${name}</b>. Chaque modification sera enregistrée sur son compte et signalée comme une correction.`
-                : `Vous consultez les performances de <b>${name}</b>, en lecture seule.`}
+            ${ecrit
+                ? `Vous êtes dans le compte de <b>${name}</b> et vous voyez son écran. Tout ce que vous enregistrerez ici partira sur son compte, signalé comme une correction.`
+                : `Vous voyez l'écran de <b>${name}</b>, en lecture seule.`}
         </span>
         <a class="ctxbar-btn" href="./team.html">Retour à l'équipe</a>`;
 

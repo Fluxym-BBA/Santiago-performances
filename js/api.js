@@ -959,6 +959,24 @@ export function amContributor() { return isContributor(_me); }
 /** Profil dont on regarde les données. Jamais nul après loadProfile(). */
 export function viewedProfile() { return _viewed || _me; }
 
+/**
+ * Peut-on ÉCRIRE dans le compte actuellement affiché ?
+ *
+ * Chez soi, toujours. Chez quelqu'un d'autre, seulement pour le propriétaire :
+ * la politique RLS de daily_activity dit « user_id = auth.uid() OR
+ * can_write_any() », et can_write_any() est le rang 4. Un manager, et même un
+ * administrateur, lit les journées des autres mais ne les modifie pas.
+ *
+ * POURQUOI CETTE FONCTION EXISTE. Depuis la v19 l'écran de saisie s'affiche à
+ * l'identique quand on consulte quelqu'un, boutons compris. Sans ce test, un
+ * manager cliquerait sur un bouton parfaitement normal et récolterait une
+ * erreur de permission incompréhensible. L'écran doit savoir ce qu'il a le
+ * droit de faire AVANT que la base le lui apprenne.
+ */
+export function canWriteViewed() {
+    return !isViewingOther() || canWriteAny();
+}
+
 /** Vrai quand on consulte quelqu'un d'autre : l'écran doit alors le dire. */
 export function isViewingOther() {
     return !!_me && !!_viewed && _viewed.user_id !== _me.user_id;

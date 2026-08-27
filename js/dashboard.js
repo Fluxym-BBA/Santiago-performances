@@ -12,7 +12,7 @@ import {
     endOfMonth, addMonthsISO, startOfQuarter, endOfQuarter, periodLength,
     previousPeriod, samePeriodLastYear, periodLabel, periodLabelShort, minISO,
     maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS,
-    isViewingOther, viewedProfile, isAdmin, linkFor, scoreWeightsMeta, metricsFor
+    isViewingOther, viewedProfile, canWriteViewed, linkFor, scoreWeightsMeta, metricsFor
 } from './api.js';
 import {
     num, score, isActive, zeroDay, rowsForRange, agg, valOf, bucketize,
@@ -236,17 +236,13 @@ function renderIdentity() {
     const v = viewedProfile();
     const name = v.display_name || v.email || 'cet utilisateur';
 
-    const badge = document.querySelector('.hero-badge');
-    const title = document.querySelector('.page-hero h1');
-    const sub = document.querySelector('.page-hero p');
-    if (badge) badge.textContent = 'Fiche d\'un BDR';
-    if (title) title.innerHTML = `${escapeHtml(name)}, <em>en détail</em>`;
-    if (sub) {
-        sub.innerHTML = `Vous consultez les performances de <b>${escapeHtml(name)}</b>`
-            + `${v.email ? ` (${escapeHtml(v.email)})` : ''}, en lecture seule. `
-            + `Les mêmes périodes, les mêmes graphiques et les mêmes info-bulles que sur votre propre page. `
-            + `<a href="./team.html">Retour à l'équipe</a>`;
-    }
+    /* v19 : l'en-tête de la page n'est plus remplacé.
+       Il annonçait « X, en détail » et un paragraphe de mise en garde, ce qui
+       donnait une page hybride : ni la sienne, ni celle du lecteur. La demande
+       est de voir exactement son écran ; l'avertissement vit maintenant dans la
+       barre de contexte, en haut, sur toutes les pages de la consultation.
+       Seul le titre de l'onglet garde le nom, pour s'y retrouver entre
+       plusieurs fiches ouvertes. */
     document.title = `${name} | Cockpit BDR — Fluxym`;
 }
 
@@ -260,11 +256,22 @@ function editLink(iso) {
     if (!isViewingOther()) {
         return `<a class="link-edit" href="./index.html?date=${iso}">modifier</a>`;
     }
-    if (!isAdmin()) return '<span class="td-muted">—</span>';
+
+    /* v19 : le lien existe pour tous ceux qui ont accès à la fiche, et porte le
+       même mot que chez soi.
+       Avant, il fallait être administrateur pour le voir, et il s'appelait
+       « corriger ». Deux problèmes : un manager n'avait aucun moyen d'ouvrir la
+       journée telle que la personne la voit, alors que c'est l'écran où tout se
+       joue ; et un administrateur non propriétaire y lisait « corriger » alors
+       que la base allait refuser ses écritures. Le mot est donc redevenu
+       « modifier », et c'est l'info-bulle qui dit ce qu'il en sera vraiment. */
     const v = viewedProfile();
-    return `<a class="link-edit link-edit--fix"
-               href="${linkFor('./index.html', v.user_id, { date: iso })}"
-               title="Corriger cette journée sur le compte de ${escapeHtml(v.display_name || v.email)}">corriger</a>`;
+    const nom = escapeHtml(v.display_name || v.email);
+    const titre = canWriteViewed()
+        ? `Ouvrir cette journée sur le compte de ${nom}. Vos modifications y seront enregistrées comme des corrections.`
+        : `Voir cette journée telle que ${nom} la voit. Vous ne pouvez pas la modifier.`;
+    return `<a class="link-edit" href="${linkFor('./index.html', v.user_id, { date: iso })}"
+               title="${titre}">modifier</a>`;
 }
 
 /* --------------------------------------------------------------------------

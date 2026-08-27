@@ -35,9 +35,9 @@ import {
     fetchDayEvents, addSalesEvent, deleteSalesEvent,
     accountHistory, agoLabel, formatDMY,
     TARGET_SCALES, scaleOf, saveGaugeScale, periodBounds, periodLabel,
-    fetchRange, joursOuvres, myProfile, loadSettings,
+    fetchRange, joursOuvres, loadSettings,
     loadVisibility, targetVisible, setVisibility,
-    fmtCible, auDixieme
+    fmtCible, auDixieme, canWriteViewed
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -175,7 +175,11 @@ function gaugeHtml(m) {
  * à montrer ni à cacher.
  */
 function oeilHtml(m) {
-    if (!m.target || isViewingOther()) return '';
+    /* v19 : l'œil reste à l'écran en consultation. Il fait partie de la vue de
+       la personne, et son état (barré ou non) dit quelque chose d'utile sur ce
+       qu'elle a choisi de regarder. Le clic, lui, reste soumis au droit
+       d'écrire, que basculeObjectif vérifie. */
+    if (!m.target) return '';
     return `
         <button class="oeil" type="button" id="oeil-${m.key}" data-oeil="${m.key}"
                 aria-pressed="false" title="Masquer cet objectif"
@@ -653,11 +657,24 @@ function retryBlocked() {
 let fixConfirmed = false;
 
 function allowWrite() {
-    if (!isViewingOther() || fixConfirmed) return true;
+    if (!isViewingOther()) return true;
+
+    /* Le droit réel avant la question : demander « continuer ? » à quelqu'un
+       qui n'a pas le droit d'écrire ne sert qu'à lui faire découvrir le refus
+       une seconde plus tard, sous forme d'erreur de permission. */
+    if (!canWriteViewed()) {
+        const v = viewedProfile();
+        toast(`Vous voyez l'écran de ${v.display_name || 'cette personne'}, `
+            + `mais seul le propriétaire du Cockpit peut y modifier quelque chose.`,
+            'error', 6000);
+        return false;
+    }
+    if (fixConfirmed) return true;
+
     const v = viewedProfile();
     const name = v.display_name || v.email || 'cet utilisateur';
     const ok = confirm(
-        `Vous allez modifier la saisie de ${name}.\n\n`
+        `Vous allez modifier le compte de ${name}.\n\n`
         + `Journée concernée : ${formatLong(day)}.\n\n`
         + `Vos modifications seront enregistrées sur son compte et signalées `
         + `comme une correction dans son historique.\n\nContinuer ?`);
@@ -673,17 +690,20 @@ function renderIdentity() {
     if (!isViewingOther()) return;
     const v = viewedProfile();
     const name = v.display_name || v.email || 'cet utilisateur';
-    const badge = document.querySelector('.hero-badge');
-    const title = document.querySelector('.page-hero h1');
-    const sub = document.querySelector('.page-hero p');
-    if (badge) badge.textContent = 'Correction';
-    if (title) title.innerHTML = `Corriger la saisie de <em>${escapeHtml(name)}</em>`;
-    if (sub) {
-        sub.innerHTML = `Vous n'êtes pas sur votre propre journée. Chaque modification sera `
-            + `enregistrée sur le compte de <b>${escapeHtml(name)}</b> et marquée comme une `
-            + `correction. <a href="${escapeHtml(`./dashboard.html?u=${v.user_id}`)}">Retour à sa fiche</a>`;
-    }
-    document.title = `Corriger ${name} | Cockpit BDR — Fluxym`;
+
+    /* v19 : LA PAGE N'EST PLUS RÉÉCRITE.
+       Elle affichait « Corriger la saisie de X » à la place du titre habituel,
+       avec un paragraphe d'avertissement en dessous. Résultat : on regardait un
+       écran qui n'était pas celui de la personne, alors que le but même de la
+       consultation est de voir ce qu'elle voit, avec ses compteurs, ses jauges
+       et ses réglages.
+       L'avertissement n'a pas disparu pour autant, il a changé de place : la
+       barre de contexte de nav.js le porte, en haut de page, sur toutes les
+       pages, et pas seulement sur celle-ci.
+       Le titre de l'ONGLET du navigateur, lui, garde le nom : c'est invisible
+       dans la page, et c'est ce qui permet de s'y retrouver quand trois fiches
+       sont ouvertes côte à côte. */
+    document.title = `${name} | Cockpit BDR — Fluxym`;
 }
 
 /** Écriture de la note du jour. Réservée aux colonnes libres de contrainte. */
@@ -1598,7 +1618,13 @@ async function setScale(next) {
         toast('Le cumul de la période n\'a pas pu être lu : les jauges restent vides, '
             + 'la saisie du jour fonctionne normalement.', 'error', 6000);
     }
-    saveGaugeScale(scale);
+    /* Chez quelqu'un d'autre, le changement d'échelle ne vaut que pour le coup
+       d'œil en cours. Deux raisons : la politique RLS de profiles n'autorise
+       l'update que sur sa propre ligne — même le propriétaire ne peut pas
+       écrire le gauge_scale d'un tiers, l'appel échouerait en silence — et
+       surtout, regarder la semaine de quelqu'un ne doit pas lui changer son
+       écran pour le lendemain matin. */
+    if (!isViewingOther()) saveGaugeScale(scale);
 }
 
 /* --------------------------------------------------------------------------
@@ -1792,7 +1818,13 @@ function appliqueVisibilite() {
  */
 async function basculeObjectif(key) {
     const qui = viewedProfile();
-    if (!qui || isViewingOther()) return;
+    if (!qui) return;
+
+    /* Chez quelqu'un d'autre, le même garde-fou que pour la saisie : une seule
+       confirmation par session, et rien du tout pour qui n'a pas le droit.
+       La politique RLS de target_visibility accepte l'exception « user » posée
+       par le propriétaire, et refuse celle des autres. */
+    if (isViewingOther() && !allowWrite()) return;
 
     const avant = targetVisible(qui, key);
     const apres = !avant;
@@ -1898,15 +1930,20 @@ function buildTargets() {
     myMetrics = metricsFor(viewedProfile());
     hasEvents = myMetrics.some(m => isEventMetric(m.key));
 
-    /* L'échelle est celle du LECTEUR, pas de la personne consultée : c'est une
-       préférence d'affichage, et quand un administrateur ouvre la journée de
-       quelqu'un d'autre, c'est sa propre habitude de lecture qui s'applique.
-       L'objectif comparé, lui, reste bien celui de la personne consultée.
+    /* v19 : L'ÉCHELLE EST CELLE DE LA PERSONNE REGARDÉE, et non plus celle du
+       lecteur. La règle précédente se défendait — une préférence d'affichage
+       appartient à celui qui lit — mais elle produisait un écran qui n'était
+       celui de personne : les compteurs de Santiago, ses objectifs, et le
+       découpage du temps de son manager. Voir ce qu'il voit suppose de le voir
+       à son échelle, sinon la comparaison des jauges ne veut rien dire.
+
+       Le changement d'échelle reste possible pendant la consultation, mais il
+       n'est PAS enregistré chez elle : voir setScale.
 
        Posée avant tout rendu : buildTargets() et paintDateBar() la lisent, et
        les voir afficher le jour une fraction de seconde avant de sauter au mois
        serait le genre de clignotement qui fait douter de ce qu'on lit. */
-    scale = scaleOf(myProfile());
+    scale = scaleOf(viewedProfile());
     renderNav();
     renderIdentity();
     buildCards();
