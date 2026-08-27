@@ -295,3 +295,28 @@
 }
 
 .obj-vis-sel:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+
+/* ==========================================================================
+   LES RÉGLAGES GÉNÉRAUX (v17)
+
+   Deux champs, pas plus, et une grille qui se replie en une colonne sur un
+   écran étroit. Volontairement en bas de l'onglet : on y vient une fois par an,
+   contrairement aux objectifs.
+   ========================================================================== */
+
+.set-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    margin-bottom: 4px;
+}
+
+.set-cell {
+    padding: 14px 16px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: var(--white);
+}
+
+.set-cell .obj-lab { margin-bottom: 6px; }
+.set-cell .obj-hint { margin-top: 6px; }

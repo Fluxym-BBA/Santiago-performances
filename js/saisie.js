@@ -145,7 +145,10 @@ function gaugeHtml(m) {
        légende et ligne de reste comprises. */
     return `
         <div class="gauge" id="gaugewrap-${m.key}">
-            <div class="gauge-track"><div class="gauge-fill" id="gauge-${m.key}" style="width:0%"></div></div>
+            <div class="gauge-track">
+                <div class="gauge-fill" id="gauge-${m.key}" style="width:0%"></div>
+                <i class="gauge-mark" id="gaugemark-${m.key}" hidden></i>
+            </div>
             <div class="gauge-legend">
                 <span>Objectif : <b id="target-${m.key}">–</b><span id="gauge-scale-${m.key}"></span></span>
                 <span id="gauge-pct-${m.key}">0 %</span>
@@ -1321,6 +1324,46 @@ function restLine(v, t) {
          + ` (${fmtInt(Math.ceil(reste / jo))} par jour)`;
 }
 
+/* --------------------------------------------------------------------------
+   LE REPÈRE DE RYTHME (v17)
+
+   Une jauge dit « 12 % de l'objectif ». Sur une journée, c'est clair. Sur un
+   exercice de douze mois, c'est trompeur dans les deux sens : au 27 août, 12 %
+   d'un objectif annuel ressemble à un désastre et 66 % à un exploit, alors que
+   66 % au 27 août, c'est exactement dans les temps.
+
+   D'où ce trait posé sur la barre à la position du temps écoulé. Au-dessus, on
+   est devant ; en dessous, on est derrière. Sans lui, l'échelle annuelle
+   n'aurait produit que des barres rassurantes pendant onze mois puis une panique
+   en septembre.
+
+   COMPTÉ EN JOURS OUVRÉS, comme tout le reste de l'outil : un objectif ne se
+   poursuit pas le dimanche, et le 15 août pèse zéro. La journée affichée est
+   incluse, parce qu'elle est en cours de saisie et que ses chiffres comptent
+   déjà dans la barre.
+
+   Le résultat est mis en cache par période : joursOuvres() parcourt les jours un
+   par un, et sur un exercice cela ferait deux cent cinquante tours par compteur
+   et par peinture, soit quatre mille pour un simple clic sur un bouton plus.
+   -------------------------------------------------------------------------- */
+
+let _rythme = { cle: null, pct: 0, faits: 0, total: 0 };
+
+function rythme() {
+    const cle = `${scale}|${day}`;
+    if (_rythme.cle === cle) return _rythme;
+    const b = periodBounds(scale, day);
+    const total = joursOuvres(b.from, b.to);
+    const faits = joursOuvres(b.from, day);
+    _rythme = {
+        cle,
+        total,
+        faits,
+        pct: total > 0 ? Math.min(100, (faits / total) * 100) : 0
+    };
+    return _rythme;
+}
+
 function paintGauge(m) {
     if (!m.target) return;   // compteur sans objectif : aucune jauge à peindre
 
@@ -1360,6 +1403,22 @@ function paintGauge(m) {
     const txt = t > 0 ? restLine(v, t) : '';
     rest.textContent = txt;
     rest.hidden = !txt;
+
+    /* Le repère de rythme. Pas sur l'échelle du jour, où le temps écoulé vaut
+       toujours cent pour cent, et pas sans objectif, où il n'y aurait rien à
+       comparer : un trait seul sur une barre vide n'informe de rien. */
+    const mark = document.getElementById(`gaugemark-${m.key}`);
+    if (mark) {
+        const montrer = scale !== 'day' && t > 0;
+        mark.hidden = !montrer;
+        if (montrer) {
+            const r = rythme();
+            mark.style.left = `${r.pct}%`;
+            const sc2 = TARGET_SCALES.find(x => x.key === scale);
+            mark.title = `${Math.round(r.pct)} % du temps écoulé : `
+                + `${r.faits} jours ouvrés sur ${r.total} ${sc2 ? sc2.article : ''}`.trim();
+        }
+    }
 }
 
 function paintDerived() {
@@ -1503,7 +1562,7 @@ function paintScaleBar() {
  * préférence d'affichage non retenue n'est pas une panne.
  */
 async function setScale(next) {
-    if (next === scale || !['day', 'week', 'month'].includes(next)) return;
+    if (next === scale || !TARGET_SCALES.some(x => x.key === next)) return;
     scale = next;
     paintScaleBar();
     buildTargets();

@@ -651,7 +651,7 @@ function normalize(p) {
            colonne n'existe pas et vaut undefined, ce qui donnerait un
            `if (scale)` vrai et une échelle inconnue à afficher. NULL veut dire
            « personne n'a choisi », et le mois s'applique alors (voir scaleOf). */
-        gauge_scale: ['day', 'week', 'month'].includes(p.gauge_scale) ? p.gauge_scale : null
+        gauge_scale: TARGET_SCALES.some(x => x.key === p.gauge_scale) ? p.gauge_scale : null
     };
 }
 
@@ -809,9 +809,32 @@ let _settings = null;
  * aides afficher la valeur de repli, ce qui est très préférable à une page de
  * saisie qui refuse de s'ouvrir pour un nombre de mois.
  */
+/**
+ * Le mois où commence l'exercice, 1 pour janvier et 10 pour octobre.
+ *
+ * Replié sur octobre quand les réglages n'ont pas été lus : c'est la valeur
+ * posée en base, donc le repli donne la même chose que la réalité au lieu de
+ * décaler silencieusement toutes les bornes annuelles de trois mois.
+ */
+export function fiscalStartMonth() {
+    const v = Number(_settings && _settings.fiscal_year_start_month);
+    return v >= 1 && v <= 12 ? v : 10;
+}
+
+/** Enregistre les réglages généraux. Réservé au propriétaire par la RLS. */
+export async function saveSettings(patch) {
+    const { error } = await supabase.from('app_settings')
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq('id', true);
+    if (error) throw error;
+    _settings = { ..._settings, ...patch };
+    applyHints();
+}
+
 export async function loadSettings() {
     const { data, error } = await supabase
-        .from('app_settings').select('known_contact_months').maybeSingle();
+        .from('app_settings')
+        .select('known_contact_months, fiscal_year_start_month').maybeSingle();
     if (error || !data) {
         if (error) console.warn('Réglages non lus :', error.message);
         return false;
@@ -1710,7 +1733,12 @@ export async function fetchTeamRange(fromIso, toIso,
 export const TARGET_SCALES = [
     { key: 'day',   label: 'Jour',    court: 'jour',       article: 'du jour' },
     { key: 'week',  label: 'Semaine', court: 'la semaine', article: 'de la semaine' },
-    { key: 'month', label: 'Mois',    court: 'le mois',    article: 'du mois' }
+    { key: 'month', label: 'Mois',    court: 'le mois',    article: 'du mois' },
+    /* v17. « De l'exercice » et non « de l'année » : chez Fluxym l'année des
+       objectifs court du 1er octobre au 30 septembre, et écrire « de l'année »
+       au-dessus d'une période qui n'est pas l'année civile est exactement le
+       genre de détail qui fait douter de tout le reste de l'écran. */
+    { key: 'year',  label: 'Année',   court: "l'exercice", article: "de l'exercice" }
 ];
 
 /** Les deux métiers qui ont des objectifs. */
@@ -2344,7 +2372,29 @@ export function periodLabelShort(from, to) {
 export function periodBounds(scale, iso) {
     if (scale === 'week')  return { from: startOfWeek(iso),  to: endOfWeek(iso) };
     if (scale === 'month') return { from: startOfMonth(iso), to: endOfMonth(iso) };
+    if (scale === 'year')  return fiscalBounds(iso);
     return { from: iso, to: iso };
+}
+
+/**
+ * L'exercice qui contient cette date.
+ *
+ * Avec un exercice démarrant en octobre, le 27 août 2026 appartient à l'exercice
+ * ouvert le 1er octobre 2025 et clos le 30 septembre 2026. La bascule se fait
+ * sur le mois : tant qu'on est avant le mois de début, on appartient à
+ * l'exercice ouvert l'année précédente.
+ *
+ * Le cas d'un exercice calé sur janvier retombe naturellement sur l'année
+ * civile, sans branche particulière.
+ */
+export function fiscalBounds(iso) {
+    const debut = fiscalStartMonth();
+    const [a, m] = iso.split('-').map(Number);
+    const anneeDebut = m >= debut ? a : a - 1;
+    const from = `${anneeDebut}-${String(debut).padStart(2, '0')}-01`;
+    const finMois = debut === 1 ? 12 : debut - 1;
+    const anneeFin = debut === 1 ? anneeDebut : anneeDebut + 1;
+    return { from, to: endOfMonth(`${anneeFin}-${String(finMois).padStart(2, '0')}-01`) };
 }
 
 /**
@@ -2383,7 +2433,7 @@ export const scaleOf = p => (p && p.gauge_scale) || 'month';
  * vrai quand la base a confirmé, faux sinon.
  */
 export async function saveGaugeScale(scale) {
-    if (!['day', 'week', 'month'].includes(scale)) return false;
+    if (!TARGET_SCALES.some(x => x.key === scale)) return false;
     const me = myProfile();
     if (!me) return false;
     const { error } = await supabase

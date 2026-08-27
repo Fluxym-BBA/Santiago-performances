@@ -855,3 +855,30 @@
    choisi de voir sur les cartes. */
 .target-read--off { opacity: 0.55; }
 .target-read--off .target-read-src { font-style: italic; }
+
+/* ==========================================================================
+   LE REPÈRE DE RYTHME SUR LA JAUGE (v17)
+
+   Un trait vertical posé à la position du temps écoulé, en jours ouvrés. À
+   gauche du trait, on est en retard ; à droite, on est en avance. Il n'apparaît
+   qu'à partir de l'échelle Semaine et seulement quand un objectif est posé.
+
+   Sans lui, l'échelle Année afficherait 20 % en janvier et 90 % en septembre,
+   deux chiffres qui ne disent rien tant qu'on ignore où on devrait en être.
+   ========================================================================== */
+
+/* app.css pose overflow:hidden sur la piste, ce qui suffit à contenir le
+   repère ; il manquait seulement le référentiel de positionnement. */
+.gauge-track { position: relative; }
+
+.gauge-mark {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;            /* centré sur sa position, pas décalé d'un pixel */
+    background: var(--navy);
+    opacity: 0.5;
+    border-radius: 1px;
+    pointer-events: none;         /* ne vole pas le survol de la barre */
+}

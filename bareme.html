@@ -283,6 +283,46 @@
                 </div>
             </section>
 
+            <!-- RÉGLAGES GÉNÉRAUX (v17)
+
+                 Deux valeurs qui ne sont ni des objectifs ni des affichages mais
+                 qui changent la lecture de tout l'outil, et qui jusqu'ici
+                 n'étaient modifiables qu'en SQL. Masqué pour qui n'a pas le droit
+                 d'écrire : la base refuserait de toute façon, autant ne pas
+                 montrer un bouton qui ne sert pas. -->
+            <section class="chart-card chart-card--wide" id="obj-settings" hidden>
+                <div class="section-head">
+                    <div>
+                        <h2>Réglages généraux</h2>
+                        <p>Le mois où commence l'exercice, et la durée au-delà de laquelle un contact
+                           redevient inconnu. Ces deux valeurs s'appliquent à tout le monde.</p>
+                    </div>
+                </div>
+
+                <div class="set-grid">
+                    <div class="set-cell">
+                        <label class="obj-lab" for="set-fiscal">L'exercice commence en</label>
+                        <select id="set-fiscal" class="obj-who"></select>
+                        <div class="obj-hint" id="set-fiscal-hint"></div>
+                    </div>
+                    <div class="set-cell">
+                        <label class="obj-lab" for="set-known">Un contact reste « connu » pendant</label>
+                        <input class="obj-input" type="number" min="1" max="120" step="1"
+                               id="set-known" inputmode="numeric">
+                        <div class="obj-hint">mois sans interaction. Sert uniquement aux libellés de
+                            la saisie : l'outil ne vérifie rien, personne ne déclare avec qui il a
+                            parlé.</div>
+                    </div>
+                </div>
+
+                <div class="obj-actions">
+                    <button class="btn btn--primary" id="set-save" type="button">
+                        Enregistrer les réglages
+                    </button>
+                    <span class="form-status" id="set-status" role="status" aria-live="polite"></span>
+                </div>
+            </section>
+
             <section class="info-panel info-panel--soft">
                 <div class="info-panel-head">
                     <span class="info-panel-icon" aria-hidden="true">🎚️</span>

@@ -54,6 +54,7 @@ import {
     loadTargets, targetsLoaded, jobTargets, userTargets, targetJobOf,
     setTarget, clearTarget, applyJobTargets, humanError,
     listProfiles, todayISO, joursOuvres, fromISO, toISO,
+    fiscalBounds, fiscalStartMonth, saveSettings, knownMonths, canWriteAny, myProfile,
     loadVisibility, visibilityLoaded, jobVisibility, userVisibility,
     setVisibility, removeVisibility, clearUserVisibility, clearVisibilityExceptions,
     visibilityExceptionUsers
@@ -188,40 +189,152 @@ function renderJobGrid() {
             }).join('')}
         </div>`;
 
-    // Le bouton de déduction n'a de sens que sur les échelles qui se déduisent.
+    /* Le bouton de déduction part de l'échelle la plus large qui soit renseignée.
+       Depuis la v17 c'est l'exercice quand il est posé, et c'est le sens de la
+       demande : les objectifs sont décidés à l'année, le reste en découle. Sur
+       l'onglet Année lui-même il n'y a rien au-dessus, donc rien à déduire. */
     const bouton = document.getElementById('obj-derive');
-    bouton.hidden = scaleKey === 'month';
+    const src = sourceDeDeduction();
+    bouton.hidden = !src;
     if (!bouton.hidden) {
-        const n = ouvresDuMois();
-        bouton.textContent = scaleKey === 'day'
-            ? `Déduire du mensuel (${n} jours ouvrés ce mois)`
-            : `Déduire du mensuel (${n} jours ouvrés ce mois, semaine de 5)`;
+        bouton.textContent = src === 'year'
+            ? `Déduire de l'annuel (${ouvresExercice()} jours ouvrés dans l'exercice)`
+            : `Déduire du mensuel (${ouvresDuMois()} jours ouvrés ce mois)`;
     }
 }
 
-/** Remplit les champs à partir du mensuel, sans rien enregistrer. */
+/** Jours ouvrés de l'exercice qui contient aujourd'hui. */
+function ouvresExercice() {
+    const b = fiscalBounds(todayISO());
+    return joursOuvres(b.from, b.to);
+}
+
+/**
+ * D'où déduire les valeurs de l'onglet courant : 'year', 'month', ou null quand
+ * il n'y a rien au-dessus ou rien de posé au-dessus.
+ */
+function sourceDeDeduction() {
+    if (scaleKey === 'year') return null;
+    if (Object.keys(jobTargets(jobKey, 'year')).length) return 'year';
+    if (scaleKey === 'month') return null;
+    if (Object.keys(jobTargets(jobKey, 'month')).length) return 'month';
+    return null;
+}
+
+/**
+ * Remplit les champs à partir de l'échelle du dessus, sans rien enregistrer.
+ *
+ * TOUT SE DÉDUIT AU PRORATA DES JOURS OUVRÉS, et pas en divisant par douze ou
+ * par cinquante-deux. C'est déjà la logique du reste de l'outil — « reste 146 en
+ * 3 jours ouvrés » — et c'est la seule qui donne un objectif de mois d'août plus
+ * petit qu'un objectif de mois de mars. Un douzième partout aurait affiché un
+ * retard mécanique chaque été.
+ *
+ * Rien n'est enregistré : les valeurs sont proposées dans les champs, à relire
+ * et à corriger avant de cliquer sur Enregistrer. Une déduction est une aide à
+ * la saisie, pas une décision.
+ */
 function deriver() {
-    const mensuels = jobTargets(jobKey, 'month');
-    const n = ouvresDuMois();
-    if (!n) return;
+    const src = sourceDeDeduction();
+    if (!src) return;
+
+    const source = jobTargets(jobKey, src);
+    const base = src === 'year' ? ouvresExercice() : ouvresDuMois();
+    if (!base) return;
+
+    /* Combien de jours ouvrés dans l'échelle visée. La semaine est prise à cinq
+       par convention : compter les jours ouvrés de LA semaine courante ferait
+       varier l'objectif hebdomadaire d'une semaine à l'autre selon les jours
+       fériés, ce qui n'a pas de sens pour une valeur qu'on pose une fois. */
+    const cible = scaleKey === 'day' ? 1
+                : scaleKey === 'week' ? 5
+                : ouvresDuMois();
+
     let touche = 0;
     metriquesDe(jobKey).forEach(m => {
-        const mois = mensuels[m.key];
+        const haut = source[m.key];
         const el = document.getElementById(`oj-${m.key}`);
         if (!el) return;
-        if (mois == null) { el.value = ''; return; }
-        const val = scaleKey === 'day'
-            ? Math.round(mois / n)
-            : Math.round((mois / n) * 5);
-        el.value = String(val);
+        if (haut == null) { el.value = ''; return; }
+        el.value = String(Math.max(0, Math.round((haut / base) * cible)));
         touche++;
     });
+
+    const nom = src === 'year' ? "l'annuel" : 'le mensuel';
     const statut = document.getElementById('obj-status');
     statut.style.color = '';
     statut.textContent = touche
         ? `${touche} valeur${touche > 1 ? 's' : ''} proposée${touche > 1 ? 's' : ''} `
-          + "d'après le mensuel. Rien n'est enregistré : relisez, corrigez, puis enregistrez."
-        : "Aucun objectif mensuel n'est posé pour ce métier : il n'y a rien à déduire.";
+          + `d'après ${nom}, au prorata des jours ouvrés. Rien n'est enregistré : `
+          + 'relisez, corrigez, puis enregistrez.'
+        : `Aucun objectif ${src === 'year' ? 'annuel' : 'mensuel'} n'est posé pour ce `
+          + "métier : il n'y a rien à déduire.";
+}
+
+/* --------------------------------------------------------------------------
+   LES RÉGLAGES GÉNÉRAUX (v17)
+
+   Deux valeurs qui ne sont ni des objectifs ni des affichages, mais qui
+   changent la lecture de tout l'outil : le mois où commence l'exercice, et la
+   durée au-delà de laquelle un contact redevient inconnu. Toutes deux vivaient
+   en base sans écran, donc n'étaient modifiables qu'en SQL.
+
+   Réservées au propriétaire, côté écran comme côté base : la RLS d'app_settings
+   n'autorise l'écriture qu'à can_write_any(), le masquage ici n'est qu'une
+   politesse pour ne pas montrer un bouton qui refuserait de servir.
+   -------------------------------------------------------------------------- */
+
+const MOIS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
+                 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+
+function renderReglages() {
+    const boite = document.getElementById('obj-settings');
+    if (!boite) return;
+    if (!canWriteAny(myProfile())) { boite.hidden = true; return; }
+    boite.hidden = false;
+
+    const debut = fiscalStartMonth();
+    const sel = document.getElementById('set-fiscal');
+    sel.innerHTML = MOIS_FR.map((nom, i) => `
+        <option value="${i + 1}"${i + 1 === debut ? ' selected' : ''}>${nom}</option>`).join('');
+
+    document.getElementById('set-known').value = String(knownMonths());
+
+    const b = fiscalBounds(todayISO());
+    document.getElementById('set-fiscal-hint').textContent =
+        `Exercice en cours : du ${formatCourt(b.from)} au ${formatCourt(b.to)}, `
+        + `${joursOuvres(b.from, b.to)} jours ouvrés.`;
+}
+
+/** Une date ISO en « 1er octobre 2025 », pour un rappel qui se lit sans effort. */
+function formatCourt(iso) {
+    const [a, m, j] = iso.split('-').map(Number);
+    return `${j === 1 ? '1er' : j} ${MOIS_FR[m - 1]} ${a}`;
+}
+
+async function enregistrerReglages() {
+    const statut = document.getElementById('set-status');
+    const mois = Number(document.getElementById('set-fiscal').value);
+    const known = Number(document.getElementById('set-known').value);
+
+    if (!(mois >= 1 && mois <= 12)) { statut.textContent = 'Mois invalide.'; return; }
+    if (!(known >= 1 && known <= 120)) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = 'La durée doit tenir entre 1 et 120 mois.';
+        return;
+    }
+
+    try {
+        await saveSettings({ fiscal_year_start_month: mois, known_contact_months: known });
+        statut.style.color = '';
+        statut.textContent = 'Réglages enregistrés. Les écrans déjà ouverts les '
+            + 'reprendront à leur prochain chargement.';
+        renderReglages();
+        repeindre();
+    } catch (e) {
+        statut.style.color = 'var(--danger)';
+        statut.textContent = humanError(e);
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -630,6 +743,7 @@ function repeindre() {
     renderApply();
     renderUserGrid();
     renderVisForce();
+    renderReglages();
 }
 
 /**
@@ -706,6 +820,7 @@ export async function initObjectifs() {
 
     document.getElementById('obj-save').addEventListener('click', saveJob);
     document.getElementById('obj-derive').addEventListener('click', deriver);
+    document.getElementById('set-save').addEventListener('click', enregistrerReglages);
     document.getElementById('obj-apply').addEventListener('click', appliquer);
     document.getElementById('obj-user-save').addEventListener('click', saveUser);
     document.getElementById('obj-user-follow').addEventListener('click', suivreLeMetier);
