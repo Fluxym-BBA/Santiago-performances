@@ -72,7 +72,11 @@ let pret = false;          // initObjectifs n'a de sens qu'une fois
 
 /** Les métriques réglables pour un métier : celles qui ont un objectif. */
 function metriquesDe(job) {
-    return METRICS.filter(m => m.target && m.jobs.includes(job));
+    /* !m.hidden écarte les sous-totaux que la page de saisie n'affiche pas.
+       Depuis la v14, calls_engaged est la somme des deux compteurs d'échange :
+       proposer d'y poser un objectif ferait miroiter une jauge qui n'existe
+       nulle part, et un objectif que personne ne verrait jamais. */
+    return METRICS.filter(m => m.target && !m.hidden && m.jobs.includes(job));
 }
 
 /** Premier et dernier jour du mois qui contient une date ISO. */

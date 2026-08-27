@@ -35,7 +35,7 @@ import {
     fetchDayEvents, addSalesEvent, deleteSalesEvent,
     accountHistory, agoLabel, formatDMY,
     TARGET_SCALES, scaleOf, saveGaugeScale, periodBounds, periodLabel,
-    fetchRange, joursOuvres, myProfile
+    fetchRange, joursOuvres, myProfile, loadSettings
 } from './api.js';
 import { $, toast, fmtInt, fmtDec, delta, hideVeil, escapeHtml } from './ui.js';
 import { renderNav } from './nav.js';
@@ -150,6 +150,37 @@ function gaugeHtml(m) {
         </div>`;
 }
 
+/**
+ * Ligne d'un total calculé : le chiffre, sa jauge, et pas de quoi le modifier.
+ *
+ * Ni bouton plus, ni champ. Le total est écrit par la base
+ * (trg_daily_activity_entonnoir) et metric_allowed() refuse qu'un client y
+ * touche : un stepper afficherait 20 pendant une seconde avant de retomber à 19,
+ * ce qui est pire que pas de stepper du tout. C'est exactement le raisonnement
+ * qui a retiré les boutons des compteurs du cycle de vente en v10.
+ *
+ * Il reste affiché parce que c'est ce qui permet de vérifier sa saisie d'un coup
+ * d'œil : trois issues déclarées et un total qui ne correspond pas à ce qu'on
+ * croyait, ça se voit immédiatement.
+ */
+function totalRowHtml(m) {
+    const parts = (m.derived || []).length;
+    return `
+    <div class="metric metric--total" data-metric="${m.key}">
+        <div class="metric-top">
+            <div class="metric-label">
+                <b>${escapeHtml(m.label)}</b>
+                <span>${escapeHtml(m.hint)}</span>
+            </div>
+            <div class="metric-total-val">
+                <b id="total-${m.key}">0</b>
+                <small>somme de ${parts}</small>
+            </div>
+        </div>
+        ${gaugeHtml(m)}
+    </div>`;
+}
+
 function metricRowHtml(m) {
     return `
     <div class="metric" data-metric="${m.key}">
@@ -218,12 +249,69 @@ function eventRowHtml(m) {
    sous-titres de la carte Prospection. On masque en style plutôt qu'en
    supprimant : les éléments de total restent dans le document, ce qui évite un
    garde-fou dans chaque fonction d'affichage. */
+function ligneHtml(m) {
+    if (isEventMetric(m.key)) return eventRowHtml(m);
+    if (m.derived) return totalRowHtml(m);
+    return metricRowHtml(m);
+}
+
+/* Libellés des trois étages. Écrits ici et non dans METRICS : ils décrivent le
+   déroulé d'un appel, pas un compteur, et le même mot « étage » n'aurait aucun
+   sens dans les groupes CRM ou cycle de vente. */
+const ETAGES = {
+    1: { titre: 'Ce que j\'ai lancé', sous: 'Tous les appels passés, aboutis ou non' },
+    2: { titre: "J'ai eu quelqu'un", sous: 'Trois issues, jamais deux fois le même appel' },
+    3: { titre: "J'ai obtenu un rendez-vous", sous: "Trois catégories, jamais deux fois le même rendez-vous" }
+};
+
 function buildCards() {
     ['crm', 'calls', 'emails', 'pipeline', 'outcome'].forEach(group => {
         const host = document.querySelector(`[data-metrics="${group}"]`);
         if (!host) return;
         const list = myMetrics.filter(m => m.group === group);
-        host.innerHTML = list.map(m => isEventMetric(m.key) ? eventRowHtml(m) : metricRowHtml(m)).join('');
+
+        /* LE GROUPE DES APPELS EST RENDU EN ESCALIER, pas en liste.
+
+           Dix compteurs à plat, c'est ce qu'un BDR abandonne au troisième jour.
+           En trois étages titrés, chacun ne lit que l'étage qui le concerne, et
+           surtout la structure de l'entonnoir devient visible : on comprend en
+           regardant que les trois issues du milieu se partagent les appels
+           décrochés, ce qu'aucun libellé ne dirait aussi bien.
+
+           Un étage dont aucun compteur ne concerne le métier affiché n'est pas
+           rendu du tout : un commercial n'a pas de rendez-vous obtenus, il ne
+           voit donc pas d'étage 3 vide.
+
+           Classes nommées « etage » et non « funnel-step » : app.css a déjà un
+           .funnel-step, qui est l'entonnoir horizontal du tableau de bord et vaut
+           display:flex. Mes étages s'y seraient rangés côte à côte au lieu de
+           s'empiler, et cela ne se serait vu qu'à l'écran. */
+        if (group === 'calls' && list.some(m => m.level)) {
+            const etages = [1, 2, 3].map(n => {
+                const dedans = list.filter(m => m.level === n);
+                if (!dedans.length) return '';
+                const e = ETAGES[n];
+                return `
+                <div class="etage" data-level="${n}">
+                    <div class="etage-head">
+                        <span class="etage-num">${n}</span>
+                        <div>
+                            <b>${escapeHtml(e.titre)}</b>
+                            <span>${escapeHtml(e.sous)}</span>
+                        </div>
+                    </div>
+                    ${dedans.map(ligneHtml).join('')}
+                </div>`;
+            }).join('');
+            // Les compteurs sans étage — calls_engaged est masqué, mais la règle
+            // vaut pour toute métrique du groupe qui n'appartiendrait à aucun
+            // étage — sont rendus à la suite plutôt que perdus.
+            const hors = list.filter(m => !m.level).map(ligneHtml).join('');
+            host.innerHTML = etages + hors;
+        } else {
+            host.innerHTML = list.map(ligneHtml).join('');
+        }
+
         const titre = document.querySelector(`[data-sub-for="${group}"]`);
         if (titre) titre.style.display = list.length ? '' : 'none';
     });
@@ -354,45 +442,62 @@ function settle() {
     status('✓ Enregistré', 'saved');
 }
 
-/* Chaîne des appels, du plus large au plus étroit. La base impose
-   appels ⊇ aboutis ⊇ échanges, et c'est voulu. */
-const CALL_CHAIN = [
-    { key: 'calls_made', label: 'appels passés' },
-    { key: 'calls_connected', label: 'appels aboutis' },
-    { key: 'calls_engaged', label: 'appels avec échange' }
+/* --------------------------------------------------------------------------
+   LA SEULE INCOHÉRENCE POSSIBLE, DEPUIS LA v14
+
+   L'ancienne version surveillait une chaîne : échanges <= aboutis <= appels.
+   Elle n'a plus d'objet. Les trois issues de l'étage 2 sont disjointes, aucune
+   n'est bornée par une autre, et « aboutis » n'est plus saisi mais calculé — il
+   ne peut donc plus être incohérent avec quoi que ce soit.
+
+   Reste une règle, celle que la base impose sous le nom
+   daily_activity_etage2_coherent : on ne peut pas avoir joint plus de personnes
+   qu'on a passé d'appels. Elle se déclenche dans deux situations, et le message
+   doit les distinguer, parce que le geste à faire n'est pas le même : soit on
+   déclare une issue de trop, soit on fait redescendre le nombre d'appels sous ce
+   qui est déjà déclaré.
+
+   Le contrôle porte sur ce qui est à l'écran, frappe en attente comprise, et non
+   sur ce que la base contient : sinon deux clics rapides passeraient le premier
+   contrôle et se feraient refuser par la base, ce qui donne un message d'erreur
+   là où une phrase claire suffisait.
+   -------------------------------------------------------------------------- */
+
+const ETAGE2 = [
+    { key: 'calls_dead_end',      label: 'sans échange' },
+    { key: 'calls_engaged_new',   label: 'échanges avec un nouveau contact' },
+    { key: 'calls_engaged_known', label: 'échanges avec un contact connu' }
 ];
 
-/**
- * Plutôt que d'envoyer une écriture qui sera refusée par la base, on dit tout
- * de suite ce qui bloque et ce qu'il faut faire. Le contrôle porte sur ce qui
- * est à l'écran, frappe en attente comprise, pas sur ce que la base contient.
- * Renvoie null si la valeur est acceptable, sinon le message à afficher.
- */
 function incoherence(key, v) {
-    const rang = CALL_CHAIN.findIndex(s => s.key === key);
-    if (rang < 0) return null;
-    const val = i => (CALL_CHAIN[i].key === key ? v : Number(row[CALL_CHAIN[i].key]) || 0);
+    const estEtage2 = ETAGE2.some(x => x.key === key);
+    if (key !== 'calls_made' && !estEtage2) return null;
 
-    for (let i = 1; i < CALL_CHAIN.length; i++) {
-        const haut = val(i - 1);
-        const bas = val(i);
-        if (bas <= haut) continue;
-        const nomHaut = CALL_CHAIN[i - 1].label;
-        const nomBas = CALL_CHAIN[i].label;
-        // Le champ que l'on est en train de saisir est-il celui du bas ?
-        if (i === rang) {
-            return `${fmtInt(bas)} ${nomBas} pour ${fmtInt(haut)} ${nomHaut} : saisissez d'abord `
-                 + `le nombre d'${nomHaut}, la valeur sera enregistrée juste après.`;
-        }
-        return `${fmtInt(bas)} ${nomBas} sont déjà saisis : le nombre d'${nomHaut} ne peut pas `
-             + `descendre à ${fmtInt(haut)}. Corrigez les ${nomBas} d'abord.`;
+    const val = k => (k === key ? v : Number(row[k]) || 0);
+    const appels = val('calls_made');
+    const joints = ETAGE2.reduce((n, x) => n + val(x.key), 0);
+    if (joints <= appels) return null;
+
+    if (estEtage2) {
+        return `${fmtInt(joints)} appels décrochés pour ${fmtInt(appels)} appels passés : `
+             + `saisissez d'abord le nombre d'appels, la valeur sera enregistrée juste après.`;
     }
-    return null;
+
+    // On tente de faire descendre le nombre d'appels sous ce qui est déclaré.
+    const detail = ETAGE2.filter(x => val(x.key) > 0)
+        .map(x => `${fmtInt(val(x.key))} ${x.label}`).join(', ');
+    return `${detail} sont déjà saisis, soit ${fmtInt(joints)} appels décrochés : le nombre `
+         + `d'appels passés ne peut pas descendre à ${fmtInt(appels)}. Corrigez les issues d'abord.`;
 }
 
-/** Vrai si la base a refusé au nom de la cohérence appels / aboutis. */
+/** Vrai si la base a refusé au nom de la cohérence de l'étage 2. */
 function isCoherence(e) {
-    return !!e && (e.code === '23514' || /calls_coherent/.test(e.message || ''));
+    /* Le nom de contrainte a changé en v14 : daily_activity_calls_coherent et
+       daily_activity_engaged_coherent ont laissé place à
+       daily_activity_etage2_coherent. Les trois motifs sont reconnus, le temps
+       qu'aucun onglet resté ouvert depuis hier ne parle encore l'ancien nom. */
+    return !!e && (e.code === '23514'
+        || /calls_coherent|engaged_coherent|etage2_coherent/.test(e.message || ''));
 }
 
 /** La base a répondu : ses valeurs font foi, sauf celles encore en attente. */
@@ -1025,7 +1130,32 @@ function onEventKey(inp, e) {
  * Renvoie null quand rien n'a été mesuré sur toute la période, jamais zéro : un
  * zéro affiché serait une déclaration, et personne ne l'a faite.
  */
+/**
+ * Valeur d'un total, additionnée depuis ce qui est à l'écran.
+ *
+ * Renvoie 0 et non null quand rien n'est déclaré : un total est une somme, et la
+ * somme de rien est zéro. C'est différent des compteurs qu'il additionne, où NULL
+ * garde son sens de « non mesuré ». La base fait exactement la même chose pour
+ * calls_connected et meetings_booked, qui sont NOT NULL depuis l'origine.
+ */
+function sommeDe(m) {
+    if (!m.derived) return Number(row[m.key]) || 0;
+    return m.derived.reduce((n, k) => n + (Number(row[k]) || 0), 0);
+}
+
 function periodValue(key) {
+    const meta = METRIC_BY_KEY[key];
+    if (meta && meta.derived) {
+        /* Un total sur une période s'additionne à partir des totaux journaliers
+           déjà calculés par la base, et non en réadditionnant les catégories :
+           l'historique d'avant la v14 a des totaux mais pas de catégories, et
+           réadditionner ferait disparaître deux cent dix-huit rendez-vous. Seule
+           la journée affichée est recalculée depuis l'écran, pour suivre la frappe. */
+        const jourEcran = sommeDe(meta);
+        if (scale === 'day') return jourEcran;
+        const hors = cumulHorsJour ? cumulHorsJour[key] : null;
+        return (hors || 0) + jourEcran;
+    }
     const jour = row[key] != null ? Number(row[key]) : null;
     if (scale === 'day') return jour;
     const hors = cumulHorsJour ? cumulHorsJour[key] : null;
@@ -1116,20 +1246,32 @@ function paintGauge(m) {
 
 function paintDerived() {
     const calls = Number(row.calls_made) || 0;
-    const conn = Number(row.calls_connected) || 0;
+
+    /* Les totaux de l'étage 2 et de l'étage 3 sont RECALCULÉS ICI, pas lus dans
+       row. row porte la réponse de la base, qui arrive trois cents millisecondes
+       après la frappe : lire row ferait un taux d'aboutissement encore calculé
+       sur l'avant-dernière valeur, juste sous un total déjà à jour. Le trigger
+       fait la même addition, donc les deux ne divergent jamais durablement. */
+    const num = k => Number(row[k]) || 0;
+    const conn = num('calls_dead_end') + num('calls_engaged_new') + num('calls_engaged_known');
+    const eched = num('calls_engaged_new') + num('calls_engaged_known');
+    const mesureEch = row.calls_engaged_new != null || row.calls_engaged_known != null
+                   || row.calls_engaged != null;
+
     /* Rendez-vous du jour : le RDV obtenu du BDR et le RDV1 tenu du commercial
        ne coexistent jamais chez la même personne, l'un des deux termes étant
        toujours nul. Pour qui a les deux métiers, les additionner est bien le
        sens voulu : ce sont deux rencontres différentes. */
-    const rdv = (Number(row.meetings_booked) || 0) + (Number(row.first_meetings) || 0);
+    const rdv = num('meetings_rescheduled') + num('meetings_new') + num('meetings_known')
+              + num('first_meetings');
 
     $('#kpi-connect').textContent = calls > 0 ? `${fmtDec((conn / calls) * 100)} %` : '–';
     // Non mesuré et zéro ne s'affichent pas pareil : le premier est une absence
     // de donnée, le second un résultat.
     const eng = $('#kpi-engage');
     if (eng) {
-        eng.textContent = row.calls_engaged == null ? 'non mesuré'
-            : conn > 0 ? `${fmtDec(((Number(row.calls_engaged) || 0) / conn) * 100)} %` : '–';
+        eng.textContent = !mesureEch ? 'non mesuré'
+            : conn > 0 ? `${fmtDec((eched / conn) * 100)} %` : '–';
     }
     $('#kpi-meeting').textContent = conn > 0 ? `${fmtDec((rdv / conn) * 100)} %` : '–';
     $('#kpi-effort').textContent = rdv > 0 ? `${fmtDec(calls / rdv)} appels` : '–';
@@ -1138,7 +1280,6 @@ function paintDerived() {
         const el = document.querySelector(`[data-total="${sel}"]`);
         if (el) el.textContent = fmtInt(v);
     };
-    const num = k => Number(row[k]) || 0;
     total('crm', num('companies_created') + num('contacts_created'));
     total('prospection', calls + num('emails_sent'));
     total('pipeline', num('first_meetings') + num('proposals_sent'));
@@ -1164,6 +1305,16 @@ function paint() {
     myMetrics.forEach(m => {
         const input = document.getElementById(`in-${m.key}`);
         if (input && document.activeElement !== input) input.value = inputValue(m.key);
+
+        /* Un total est recalculé À L'ÉCRAN à partir des valeurs affichées, et
+           non lu dans la réponse de la base. La base a raison, mais elle répond
+           trois cents millisecondes plus tard : lire sa valeur ferait un total
+           qui reste sur l'ancien chiffre le temps de l'aller-retour, à côté de
+           trois compteurs déjà à jour. Le trigger et ce calcul appliquent la
+           même addition, donc les deux tombent toujours d'accord. */
+        const total = document.getElementById(`total-${m.key}`);
+        if (total) total.textContent = fmtInt(sommeDe(m));
+
         paintGauge(m);
     });
     const notes = $('#day-notes');
@@ -1447,6 +1598,14 @@ function buildTargets() {
 
 (async function init() {
     session = await requireAuth({ needs: 'bdr' });
+
+    /* Les réglages avant la construction des cartes : les aides de saisie citent
+       le seuil « contact connu », et loadSettings le substitue dans METRICS. Les
+       construire avant afficherait la valeur de repli, puis plus rien ne la
+       corrigerait — les libellés ne sont écrits qu'une fois. Ne lève pas : un
+       seuil illisible ne doit pas empêcher de saisir sa journée. */
+    await loadSettings();
+
     myMetrics = metricsFor(viewedProfile());
     hasEvents = myMetrics.some(m => isEventMetric(m.key));
 

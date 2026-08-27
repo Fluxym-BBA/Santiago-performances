@@ -453,3 +453,124 @@
     .scale-pick .seg { flex: 1; }
     .scale-pick .seg button { flex: 1; padding: 8px 6px; }
 }
+
+/* ==========================================================================
+   L'ENTONNOIR À TROIS ÉTAGES (v14)
+
+   Dix compteurs à plat, c'est ce qu'un BDR abandonne au troisième jour. En trois
+   étages titrés et numérotés, chacun ne lit que l'étage qui le concerne, et la
+   structure devient visible : on comprend en regardant que les trois issues du
+   milieu se partagent les appels décrochés.
+
+   Le trait vertical à gauche est ce qui fait tenir l'ensemble visuellement. Sans
+   lui, trois titres et dix lignes se lisent comme dix lignes.
+
+   Les classes s'appellent « etage » et non « funnel-step » : app.css a déjà un
+   .funnel-step, l'entonnoir horizontal du tableau de bord, qui vaut display:flex.
+   Mes étages s'y seraient rangés côte à côte au lieu de s'empiler.
+   ========================================================================== */
+
+.etage {
+    position: relative;
+    padding-left: 18px;
+    margin-bottom: 6px;
+}
+
+.etage::before {
+    content: '';
+    position: absolute;
+    left: 5px; top: 30px; bottom: 10px;
+    width: 2px;
+    background: var(--gray-200);
+    border-radius: 1px;
+}
+
+/* Le dernier étage ne prolonge pas le trait : un trait qui continue sous le
+   dernier compteur laisse attendre une suite qui n'existe pas. */
+.etage:last-child::before { bottom: 18px; }
+
+.etage-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 14px 0 8px;
+}
+
+.etage-num {
+    flex: 0 0 auto;
+    width: 22px; height: 22px;
+    margin-left: -18px;
+    border-radius: var(--radius-full);
+    background: var(--navy);
+    color: var(--white);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 22px;
+    text-align: center;
+}
+
+.etage-head b {
+    display: block;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--navy);
+}
+
+.etage-head span {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--gray-400);
+    line-height: 1.4;
+}
+
+/* --------------------------------------------------------------------------
+   Les totaux calculés
+
+   Pas de bouton, pas de champ : la base écrit ces chiffres et metric_allowed()
+   refuse qu'un client y touche. Un stepper afficherait 20 pendant une seconde
+   avant de retomber à 19. Le fond légèrement teinté dit « ce n'est pas à vous de
+   le remplir » sans qu'il faille l'écrire.
+   -------------------------------------------------------------------------- */
+
+/* .metric ne porte qu'un border-bottom en pointillés : « border-style: dashed »
+   seul n'aurait rien dessiné faute d'épaisseur, et un fond sans marge intérieure
+   se serait collé au texte. D'où le padding et le cadre explicites. */
+.metric--total {
+    margin: 8px 0 2px;
+    padding: 12px 14px;
+    background: var(--gray-50);
+    border: 1px dashed var(--gray-300);
+    border-radius: var(--radius-md);
+}
+
+/* La jauge d'un total garde sa place, mais le compteur n'a pas de champ : sans
+   ce retrait, elle démarrerait au ras du cadre. */
+.metric--total .gauge { margin-top: 10px; }
+
+.metric-total-val {
+    flex: 0 0 auto;
+    text-align: right;
+    line-height: 1.2;
+}
+
+.metric-total-val b {
+    display: block;
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
+}
+
+.metric-total-val small {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--gray-400);
+}
+
+@media (max-width: 560px) {
+    .etage { padding-left: 14px; }
+    .etage::before { left: 4px; }
+    .etage-num { margin-left: -14px; width: 20px; height: 20px; line-height: 20px; font-size: 11px; }
+    .metric-total-val b { font-size: 19px; }
+}

@@ -45,36 +45,88 @@ export const METRICS = [
         label: 'Contacts créés', short: 'Contacts',
         hint: 'Nouvelles fiches contact renseignées', color: '#8b5cf6'
     },
+    /* ---- L'ENTONNOIR, TROIS ÉTAGES ---------------------------------------
+
+       Refondu le 27/08/2026 après un échange avec Dominique. L'ancien modèle
+       empilait appels, aboutis et échanges, chaque niveau contenant le suivant :
+       le même appel se comptait deux fois, dans « aboutis » puis dans « échange »,
+       et personne ne savait dire de tête si vingt aboutis dont huit échanges
+       faisait vingt ou vingt-huit appels décrochés.
+
+       Le nouveau modèle découpe chaque étage en issues DISJOINTES. Un appel se
+       compte une fois et une seule.
+
+         Étage 1   calls_made             tous les appels passés
+         Étage 2   calls_dead_end         décroché, pas de conversation
+                   calls_engaged_new      conversation, contact nouveau
+                   calls_engaged_known    conversation, contact connu
+         Étage 3   meetings_rescheduled   un rendez-vous existant, reposé
+                   meetings_new           rendez-vous, contact nouveau
+                   meetings_known         rendez-vous, contact connu
+
+       `level` porte l'étage, et sert au rendu en escalier de la page de saisie.
+       `derived` marque les deux totaux : ils s'affichent, ils ne se saisissent
+       pas. Ils restent dans METRICS parce que le score de productivité, le
+       classement d'équipe et quatre taux de conversion s'appuient sur eux, et
+       parce qu'un total à l'écran est ce qui permet de vérifier sa saisie d'un
+       coup d'œil. La base les écrit elle-même (trg_daily_activity_entonnoir) et
+       metric_allowed() refuse désormais qu'un client y touche.
+
+       `{mois}` dans une aide est remplacé à l'affichage par le seuil
+       app_settings.known_contact_months, chargé par loadSettings(). Écrire « 24 »
+       en dur dans six aides garantissait qu'elles finiraient par se contredire le
+       jour où le seuil changerait.
+       --------------------------------------------------------------------- */
     {
-        /* Les trois compteurs d'appels vont ensemble, pour le commercial aussi.
-           La base impose calls_engaged <= calls_connected <= calls_made par
-           daily_activity_engaged_coherent et daily_activity_calls_coherent : ne
-           montrer que « appels avec échange » à un commercial ferait refuser sa
-           toute première saisie. Le prix de cette règle est deux champs de plus
-           sur sa page, et c'est le bon prix : remplir les deux cases amont à sa
-           place fabriquerait des chiffres que personne n'a saisis. */
-        key: 'calls_made', target: 'calls_made_target', group: 'calls',
+        key: 'calls_made', target: 'calls_made_target', group: 'calls', level: 1,
         jobs: ['bdr', 'sales'],
         label: "Nombre d'appels", short: 'Appels',
         hint: 'Tous les appels passés, aboutis ou non', color: '#00A7E1'
     },
     {
-        key: 'calls_connected', target: 'calls_connected_target', group: 'calls',
+        key: 'calls_dead_end', target: 'dead_end_target', group: 'calls', level: 2,
         jobs: ['bdr', 'sales'],
-        label: 'Appels aboutis', short: 'Aboutis',
-        hint: 'Interlocuteur réellement joint', color: '#0ea5e9'
+        label: 'Sans échange', short: 'Sans échange',
+        hint: "Il a décroché, la conversation n'a pas eu lieu", color: '#94a3b8',
+        since: '2026-08-27'
     },
     {
+        key: 'calls_engaged_new', target: 'engaged_new_target', group: 'calls', level: 2,
+        jobs: ['bdr', 'sales'],
+        label: 'Échange, nouveau contact', short: 'Éch. nouveau',
+        hint: 'Première conversation, ou plus de {mois} mois sans contact',
+        color: '#00A7E1',
+        since: '2026-08-27'
+    },
+    {
+        key: 'calls_engaged_known', target: 'engaged_known_target', group: 'calls', level: 2,
+        jobs: ['bdr', 'sales'],
+        label: 'Échange, contact connu', short: 'Éch. connu',
+        hint: 'Déjà une interaction dans les {mois} derniers mois',
+        color: '#0284c7',
+        since: '2026-08-27'
+    },
+    {
+        /* Total de l'étage 2. Garde la clé calls_connected et le libellé
+           « aboutis » : c'est le même chiffre qu'avant, avec la même définition
+           — un interlocuteur joint — et les taux qui le divisent gardent leur
+           sens. Seule sa provenance change : somme au lieu de saisie. */
+        key: 'calls_connected', target: 'calls_connected_target', group: 'calls',
+        level: 2, derived: ['calls_dead_end', 'calls_engaged_new', 'calls_engaged_known'],
+        jobs: ['bdr', 'sales'],
+        label: 'Appels aboutis', short: 'Aboutis',
+        hint: 'Somme des trois issues ci-dessus', color: '#0ea5e9'
+    },
+    {
+        /* Conservé pour le barème, les taux et l'historique du 25 au 27 août.
+           Sans niveau et sans jauge : c'est un sous-total à l'intérieur de
+           l'étage 2, et l'afficher en troisième total ferait trois chiffres pour
+           trois compteurs, ce qui embrouille plus que ça n'aide. */
         key: 'calls_engaged', target: 'engaged_target', group: 'calls',
+        derived: ['calls_engaged_new', 'calls_engaged_known'], hidden: true,
         jobs: ['bdr', 'sales'],
         label: 'Appels avec échange', short: 'Échanges',
-        hint: 'Conversation réelle, au-delà des 30 premières secondes', color: '#0284c7',
-        /* Première journée mesurable. Avant cette date la colonne vaut NULL en
-           base : personne ne comptait. Tout graphique, moyenne ou taux portant
-           sur cette métrique doit exclure les journées antérieures plutôt que
-           de les afficher à zéro, sinon la courbe racontera une progression
-           qui n'a jamais eu lieu. En base, la même information se lit
-           select min(activity_date) from daily_activity where calls_engaged is not null. */
+        hint: 'Somme des deux compteurs d\'échange', color: '#0284c7',
         since: '2026-08-25'
     },
     {
@@ -82,10 +134,33 @@ export const METRICS = [
            RDV1 plus bas, qui est le rendez-vous TENU par le commercial. Deux
            personnes, deux événements, deux compteurs : les additionner
            compterait deux fois la même rencontre. */
+        key: 'meetings_rescheduled', target: 'meetings_resched_target', group: 'calls',
+        level: 3, jobs: ['bdr'],
+        label: 'RDV reprogrammé', short: 'RDV reprog.',
+        hint: 'Un rendez-vous existant, annulé ou manqué, reposé', color: '#f59e0b',
+        since: '2026-08-27'
+    },
+    {
+        key: 'meetings_new', target: 'meetings_new_target', group: 'calls',
+        level: 3, jobs: ['bdr'],
+        label: 'RDV, nouveau contact', short: 'RDV nouveau',
+        hint: 'Rendez-vous avec un contact nouveau, ou revu après {mois} mois',
+        color: '#10b981',
+        since: '2026-08-27'
+    },
+    {
+        key: 'meetings_known', target: 'meetings_known_target', group: 'calls',
+        level: 3, jobs: ['bdr'],
+        label: 'RDV, contact connu', short: 'RDV connu',
+        hint: 'Rendez-vous avec un contact déjà connu', color: '#059669',
+        since: '2026-08-27'
+    },
+    {
         key: 'meetings_booked', target: 'meetings_target', group: 'calls',
+        level: 3, derived: ['meetings_rescheduled', 'meetings_new', 'meetings_known'],
         jobs: ['bdr'],
         label: 'Rendez-vous obtenus', short: 'RDV',
-        hint: 'Le seul chiffre qui compte vraiment', color: '#10b981'
+        hint: 'Somme des trois catégories ci-dessus', color: '#10b981'
     },
     {
         /* Réservé au BDR faute de demande, pas par principe : un commercial en
@@ -710,10 +785,83 @@ export function jobLabel(p) {
  * déroutant qu'un écran complet. La base refuse de toute façon ce qu'il n'a pas
  * le droit d'écrire.
  */
+/* --------------------------------------------------------------------------
+   RÉGLAGES GLOBAUX (v14)
+
+   Une seule ligne en base, un seul réglage pour l'instant : le nombre de mois
+   au-delà duquel un contact redevient nouveau. Dominique dit deux ans.
+
+   IL EST DÉCLARATIF, ET C'EST UNE LIMITE À CONNAÎTRE. L'outil ne vérifie rien.
+   Au moment où un BDR déclare un échange, il ne dit pas avec qui, donc aucune
+   règle d'ancienneté ne peut se calculer, quelle que soit la base. Le seuil est
+   une consigne commune, affichée là où la question se pose, et la justesse
+   repose sur le jugement de celui qui saisit.
+
+   Stocké plutôt qu'écrit en dur parce qu'il apparaît dans quatre aides de
+   saisie : « 24 » recopié quatre fois finit toujours par se contredire, et le
+   passer à dix-huit mois ne doit pas demander un redéploiement.
+   -------------------------------------------------------------------------- */
+
+let _settings = null;
+
+/**
+ * Charge les réglages. Ne lève pas : un seuil qu'on n'a pas pu lire laisse les
+ * aides afficher la valeur de repli, ce qui est très préférable à une page de
+ * saisie qui refuse de s'ouvrir pour un nombre de mois.
+ */
+export async function loadSettings() {
+    const { data, error } = await supabase
+        .from('app_settings').select('known_contact_months').maybeSingle();
+    if (error || !data) {
+        if (error) console.warn('Réglages non lus :', error.message);
+        return false;
+    }
+    _settings = data;
+    applyHints();
+    return true;
+}
+
+/** Seuil « contact connu », en mois. 24 par défaut si la base n'a rien dit. */
+export const knownMonths = () =>
+    (_settings && _settings.known_contact_months) || 24;
+
+/* Gabarits des aides qui citent le seuil, mémorisés avant toute substitution.
+   Sans cette copie, une deuxième substitution n'aurait plus de « {mois} » à
+   remplacer et le premier seuil resterait affiché pour toujours. */
+const _hintTpl = new Map(
+    METRICS.filter(m => m.hint && m.hint.includes('{mois}')).map(m => [m.key, m.hint])
+);
+
+/**
+ * Réécrit les aides concernées avec le seuil en vigueur.
+ *
+ * LE SEUIL EST SUBSTITUÉ DANS METRICS, ET NON À L'AFFICHAGE. Quatre écrans
+ * lisent m.hint directement, dont deux fichiers de quatre-vingt kilo-octets que
+ * ce lot n'a aucune raison de toucher. Les faire tous passer par une fonction
+ * aurait multiplié les occasions d'en oublier un, et l'oubli se serait vu sous
+ * la forme d'un « {mois} » affiché tel quel dans une info-bulle que personne ne
+ * relit. Muter la table une fois au chargement règle la question pour tous les
+ * écrans, présents et futurs.
+ *
+ * Appelée dès l'évaluation du module avec la valeur de repli, puis de nouveau
+ * quand la base a répondu : un écran qui ne charge pas les réglages affiche donc
+ * « 24 mois » et jamais un gabarit.
+ */
+function applyHints() {
+    const n = String(knownMonths());
+    _hintTpl.forEach((tpl, key) => {
+        const m = METRICS.find(x => x.key === key);
+        if (m) m.hint = tpl.replace('{mois}', n);
+    });
+}
+
+applyHints();
+
 export function metricsFor(p) {
     const j = jobsOf(p);
-    if (!j.length) return METRICS.slice();
-    return METRICS.filter(m => m.jobs.some(x => j.includes(x)));
+    const vues = METRICS.filter(m => !m.hidden);
+    if (!j.length) return vues;
+    return vues.filter(m => m.jobs.some(x => j.includes(x)));
 }
 
 /**
@@ -724,8 +872,9 @@ export function metricsFor(p) {
  */
 export function metricsForAny(list) {
     const j = new Set((list || []).flatMap(jobsOf));
-    if (!j.size) return METRICS.slice();
-    return METRICS.filter(m => m.jobs.some(x => j.has(x)));
+    const vues = METRICS.filter(m => !m.hidden);
+    if (!j.size) return vues;
+    return vues.filter(m => m.jobs.some(x => j.has(x)));
 }
 
 /**
