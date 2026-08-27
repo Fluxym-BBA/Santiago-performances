@@ -151,7 +151,7 @@ function gaugeHtml(m) {
 }
 
 /**
- * Ligne d'un total calculé : le chiffre, sa jauge, et pas de quoi le modifier.
+ * Un total calculé : le chiffre, sa jauge, et pas de quoi le modifier.
  *
  * Ni bouton plus, ni champ. Le total est écrit par la base
  * (trg_daily_activity_entonnoir) et metric_allowed() refuse qu'un client y
@@ -162,7 +162,30 @@ function gaugeHtml(m) {
  * Il reste affiché parce que c'est ce qui permet de vérifier sa saisie d'un coup
  * d'œil : trois issues déclarées et un total qui ne correspond pas à ce qu'on
  * croyait, ça se voit immédiatement.
+ *
+ * DEUX GABARITS, LES MÊMES IDENTIFIANTS. totalHeadHtml() range le total dans
+ * l'en-tête de son étage, à droite du titre : c'est la version utilisée par
+ * l'entonnoir depuis la v15, et c'est ce qui a supprimé deux grandes lignes de la
+ * hauteur de la page. totalRowHtml() garde l'ancienne présentation en ligne pour
+ * un total qui n'appartiendrait à aucun étage. Les deux écrivent total-<clé> et
+ * la jauge de gaugeHtml() : paint() et paintGauge() n'ont pas à savoir lequel des
+ * deux a été rendu.
  */
+function totalHeadHtml(m) {
+    const parts = (m.derived || []).length;
+    return `
+    <div class="etage-tot" data-metric="${m.key}">
+        <div class="etage-tot-num">
+            <b id="total-${m.key}">0</b>
+            <div>
+                <span>${escapeHtml(m.label)}</span>
+                <small>somme des ${parts} ci-contre</small>
+            </div>
+        </div>
+        ${gaugeHtml(m)}
+    </div>`;
+}
+
 function totalRowHtml(m) {
     const parts = (m.derived || []).length;
     return `
@@ -181,9 +204,31 @@ function totalRowHtml(m) {
     </div>`;
 }
 
-function metricRowHtml(m) {
+/**
+ * Compteur ordinaire : un libellé, un stepper, une jauge.
+ *
+ * TROIS PRÉSENTATIONS POUR UN SEUL GABARIT, choisies par l'appelant :
+ *
+ *   ''      liste verticale, telle qu'elle était avant la v15. Le CRM et les
+ *           sorties de pipeline, où les compteurs n'ont pas de structure entre
+ *           eux, s'en contentent très bien.
+ *   'wide'  une seule ligne, du libellé à gauche à la jauge à droite. Réservée
+ *           aux compteurs seuls de leur ligne : les appels passés, les e-mails.
+ *           Trois zones côte à côte au lieu de trois empilées, donc trois fois
+ *           moins de hauteur.
+ *   'col'   une carte en colonne, stepper pleine largeur sous le libellé. C'est
+ *           la présentation des issues de l'étage 2 et des rendez-vous de
+ *           l'étage 3, celles qui se comparent entre elles.
+ *
+ * Le stepper pleine largeur en colonne n'est pas décoratif : le + devient une
+ * cible de plus de deux cents pixels, ce qui compte sur un téléphone tenu d'une
+ * main entre deux appels, et c'est ce geste-là qui décide si les chiffres sont
+ * saisis ou non.
+ */
+function metricRowHtml(m, variante) {
+    const v = variante ? ` metric--${variante}` : '';
     return `
-    <div class="metric" data-metric="${m.key}">
+    <div class="metric${v}" data-metric="${m.key}">
         <div class="metric-top">
             <div class="metric-label">
                 <b>${escapeHtml(m.label)}</b>
@@ -246,13 +291,14 @@ function eventRowHtml(m) {
 /* Les cartes dépendent du métier : un BDR ne voit pas le cycle de vente, un
    commercial ne voit ni les entreprises créées ni les e-mails. Une carte sans
    aucun compteur est masquée plutôt que laissée vide, et il en va de même des
-   sous-titres de la carte Prospection. On masque en style plutôt qu'en
+   sous-cartes de la carte Prospection : depuis la v15 data-sub-for porte la
+   sous-carte entière et non son seul titre, donc c'est le cadre qui disparaît. On masque en style plutôt qu'en
    supprimant : les éléments de total restent dans le document, ce qui évite un
    garde-fou dans chaque fonction d'affichage. */
-function ligneHtml(m) {
+function ligneHtml(m, variante) {
     if (isEventMetric(m.key)) return eventRowHtml(m);
     if (m.derived) return totalRowHtml(m);
-    return metricRowHtml(m);
+    return metricRowHtml(m, variante);
 }
 
 /* Libellés des trois étages. Écrits ici et non dans METRICS : ils décrivent le
@@ -270,13 +316,27 @@ function buildCards() {
         if (!host) return;
         const list = myMetrics.filter(m => m.group === group);
 
-        /* LE GROUPE DES APPELS EST RENDU EN ESCALIER, pas en liste.
+        /* LE GROUPE DES APPELS EST RENDU EN GRILLE, pas en liste.
 
-           Dix compteurs à plat, c'est ce qu'un BDR abandonne au troisième jour.
-           En trois étages titrés, chacun ne lit que l'étage qui le concerne, et
-           surtout la structure de l'entonnoir devient visible : on comprend en
-           regardant que les trois issues du milieu se partagent les appels
-           décrochés, ce qu'aucun libellé ne dirait aussi bien.
+           Dix compteurs empilés dans une colonne de trois cent cinquante pixels,
+           c'est huit cents pixels de haut et trois écrans de défilement : ce que
+           quelqu'un abandonne au troisième jour. En v15 la carte Prospection
+           occupe toute la largeur et chaque étage devient une LIGNE :
+
+             étage 1  une seule ligne large, les appels passés
+             étage 2  trois colonnes, les trois issues d'un appel décroché
+             étage 3  trois colonnes, les trois catégories de rendez-vous
+
+           Le total de l'étage est remonté DANS SON EN-TÊTE, à droite du titre,
+           au lieu d'occuper une quatrième grande ligne sous les colonnes. Deux
+           gains dans le même geste : la hauteur de deux blocs en moins, et le
+           total placé là où on le cherche, en face de l'intitulé de l'étage.
+
+           Le nombre de colonnes n'est pas écrit ici. Le CSS le déduit du nombre
+           de compteurs avec un auto-fit, parce que ce nombre dépend du métier
+           affiché : un étage à trois compteurs pour un BDR peut n'en avoir qu'un
+           pour un commercial, et une grille à trois colonnes fixes lui aurait
+           laissé deux trous.
 
            Un étage dont aucun compteur ne concerne le métier affiché n'est pas
            rendu du tout : un commercial n'a pas de rendez-vous obtenus, il ne
@@ -291,25 +351,38 @@ function buildCards() {
                 const dedans = list.filter(m => m.level === n);
                 if (!dedans.length) return '';
                 const e = ETAGES[n];
+                const totaux = dedans.filter(m => m.derived);
+                const saisis = dedans.filter(m => !m.derived);
+                /* Un compteur seul dans son étage se lit en ligne large ; à
+                   plusieurs, ils se comparent, donc ils se rangent en colonnes. */
+                const variante = saisis.length > 1 ? 'col' : 'wide';
                 return `
-                <div class="etage" data-level="${n}">
+                <section class="etage" data-level="${n}">
                     <div class="etage-head">
                         <span class="etage-num">${n}</span>
-                        <div>
+                        <div class="etage-titre">
                             <b>${escapeHtml(e.titre)}</b>
                             <span>${escapeHtml(e.sous)}</span>
                         </div>
+                        ${totaux.map(totalHeadHtml).join('')}
                     </div>
-                    ${dedans.map(ligneHtml).join('')}
-                </div>`;
+                    <div class="etage-cols" data-cols="${saisis.length}">
+                        ${saisis.map(m => ligneHtml(m, variante)).join('')}
+                    </div>
+                </section>`;
             }).join('');
             // Les compteurs sans étage — calls_engaged est masqué, mais la règle
             // vaut pour toute métrique du groupe qui n'appartiendrait à aucun
             // étage — sont rendus à la suite plutôt que perdus.
-            const hors = list.filter(m => !m.level).map(ligneHtml).join('');
+            const hors = list.filter(m => !m.level).map(m => ligneHtml(m, 'wide')).join('');
             host.innerHTML = etages + hors;
+        } else if (group === 'emails') {
+            // Un seul compteur, et une carte pleine largeur pour l'accueillir :
+            // la ligne large évite d'empiler libellé, stepper et jauge sur trois
+            // niveaux dans un espace qui en tient un.
+            host.innerHTML = list.map(m => ligneHtml(m, 'wide')).join('');
         } else {
-            host.innerHTML = list.map(ligneHtml).join('');
+            host.innerHTML = list.map(m => ligneHtml(m)).join('');
         }
 
         const titre = document.querySelector(`[data-sub-for="${group}"]`);

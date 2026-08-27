@@ -455,51 +455,114 @@
 }
 
 /* ==========================================================================
-   L'ENTONNOIR À TROIS ÉTAGES (v14)
+   L'ENTONNOIR EN GRILLE (v15, remplace l'escalier vertical de la v14)
 
-   Dix compteurs à plat, c'est ce qu'un BDR abandonne au troisième jour. En trois
-   étages titrés et numérotés, chacun ne lit que l'étage qui le concerne, et la
-   structure devient visible : on comprend en regardant que les trois issues du
-   milieu se partagent les appels décrochés.
+   La v14 empilait dix compteurs dans une colonne de 340 px : environ huit cents
+   pixels de haut, trois écrans de défilement sur un portable, et un
+   « Rendez-vous obtenus » qu'on ne voyait jamais sans faire défiler. La v15 garde
+   exactement les mêmes étages et le même modèle de données, et change seulement
+   la façon de les poser à l'écran :
 
-   Le trait vertical à gauche est ce qui fait tenir l'ensemble visuellement. Sans
-   lui, trois titres et dix lignes se lisent comme dix lignes.
+     la carte Prospection prend TOUTE LA LARGEUR et passe en premier
+     chaque étage devient UNE LIGNE
+     les compteurs d'un même étage se rangent EN COLONNES, une par catégorie
+     le total de l'étage vient DANS SON EN-TÊTE, à droite du titre
+
+   Ce qui n'a PAS été fait, volontairement : réduire les marges intérieures des
+   compteurs. Le gain de hauteur vient de la mise en colonnes, pas d'un
+   tassement. Chaque compteur doit rester assez large pour accueillir les
+   réglages à venir (échelle par compteur, jauge affichée ou non), sinon il
+   faudra tout redéfaire au lot suivant.
 
    Les classes s'appellent « etage » et non « funnel-step » : app.css a déjà un
-   .funnel-step, l'entonnoir horizontal du tableau de bord, qui vaut display:flex.
-   Mes étages s'y seraient rangés côte à côte au lieu de s'empiler.
+   .funnel-step, l'entonnoir horizontal du tableau de bord, qui vaut
+   display:flex. Mes étages s'y seraient rangés côte à côte au lieu de s'empiler.
    ========================================================================== */
 
-.etage {
-    position: relative;
-    padding-left: 18px;
-    margin-bottom: 6px;
+/* --------------------------------------------------------------------------
+   La grille des cartes sur la page de saisie
+
+   Deux colonnes fixes au lieu de l'auto-fit de app.css, qui fabriquait quatre
+   colonnes de 340 px sur un grand écran : la carte pleine largeur aurait alors
+   laissé le CRM et le Résultat du jour serrés à gauche, avec deux colonnes de
+   blanc à droite.
+
+   La classe est posée sur le conteneur dans index.html plutôt que déduite de son
+   contenu : .cards-grid sert aussi au tableau de bord, qu'on ne touche pas ici.
+
+   Les points de rupture sont redéclarés ici parce que saisie-events.css est
+   chargé après app.css : sans eux, ma règle à deux colonnes écraserait le retour
+   à une colonne de app.css et le téléphone se retrouverait avec deux colonnes de
+   170 px.
+   -------------------------------------------------------------------------- */
+.cards-grid--saisie { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* Une carte qui traverse la grille. Nom distinct de .chart-card--wide, déjà pris
+   par les graphiques du tableau de bord. */
+.card--wide { grid-column: 1 / -1; }
+
+@media (max-width: 1020px) {
+    .cards-grid--saisie { grid-template-columns: 1fr; }
 }
 
+/* --------------------------------------------------------------------------
+   Les sous-cartes de la carte Prospection
+
+   Deux blocs encadrés, appels et e-mails, dans une carte qui fait désormais
+   1 200 px de large. Sans cadre, la ligne des e-mails se lirait comme un
+   quatrième étage de l'entonnoir téléphonique, ce qu'elle n'est pas.
+   -------------------------------------------------------------------------- */
+.card-body--pros { padding-bottom: 22px; }
+
+.subcard {
+    margin-top: 16px;
+    padding: 2px 18px 16px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    background: var(--white);
+}
+
+/* Le titre de sous-carte vit dans app.css. Ici il est simplement recollé au bord
+   haut du cadre, sinon il flotte à dix-huit pixels du trait. */
+.subcard > .subcard-title { margin-top: 14px; }
+
+/* --------------------------------------------------------------------------
+   Un étage = une ligne
+   -------------------------------------------------------------------------- */
+.etage {
+    position: relative;
+    padding: 16px 0 4px 20px;
+    border-top: 1px dashed var(--gray-200);
+}
+
+/* Le premier étage n'a rien au-dessus de lui : un trait l'aurait séparé du titre
+   de la sous-carte, à laquelle il appartient. */
+.etage:first-child { border-top: none; padding-top: 8px; }
+
+/* Le trait vertical à gauche relie le numéro de l'étage à ses colonnes. Sans
+   lui, trois titres et trois grilles se lisent comme six blocs indépendants. */
 .etage::before {
     content: '';
     position: absolute;
-    left: 5px; top: 30px; bottom: 10px;
+    left: 6px; top: 40px; bottom: 14px;
     width: 2px;
     background: var(--gray-200);
     border-radius: 1px;
 }
 
-/* Le dernier étage ne prolonge pas le trait : un trait qui continue sous le
-   dernier compteur laisse attendre une suite qui n'existe pas. */
-.etage:last-child::before { bottom: 18px; }
+.etage:first-child::before { top: 32px; }
 
 .etage-head {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    margin: 14px 0 8px;
+    gap: 14px;
+    margin-bottom: 12px;
 }
 
 .etage-num {
     flex: 0 0 auto;
     width: 22px; height: 22px;
-    margin-left: -18px;
+    margin-left: -20px;
     border-radius: var(--radius-full);
     background: var(--navy);
     color: var(--white);
@@ -509,14 +572,18 @@
     text-align: center;
 }
 
-.etage-head b {
+/* Le titre prend la place qui reste, le total garde la sienne : c'est ce qui
+   aligne verticalement les deux totaux d'un étage à l'autre. */
+.etage-titre { flex: 1 1 auto; min-width: 0; }
+
+.etage-titre b {
     display: block;
-    font-size: 13.5px;
+    font-size: 14px;
     font-weight: 700;
     color: var(--navy);
 }
 
-.etage-head span {
+.etage-titre span {
     display: block;
     font-size: 11.5px;
     font-weight: 500;
@@ -525,17 +592,145 @@
 }
 
 /* --------------------------------------------------------------------------
-   Les totaux calculés
+   Le total de l'étage, dans l'en-tête
 
-   Pas de bouton, pas de champ : la base écrit ces chiffres et metric_allowed()
-   refuse qu'un client y touche. Un stepper afficherait 20 pendant une seconde
-   avant de retomber à 19. Le fond légèrement teinté dit « ce n'est pas à vous de
-   le remplir » sans qu'il faille l'écrire.
+   Pas de bouton, pas de champ : la base écrit ce chiffre
+   (trg_daily_activity_entonnoir) et metric_allowed() refuse qu'un client y
+   touche. Un stepper afficherait 20 pendant une seconde avant de retomber à 19.
+   Le cadre en pointillés dit « ce n'est pas à vous de le remplir » sans qu'il
+   faille l'écrire.
    -------------------------------------------------------------------------- */
+.etage-tot {
+    flex: 0 0 auto;
+    width: 272px;
+    padding: 10px 14px 12px;
+    background: var(--gray-50);
+    border: 1px dashed var(--gray-300);
+    border-radius: var(--radius-md);
+}
 
-/* .metric ne porte qu'un border-bottom en pointillés : « border-style: dashed »
-   seul n'aurait rien dessiné faute d'épaisseur, et un fond sans marge intérieure
-   se serait collé au texte. D'où le padding et le cadre explicites. */
+.etage-tot-num {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.etage-tot-num b {
+    font-size: 26px;
+    font-weight: 800;
+    line-height: 1;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
+}
+
+.etage-tot-num span {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--gray-600);
+    line-height: 1.3;
+}
+
+.etage-tot-num small {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--gray-400);
+}
+
+.etage-tot .gauge { margin-top: 8px; }
+
+/* --------------------------------------------------------------------------
+   Les colonnes d'un étage
+
+   auto-fit et non un nombre fixe : le nombre de compteurs dépend du métier
+   affiché, et trois colonnes imposées à un commercial qui n'en a qu'une auraient
+   laissé deux trous. À trois compteurs et 1 200 px de large, cela donne bien les
+   trois colonnes demandées ; à 700 px, deux ; sur un téléphone, une.
+   -------------------------------------------------------------------------- */
+.etage-cols {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
+}
+
+/* Un seul compteur dans l'étage : il occupe la ligne entière plutôt que de
+   laisser 900 px de blanc à sa droite. */
+.etage-cols[data-cols="1"] { grid-template-columns: 1fr; }
+
+/* --------------------------------------------------------------------------
+   Un compteur en colonne
+
+   Le stepper passe sous le libellé et prend toute la largeur : le + devient une
+   cible de plus de deux cents pixels. Sur un téléphone tenu d'une main entre
+   deux appels, c'est ce geste-là qui décide si les chiffres sont saisis ou non.
+
+   .metric porte un border-bottom en pointillés dans app.css, qui doit être
+   neutralisé ici, sinon chaque carte affiche un trait sous elle.
+   -------------------------------------------------------------------------- */
+.metric--col {
+    display: flex;
+    flex-direction: column;
+    padding: 14px 16px 16px;
+    border: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: var(--white);
+}
+
+.metric--col:last-child { border-bottom: 1px solid var(--gray-200); }
+
+.metric--col .metric-top {
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+}
+
+/* Le stepper est poussé en bas de la zone haute : les trois colonnes d'un étage
+   gardent leurs boutons alignés même quand un sous-titre tient sur deux lignes
+   et le voisin sur trois. */
+.metric--col .stepper {
+    width: 100%;
+    margin-top: auto;
+    justify-content: space-between;
+}
+
+.metric--col .metric-input { flex: 1 1 auto; min-width: 0; width: auto; }
+
+.metric--col .gauge { margin-top: 12px; }
+
+/* --------------------------------------------------------------------------
+   Un compteur en ligne large
+
+   Libellé, stepper et jauge côte à côte au lieu d'être empilés : trois fois
+   moins de hauteur pour la même information. Réservé aux compteurs seuls sur
+   leur ligne, les appels passés et les e-mails.
+   -------------------------------------------------------------------------- */
+.metric--wide {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 38%);
+    align-items: center;
+    gap: 24px;
+}
+
+.metric--wide .gauge { margin-top: 0; }
+
+/* Dans un étage, la ligne large reçoit le même cadre que les colonnes : les deux
+   présentations se suivent dans la même sous-carte, elles doivent se ressembler.
+   Hors étage — les e-mails — le cadre de la sous-carte suffit déjà. */
+.etage-cols .metric--wide {
+    padding: 14px 16px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+}
+
+/* --------------------------------------------------------------------------
+   Un total resté en ligne
+
+   Aucun étage n'utilise plus cette présentation depuis la v15 ; elle sert de
+   filet à un total qui n'appartiendrait à aucun étage.
+   -------------------------------------------------------------------------- */
 .metric--total {
     margin: 8px 0 2px;
     padding: 12px 14px;
@@ -544,8 +739,6 @@
     border-radius: var(--radius-md);
 }
 
-/* La jauge d'un total garde sa place, mais le compteur n'a pas de champ : sans
-   ce retrait, elle démarrerait au ras du cadre. */
 .metric--total .gauge { margin-top: 10px; }
 
 .metric-total-val {
@@ -568,9 +761,24 @@
     color: var(--gray-400);
 }
 
+/* --------------------------------------------------------------------------
+   Écrans étroits
+   -------------------------------------------------------------------------- */
+
+/* Sous 860 px, le total ne tient plus à droite du titre sans écraser les deux :
+   il passe sous l'intitulé de l'étage, sur toute la largeur. */
+@media (max-width: 860px) {
+    .etage-head { flex-wrap: wrap; }
+    .etage-tot { width: 100%; }
+    .metric--wide { grid-template-columns: 1fr; gap: 10px; }
+    .metric--wide .gauge { margin-top: 8px; }
+}
+
 @media (max-width: 560px) {
-    .etage { padding-left: 14px; }
+    .subcard { padding: 2px 12px 14px; }
+    .etage { padding-left: 16px; }
     .etage::before { left: 4px; }
-    .etage-num { margin-left: -14px; width: 20px; height: 20px; line-height: 20px; font-size: 11px; }
+    .etage-num { margin-left: -16px; width: 20px; height: 20px; line-height: 20px; font-size: 11px; }
+    .etage-tot-num b { font-size: 22px; }
     .metric-total-val b { font-size: 19px; }
 }

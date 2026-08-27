@@ -80,12 +80,59 @@
 
         <div id="past-warning"></div>
 
-        <!-- CARTES DE SAISIE -->
-        <div class="cards-grid">
+        <!-- CARTES DE SAISIE
 
-            <!-- CARTE 1 : ENRICHISSEMENT DU CRM (BDR)
+             cards-grid--saisie : deux colonnes fixes au lieu de l'auto-fit
+             général de app.css. Sur un grand écran, l'auto-fit fabriquait quatre
+             colonnes de 340 px, et la carte Prospection pleine largeur laissait
+             alors le CRM et le Résultat du jour serrés à gauche avec deux
+             colonnes de blanc à droite. Le tableau de bord garde l'auto-fit. -->
+        <div class="cards-grid cards-grid--saisie">
+
+            <!-- CARTE 1 : PROSPECTION (BDR et commercial)
+
+                 PLACÉE EN PREMIER ET SUR TOUTE LA LARGEUR (v15). C'est la carte
+                 qui est réellement remplie tous les jours ; le CRM et le score
+                 se consultent après. En haut de page et en pleine largeur, ses
+                 dix compteurs tiennent sur trois lignes au lieu d'une colonne de
+                 huit cents pixels de haut.
+
                  data-card : buildCards() masque toute carte dont aucun compteur
                  n'appartient au métier de la personne affichée. -->
+            <section class="card card--wide" data-card="prospection">
+                <div class="card-header">
+                    <div class="card-icon card-icon--cyan">🎯</div>
+                    <div>
+                        <div class="card-title">Prospection</div>
+                        <div class="card-subtitle">Mes actions sortantes du jour</div>
+                    </div>
+                    <div class="card-total"><span data-total="prospection">0</span><small>actions</small></div>
+                </div>
+                <div class="card-body card-body--pros">
+
+                    <!-- SOUS-CARTE : LES APPELS, EN TROIS LIGNES
+
+                         data-sub-for porte maintenant la sous-carte entière et
+                         non plus son seul titre : un groupe hors métier fait
+                         disparaître le cadre avec lui, au lieu de laisser un
+                         encadré vide. buildCards() n'a pas changé de sélecteur. -->
+                    <section class="subcard" data-sub-for="calls">
+                        <div class="subcard-title">📞 Appels téléphoniques</div>
+                        <div data-metrics="calls"></div>
+                    </section>
+
+                    <!-- SOUS-CARTE : LES E-MAILS
+                         Un seul compteur, donc une ligne large : le mettre en
+                         colonne étroite à côté de rien aurait fabriqué un vide. -->
+                    <section class="subcard" data-sub-for="emails">
+                        <div class="subcard-title">✉️ E-mails de prospection</div>
+                        <div data-metrics="emails"></div>
+                    </section>
+
+                </div>
+            </section>
+
+            <!-- CARTE 2 : ENRICHISSEMENT DU CRM (BDR) -->
             <section class="card" data-card="crm">
                 <div class="card-header">
                     <div class="card-icon card-icon--purple">🗂️</div>
@@ -96,28 +143,6 @@
                     <div class="card-total"><span data-total="crm">0</span><small>fiches</small></div>
                 </div>
                 <div class="card-body" data-metrics="crm"></div>
-            </section>
-
-            <!-- CARTE 2 : PROSPECTION (BDR et commercial) -->
-            <section class="card" data-card="prospection">
-                <div class="card-header">
-                    <div class="card-icon card-icon--cyan">🎯</div>
-                    <div>
-                        <div class="card-title">Prospection</div>
-                        <div class="card-subtitle">Mes actions sortantes du jour</div>
-                    </div>
-                    <div class="card-total"><span data-total="prospection">0</span><small>actions</small></div>
-                </div>
-                <div class="card-body">
-                    <!-- data-sub-for : le sous-titre disparaît avec son groupe.
-                         Structure volontairement laissée plate, sans conteneur
-                         supplémentaire, pour ne rien changer à la mise en page
-                         existante. -->
-                    <div class="subcard-title" data-sub-for="calls">📞 Appels téléphoniques</div>
-                    <div data-metrics="calls"></div>
-                    <div class="subcard-title" data-sub-for="emails">✉️ E-mails de prospection</div>
-                    <div data-metrics="emails"></div>
-                </div>
             </section>
 
             <!-- CARTE 3 : CYCLE DE VENTE (commercial) -->
