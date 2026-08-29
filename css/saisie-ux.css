@@ -255,7 +255,50 @@
    -------------------------------------------------------------------------- */
 
 /* --------------------------------------------------------------------------
+   3 bis. CE QUE RAPPORTE CHAQUE GESTE
+
+   Posée par js/saisie-ux.js, qui calcule les points à partir du barème chargé
+   depuis la base. Trois paliers, les mêmes que les cinématiques : la couleur du
+   bouton annonce l'effet qu'il va déclencher, et la pastille dit pourquoi.
+
+     palier 1, 1 à 3 points     cyan, la couleur ordinaire de l'outil
+     palier 2, 4 à 9 points     indigo, le geste qui commence à compter
+     palier 3, 10 points et +   vert, le geste qui fait la journée
+
+   L'attribut data-ux-palier est écrit par le script sur la tuile. C'est le seul
+   endroit où cette feuille agit sur un sélecteur du projet, et elle n'agit que
+   par un attribut qu'elle a elle-même posé : sans le script, rien ne change.
+   -------------------------------------------------------------------------- */
+.ux-on .ux-pts {
+    flex: 0 0 auto;
+    align-self: center;
+    padding: 3px 8px;
+    border-radius: var(--radius-full);
+    font-size: 10px; font-weight: 800; letter-spacing: 0.02em;
+    white-space: nowrap;
+    background: var(--gray-100);
+    color: var(--gray-400);
+}
+
+.ux-on .metric[data-ux-palier="2"] .ux-pts { background: rgba(99, 102, 241, 0.12); color: #4338ca; }
+.ux-on .metric[data-ux-palier="3"] .ux-pts { background: rgba(16, 185, 129, 0.15); color: #047857; }
+
+.ux-on .metric[data-ux-palier="2"] .stepper-btn--plus {
+    background: linear-gradient(135deg, #6366f1, #4f46e5);
+    box-shadow: 0 10px 22px -10px rgba(99, 102, 241, 0.8);
+}
+.ux-on .metric[data-ux-palier="3"] .stepper-btn--plus {
+    background: linear-gradient(135deg, #10b981, #059669);
+    box-shadow: 0 10px 22px -10px rgba(16, 185, 129, 0.85);
+}
+
+/* --------------------------------------------------------------------------
    4. LES CINÉMATIQUES
+
+   Note : il n'y a plus aucune animation du nombre lui-même. app.css en pose
+   déjà une via flash(), appelée par onBump() dès le clic ; la nôtre par dessus
+   faisait bouger le chiffre une seconde fois avec un décalage. Nos effets
+   portent sur la tuile, la bulle de points, le score et les confettis.
 
    Trois paliers, calés sur les points RÉELLEMENT gagnés par le clic, lus dans
    la variation du score affiché par saisie.js. Le barème peut donc changer
@@ -309,30 +352,6 @@
     0%, 100% { transform: translateX(0); }
     25%      { transform: translateX(-2.5px); }
     75%      { transform: translateX(2.5px); }
-}
-
-/* ATTENTION, POINT DE RENCONTRE AVEC LE CODE EXISTANT
-   onBump() appelle flash(key), qui pose .metric-input--flash sur le champ, et
-   app.css y attache animation:flash, un fond cyan avec un léger grossissement.
-   Nos deux classes visent le même élément. Comme « animation » est une propriété
-   unique et non cumulative, la dernière feuille chargée gagne : nos animations
-   remplacent celle d'app.css au lieu de s'y ajouter.
-
-   Elles reprennent donc son fond cyan à l'identique. Rien n'est perdu à l'écran,
-   et surtout aucune ligne de saisie.js n'a eu à changer : flash() est toujours
-   appelée, sa classe est toujours posée, seul son rendu est enrichi. */
-.ux-on .fx-bump { animation: fxBump 0.42s cubic-bezier(0.2, 0.7, 0.3, 1); }
-@keyframes fxBump {
-    0%   { transform: scale(1); background: rgba(0, 167, 225, 0.25); }
-    30%  { transform: scale(1.18); }
-    100% { transform: scale(1); background: transparent; }
-}
-
-.ux-on .fx-big { animation: fxBig 0.7s cubic-bezier(0.2, 0.7, 0.3, 1); }
-@keyframes fxBig {
-    0%   { transform: scale(1); background: rgba(251, 191, 36, 0.3); }
-    25%  { transform: scale(1.4); color: var(--warning); }
-    100% { transform: scale(1); background: transparent; }
 }
 
 /* Le gain qui s'envole. position:fixed et non absolute : le script donne des

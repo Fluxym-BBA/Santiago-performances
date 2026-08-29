@@ -866,7 +866,14 @@
    tabular-nums : sans elle, la largeur du champ saute en passant de 9 à 10, et
    les trois colonnes d'un étage se décalent pendant la saisie.
    -------------------------------------------------------------------------- */
-.stepper { gap: 10px; }
+/* Le − et le + forment un groupe, poussé à droite par une marge automatique
+   sur le −. C'est plus robuste qu'un justify-content : peu importe ce qui se
+   trouve à gauche, chiffre seul ou chiffre suivi de la pastille de points, les
+   deux boutons restent côte à côte. Avant, space-between répartissait l'espace
+   entre les TROIS éléments, ce qui écartait le − du + de près de trente pixels
+   et cassait la lecture du groupe. */
+.stepper { gap: 8px; }
+.stepper-btn--minus { margin-left: auto; }
 
 .metric-input {
     order: -1;

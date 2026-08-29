@@ -1,25 +1,20 @@
-/* ==========================================================================
-   js/saisie-ux.js — Couche d'ergonomie de la Saisie du jour (v23)
+/* v24.2 — Les points d'un clic sont connus AVANT le clic.
 
-   CE FICHIER N'EST PAS UNE RÉÉCRITURE DE js/saisie.js. Il ne contient aucune
-   règle de calcul, aucun barème, aucun appel à Supabase, aucune écriture. Il
-   arrive APRÈS saisie.js, prend les cartes déjà construites et se contente de :
+   La version précédente lisait la variation de #day-score après coup. C'était
+   fragile pour deux raisons, toutes deux constatées à l'écran :
 
-     1. les répartir dans des onglets, au lieu d'une colonne à faire défiler ;
-     2. afficher le score du jour en permanence dans la barre d'onglets ;
-     3. jouer une cinématique de récompense proportionnelle aux points gagnés.
+     - paint() écrit le score en dernier, dans paintDerived(). Lire à la première
+       mutation du DOM donnait donc zéro point, et zéro point déclenche l'effet le
+       plus terne. Aucun clic n'a jamais dépassé le premier palier, pas même un
+       rendez-vous à vingt-cinq points ;
+     - le champ recevait deux animations : celle de flash() dans app.css, posée au
+       clic, puis la nôtre au moment de la résolution. D'où un nombre qui bougeait
+       deux fois, avec un temps de retard visible.
 
-   Trois conséquences voulues :
-     - aucune fonctionnalité existante ne peut disparaître, puisque le balisage,
-       les identifiants et les écouteurs de saisie.js ne sont pas touchés : les
-       cartes changent seulement de parent ;
-     - si ce fichier plante ou est retiré, la page revient à son état actuel
-       (la classe .ux-on n'est jamais posée, donc css/saisie-ux.css ne
-       s'applique pas) ;
-     - le barème peut changer dans l'écran Barème sans rendre les effets faux :
-       les points gagnés ne sont pas recalculés ici, ils sont LUS dans la
-       variation du score que saisie.js affiche déjà.
-   ========================================================================== */
+   Les points sont maintenant calculés à partir du barème lui-même, sans le
+   dupliquer, et l'effet part dans le même geste que le clic. */
+import { METRICS, SCORE_WEIGHTS } from './api.js';
+
 (() => {
   'use strict';
 
@@ -43,13 +38,13 @@
     { id:'pros',  ico:'📞', couleur:'#00A7E1', titre:'Prospection',
       sous:'Appels, issues, rendez-vous, e-mails', unite:'actions',
       cartes:['[data-card="prospection"]'], total:'[data-total="prospection"]' },
-    { id:'crm',   ico:'🗂️', couleur:'#6366f1', titre:'CRM',
+    { id:'crm',   ico:'🗂️', couleur:'#6366f1', titre:'Enrichissement du CRM',
       sous:'Entreprises et contacts créés', unite:'fiches',
       cartes:['[data-card="crm"]'], total:'[data-total="crm"]' },
     { id:'vente', ico:'🤝', couleur:'#10b981', titre:'Cycle de vente',
       sous:'Événements et sorties de pipeline', unite:'actions',
       cartes:['[data-card="pipeline"]','[data-card="outcome"]'], total:'[data-total="pipeline"]' },
-    { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Bilan de la journée',
+    { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Ce que la journée dit',
       sous:'Taux, décomposition du score, note du jour', unite:'score',
       cartes:[], total:'#day-score' }
   ];
@@ -141,24 +136,50 @@
     setTimeout(() => el.classList.remove(classe), duree || 1000);
   }
 
+  /* Ce que vaut un clic sur ce compteur, en points.
+
+     Le poids direct de la clé, plus le poids de chaque total dérivé qu'elle
+     alimente. Un clic sur « Échange, nouveau contact » vaut donc le poids de
+     l'appel abouti plus celui de l'appel avec échange, parce que METRICS déclare
+     ces deux totaux comme dérivés de cette catégorie. Rien n'est écrit en dur :
+     les dérivations viennent du champ « derived » de METRICS, les poids de
+     SCORE_WEIGHTS, que loadScoreWeights() remplit depuis la base en mutant le
+     tableau sur place, donc la référence importée ici reste la bonne. */
+  function poidsDe(cle){
+    const w = SCORE_WEIGHTS.find(x => x.key === cle);
+    return w ? Number(w.w) || 0 : 0;
+  }
+  function pointsDuClic(cle){
+    if(!cle) return 0;
+    let p = poidsDe(cle);
+    METRICS.forEach(m => {
+      if(m.derived && m.derived.indexOf(cle) >= 0) p += poidsDe(m.key);
+    });
+    return p;
+  }
+  /* Trois paliers, les mêmes que les cinématiques : la couleur du bouton annonce
+     l'effet qu'il va déclencher, et la pastille dit combien il rapporte. */
+  function palierDe(points){ return points >= 10 ? 3 : points >= 4 ? 2 : 1; }
+
   /* La récompense dépend des points réellement gagnés, pas du compteur touché. */
+  /* ON NE TOUCHE PLUS AU NOMBRE. app.css animait déjà le champ via flash(),
+     appelée par onBump() dès le clic. Ajouter la nôtre par dessus faisait bouger
+     le nombre une seconde fois, avec un décalage. Le retour immédiat sur le
+     nombre est laissé à flash(), et nos effets portent sur la tuile, la bulle de
+     points, le score et les confettis. */
   function celebre(points, x, y, metric){
-    const champ = metric ? $('.metric-input, .metric-total-val', metric) : null;
     if(points <= 0){
       anime(metric, 'fx-p0', 400);
-      anime(champ, 'fx-bump', 500);
       return;
     }
     if(points < SEUIL_PALIER_2){
       anime(metric, 'fx-p1', 500);
-      anime(champ, 'fx-bump', 500);
       bulle(x, y, '+' + points + ' pt' + (points > 1 ? 's' : ''), 'ux-fx-pop--s');
       return;
     }
     const feuPossible = FX_BIG_COOLDOWN_MS === 0 || (Date.now() - dernierFeu) > FX_BIG_COOLDOWN_MS;
     if(points < SEUIL_PALIER_3 || !feuPossible){
       anime(metric, 'fx-p2', 700);
-      anime(champ, 'fx-bump', 500);
       bulle(x, y, '+' + points + ' pts', 'ux-fx-pop--m');
       salve(x, y, 14, { haut:true, vitesse:3.4, pousse:1.6, taille:4, vie:46,
         couleurs:['#00A7E1', '#0ea5e9', '#6ee7b7', '#a5f3fc'] });
@@ -167,7 +188,6 @@
     /* Palier 3 : le jalon de la journée. */
     dernierFeu = Date.now();
     anime(metric, 'fx-p3', 1100);
-    anime(champ, 'fx-big', 800);
     anime($('.ux-score'), 'ux-score--boom', 900);
     bulle(x, y, '🎉 +' + points + ' points', 'ux-fx-pop--l');
     const P = ['#fbbf24', '#f59e0b', '#10b981', '#00A7E1', '#6366f1', '#f472b6', '#ffffff'];
@@ -184,72 +204,49 @@
      exactement au barème en vigueur. */
   const lireScore = () => nombre($('#day-score') ? $('#day-score').textContent : 0);
 
-  let attente = null, minuteur = null, differe = null;
-  function armer(x, y, metric, sens){
-    attente = { avant:lireScore(), x, y, metric, sens };
-    clearTimeout(minuteur);
-    clearTimeout(differe);
-    /* Filet : si le score ne bouge pas (compteur à zéro point, écriture
-       refusée, journée verrouillée), on joue quand même un retour discret pour
-       que le clic ne paraisse pas perdu. */
-    minuteur = setTimeout(() => {
-      if(!attente) return;
-      const a = attente; attente = null;
-      if(a.sens > 0) celebre(0, a.x, a.y, a.metric);
-    }, 900);
-  }
-  /* POURQUOI ON ATTEND AVANT DE RÉCOMPENSER — corrigé le 29/08
+  /* Le clic déclenche l'effet immédiatement, avec les points du barème. Plus
+     d'attente, plus d'observation du score : la récompense part dans le même
+     geste que le chiffre qui monte.
 
-     Premier essai : on résolvait dès la première mutation du DOM. Résultat, le
-     clic ne déclenchait jamais que l'effet le plus terne, quel que soit le
-     nombre de points gagnés, y compris sur un rendez-vous.
-
-     La cause est dans l'ordre de paint() : elle met d'abord à jour les champs et
-     les totaux de chaque compteur, et n'écrit le score qu'à la toute fin, dans
-     paintDerived(). La première mutation arrive donc alors que #day-score porte
-     encore l'ancienne valeur : le delta valait zéro, et zéro point donne l'effet
-     minimal. La logique était juste, elle regardait simplement trop tôt.
-
-     Chaque mutation repousse maintenant la résolution de 90 ms. paint() enchaîne
-     ses écritures en quelques millisecondes, donc on lit toujours le score final,
-     une seule fois, et l'effet correspond aux points réellement gagnés. Le filet
-     de 900 ms reste au-dessus : si le score ne bouge pas du tout, le clic reçoit
-     quand même un retour discret. */
-  function resoudre(){
-    if(!attente) return;
-    clearTimeout(differe);
-    differe = setTimeout(resoudreMaintenant, 90);
-  }
-
-  function resoudreMaintenant(){
-    if(!attente) return;
-    const a = attente; attente = null;
-    clearTimeout(minuteur);
-    const delta = lireScore() - a.avant;
-    if(a.sens < 0 || delta < 0){
-      anime(a.metric, 'fx-minus', 400);
-      bulle(a.x, a.y, delta < 0 ? '\u2212' + Math.abs(delta) + ' pts' : 'retiré',
-        'ux-fx-pop--minus');
-      return;
-    }
-    celebre(delta, a.x, a.y, a.metric);
-  }
-
-  /* Capture : on passe avant les écouteurs de saisie.js pour photographier le
-     score d'avant, sans jamais intercepter ni annuler le clic. */
+     Capture, et jamais d'interception : on ne fait que lire l'événement, les
+     écouteurs de saisie.js reçoivent le clic intact. */
   document.addEventListener('click', ev => {
     const btn = ev.target.closest && ev.target.closest('.stepper-btn');
-    if(!btn) return;
-    armer(ev.clientX, ev.clientY, btn.closest('.metric'),
-      btn.classList.contains('stepper-btn--minus') ? -1 : 1);
+    if(!btn || btn.disabled) return;
+    const metric = btn.closest('.metric');
+    const cle = btn.dataset.key || (metric && metric.dataset.metric);
+
+    if(btn.classList.contains('stepper-btn--minus')){
+      /* Le retrait a sa cinématique propre, volontairement terne : corriger ne se
+         récompense pas, mais on doit voir ce qu'on vient de perdre. */
+      const perdus = pointsDuClic(cle);
+      anime(metric, 'fx-minus', 400);
+      bulle(ev.clientX, ev.clientY,
+        perdus > 0 ? '\u2212' + perdus + ' pts' : 'retiré', 'ux-fx-pop--minus');
+      return;
+    }
+    celebre(pointsDuClic(cle), ev.clientX, ev.clientY, metric);
   }, true);
 
-  /* Saisie directe au clavier : même mécanique, la bulle part du champ. */
+  /* Saisie directe au clavier. Un seul nombre tapé peut valoir plusieurs
+     incréments : les points sont multipliés par l'écart réellement saisi. */
   document.addEventListener('change', ev => {
     const champ = ev.target.closest && ev.target.closest('.metric-input');
     if(!champ) return;
+    const avant = nombre(champ.dataset.uxAvant);
+    const apres = nombre(champ.value);
+    champ.dataset.uxAvant = apres;
+    if(apres <= avant) return;
     const r = champ.getBoundingClientRect();
-    armer(r.left + r.width / 2, r.top, champ.closest('.metric'), 1);
+    celebre(pointsDuClic(champ.dataset.key) * (apres - avant),
+      r.left + r.width / 2, r.top, champ.closest('.metric'));
+  }, true);
+
+  /* La valeur d'avant est mémorisée à la prise de focus : sans elle, impossible
+     de savoir si l'on a tapé 12 en partant de 0 ou de 11. */
+  document.addEventListener('focusin', ev => {
+    const champ = ev.target.closest && ev.target.closest('.metric-input');
+    if(champ) champ.dataset.uxAvant = nombre(champ.value);
   }, true);
 
   /* ------------------------------------------------------------- onglets */
@@ -358,8 +355,57 @@
     document.documentElement.style.setProperty('--ux-top', h + 'px');
   }
 
+  /* ---------------------------------------------------- valeur de chaque geste
+
+     La maquette validée affiche sur chaque compteur ce que le geste rapporte.
+     Ce n'est pas de la décoration : un BDR qui voit « 25 pts » sur le rendez-vous
+     et « 1 pt » sur l'appel comprend en un regard où est la valeur de sa journée,
+     sans aller lire l'écran Barème.
+
+     La pastille est insérée dans le .stepper, entre le chiffre et les boutons.
+     Deux raisons : le coin haut droit de la tuile est déjà pris par l'œil de
+     visibilité, et cet espace-là était justement vide, ce qui donnait la
+     sensation que les boutons flottaient loin du nombre.
+
+     Rien n'est ajouté dans saisie.js : ces pastilles sont posées après coup et
+     reposées si buildCards() reconstruit les cartes. */
+  let enPose = false;
+  function poserPastilles(){
+    /* GARDE-FOU. Ces pastilles sont insérées DANS la grille, et c'est cette même
+       grille qu'un MutationObserver surveille pour rafraîchir les onglets. Sans
+       ce drapeau, poser une pastille déclencherait l'observateur, qui rappellerait
+       cette fonction. Les comparaisons ci-dessous suffisent à faire converger la
+       boucle en un tour, mais mieux vaut ne pas la laisser s'ouvrir du tout. */
+    if(enPose) return;
+    enPose = true;
+    try { posePastilles(); } finally { enPose = false; }
+  }
+  function posePastilles(){
+    $$('.metric[data-metric]').forEach(m => {
+      const st = $('.stepper', m);
+      if(!st) return;                      /* total calculé ou ligne d'événement */
+      const cle = m.dataset.metric;
+      const pts = pointsDuClic(cle);
+      const pal = palierDe(pts);
+      if(String(m.dataset.uxPalier) !== String(pal)) m.dataset.uxPalier = pal;
+      let b = $('.ux-pts', st);
+      if(!b){
+        b = document.createElement('span');
+        b.className = 'ux-pts';
+        b.setAttribute('aria-hidden', 'true');   /* déjà dit par l'écran Barème */
+        const champ = $('.metric-input', st);
+        if(champ && champ.nextSibling) st.insertBefore(b, champ.nextSibling);
+        else st.appendChild(b);
+      }
+      const txt = pts > 0 ? pts + (pts > 1 ? ' pts' : ' pt') : '';
+      if(b.textContent !== txt) b.textContent = txt;
+      b.hidden = !txt;
+    });
+  }
+
   /* Chiffres des onglets, pastille « rien de saisi », score en miroir. */
   function rafraichir(){
+    poserPastilles();
     const sc = lireScore();
     const n = $('#ux-score-n');
     if(n && n.textContent !== String(sc)) n.textContent = sc;
@@ -392,11 +438,11 @@
   function demarrer(){
     if(construire()){
       const g = grille();
-      const obs = new MutationObserver(() => { rafraichir(); resoudre(); });
+      const obs = new MutationObserver(() => { rafraichir(); });
       obs.observe(g, { childList:true, subtree:true, characterData:true, attributes:true,
         attributeFilter:['hidden', 'style', 'aria-hidden'] });
       const sc = $('#day-score');
-      if(sc) new MutationObserver(() => { rafraichir(); resoudre(); })
+      if(sc) new MutationObserver(() => { rafraichir(); })
         .observe(sc, { childList:true, characterData:true, subtree:true });
       window.addEventListener('resize', calerHauteur);
       return true;
