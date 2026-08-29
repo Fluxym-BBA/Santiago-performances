@@ -1,5 +1,5 @@
 /* ==========================================================================
-   css/saisie-ux.css — Refonte ergonomique de la Saisie du jour (v23)
+   css/saisie-ux.css — Refonte ergonomique de la Saisie du jour (v23.1)
 
    POURQUOI UNE FEUILLE À PART, ET PAS UNE MODIFICATION DE app.css
    app.css est le fichier le plus disputé du projet : plusieurs sujets le
@@ -10,252 +10,473 @@
    TOUT EST PRÉFIXÉ PAR .ux-on
    La classe .ux-on est posée sur <body> par js/saisie-ux.js. Si ce script
    échoue ou est retiré, aucune règle de cette feuille ne s'applique et la page
-   revient exactement à son apparence actuelle. C'est le filet de sécurité.
+   revient exactement à son apparence actuelle.
 
-   Ce que cette feuille fait :
-     1. transforme chaque ligne de compteur en tuile lisible (le chiffre domine,
-        le + est deux fois plus gros que le −) ;
-     2. habille la barre d'onglets et les panneaux créés par le script ;
-     3. porte les trois cinématiques de récompense et celle du retrait ;
-     4. adapte le tout au téléphone.
+   ------------------------------------------------------------------------
+   CE QUI A CASSÉ EN v23, ET LA RÈGLE QUI EN DÉCOULE
+
+   La v23 posait display:flex + flex-direction:column sur .metric et
+   flex-wrap:wrap sur .metric-top, en croyant surcharger une simple ligne.
+   En réalité toute la mise en page de la carte Prospection vit dans
+   css/saisie-events.css, qui n'a rien à voir avec son nom :
+
+     .metric--wide           display:grid, deux colonnes (libellé | jauge)
+     .metric--col            display:flex, direction column
+     .metric--col .metric-top   flex-direction:column, align-items:stretch
+     .metric--col .stepper      margin-top:auto, justify-content:space-between
+     .etage-cols             grid auto-fit, minmax(236px, 1fr)
+     .cards-grid--saisie     grid, deux colonnes
+     .card--wide             grid-column: 1 / -1
+
+   flex-wrap:wrap appliqué à un conteneur déjà en flex-direction:column ne
+   met pas les enfants à la ligne : il ouvre une SECONDE COLONNE à droite.
+   Le champ et les deux boutons des étages 2 et 3 sont partis dans cette
+   colonne, hors de la tuile, et .card porte overflow:hidden. D'où des
+   tuiles avec un libellé et rien d'autre.
+
+   RÈGLE TENUE ICI, SANS EXCEPTION : cette feuille ne redéclare AUCUNE
+   propriété de mise en page (display, flex-direction, flex-wrap, flex,
+   grid-template, position) sur un sélecteur qui ne lui appartient pas.
+   Seule exception assumée et documentée : .cards-grid--saisie passe à une
+   colonne, parce que les enfants de la grille sont désormais les panneaux
+   d'onglets et non plus les cartes.
+
+   Ce qu'elle ne touche plus du tout, alors que la v23 y touchait :
+   .metric, .metric-top, .metric-label, .metric--col, .metric--wide,
+   .metric--total, .metric-total-val, .metric--events, .gauge et tous ses
+   enfants, .etage et tous ses enfants, .oeil.
+
+   Deuxième correction : la v23 utilisait --bg, --border, --muted et
+   color-mix(). Aucune de ces trois variables n'existe dans app.css, les
+   couleurs de repli s'appliquaient donc partout, à côté de la palette du
+   projet. Ici, uniquement les variables réelles de :root et des rgba()
+   explicites. Aucun color-mix, donc aucune exigence de navigateur récent.
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
    1. BARRE D'ONGLETS
-   Collante : le score du jour reste visible pendant toute la saisie. Le décalage
-   du haut est calculé par le script (hauteur réelle de l'en-tête collant) et
-   posé dans --ux-top, jamais devinée ici.
+
+   Collante sous la barre de navigation : le score du jour reste visible
+   pendant toute la saisie. Le décalage du haut est mesuré par le script
+   (hauteur réelle de .topbar, qui est en position:sticky) et posé dans
+   --ux-top. Jamais une valeur devinée : la barre a trois hauteurs selon la
+   largeur de l'écran.
    -------------------------------------------------------------------------- */
-.ux-on .ux-tabs{
-  position:sticky; top:var(--ux-top,0px); z-index:40;
-  display:flex; align-items:stretch; gap:8px;
-  padding:10px 0 12px; margin:0 0 2px;
-  background:linear-gradient(180deg,var(--bg,#f4f7fb) 72%,transparent);
+.ux-on .ux-tabs {
+    position: sticky;
+    top: var(--ux-top, 0px);
+    z-index: 40;
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 0;
+    margin-top: 20px;
+    /* Le fond reprend celui du body (--gray-50), sinon les tuiles qui passent
+       dessous en défilant restent visibles à travers la barre. */
+    background: linear-gradient(180deg, var(--gray-50) 74%, rgba(249, 250, 251, 0));
 }
-.ux-on .ux-tabs-list{display:flex; gap:8px; flex:1; min-width:0}
-.ux-on .ux-tab{
-  flex:1 1 0; min-width:0; display:flex; align-items:center; gap:11px;
-  padding:11px 13px; border-radius:14px; text-align:left; cursor:pointer;
-  background:#fff; border:1px solid var(--border,#e4eaf2);
-  box-shadow:0 1px 2px rgba(11,32,70,.05);
-  transition:background .16s ease, box-shadow .16s ease, border-color .16s ease;
-  position:relative;
+
+.ux-on .ux-tabs-list { display: flex; gap: 8px; flex: 1 1 auto; min-width: 0; }
+
+.ux-on .ux-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 11px 13px;
+    border-radius: var(--radius-lg);
+    text-align: left;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    box-shadow: 0 1px 2px rgba(11, 32, 70, 0.05);
+    transition: background 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    position: relative;
 }
-.ux-on .ux-tab:hover{background:#f8fafc}
-.ux-on .ux-tab-ico{
-  width:34px; height:34px; border-radius:11px; flex:0 0 auto;
-  display:grid; place-items:center; font-size:16px;
-  background:color-mix(in srgb, var(--ux-c,#00A7E1) 14%, transparent);
+
+.ux-on .ux-tab:hover { background: var(--gray-50); }
+.ux-on .ux-tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+/* La couleur de l'onglet arrive par --ux-c, écrite en ligne par le script :
+   une seule règle sert les quatre onglets. */
+.ux-on .ux-tab-ico {
+    flex: 0 0 auto;
+    width: 34px; height: 34px;
+    border-radius: var(--radius-md);
+    display: grid;
+    place-items: center;
+    font-size: 16px;
+    background: var(--gray-100);
 }
-.ux-on .ux-tab-txt{min-width:0; flex:1}
-.ux-on .ux-tab-txt b{display:block; font-size:13.5px; font-weight:900; line-height:1.2; color:var(--navy,#0B2046)}
-.ux-on .ux-tab-txt span{display:block; font-size:11px; font-weight:600; line-height:1.3; color:var(--muted,#5b6b83); margin-top:2px}
-.ux-on .ux-tab-num{flex:0 0 auto; text-align:right}
-.ux-on .ux-tab-num b{display:block; font-size:19px; font-weight:900; line-height:1; color:var(--ux-c,#00A7E1)}
-.ux-on .ux-tab-num span{display:block; font-size:9px; font-weight:900; letter-spacing:.07em; text-transform:uppercase; color:var(--muted,#5b6b83); margin-top:3px}
-.ux-on .ux-tab[aria-selected="true"]{
-  border-color:color-mix(in srgb, var(--ux-c,#00A7E1) 55%, var(--border,#e4eaf2));
-  box-shadow:0 2px 4px rgba(11,32,70,.06), 0 14px 30px -18px rgba(11,32,70,.4);
+
+.ux-on .ux-tab-txt { flex: 1 1 auto; min-width: 0; }
+
+/* Aucun texte tronqué, c'est une règle du projet : un libellé long passe à la
+   ligne, la tuile grandit. */
+.ux-on .ux-tab-txt b {
+    display: block;
+    font-size: 13.5px; font-weight: 800; line-height: 1.2;
+    color: var(--navy);
+    overflow-wrap: anywhere;
 }
-.ux-on .ux-tab[aria-selected="true"]::before{
-  content:''; position:absolute; left:-1px; right:-1px; top:-1px; height:4px;
-  border-radius:14px 14px 0 0; background:var(--ux-c,#00A7E1);
+.ux-on .ux-tab-txt span {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px; font-weight: 500; line-height: 1.3;
+    color: var(--gray-400);
+    overflow-wrap: anywhere;
 }
-.ux-on .ux-tab[aria-selected="false"]{background:transparent; border-color:transparent; box-shadow:none}
-.ux-on .ux-tab[aria-selected="false"] .ux-tab-num b{color:var(--navy,#0B2046)}
-/* Pastille dorée : cet onglet n'a rien de saisi. Un découpage en onglets cache
-   le travail restant, il faut le redire sur l'étiquette. */
-.ux-on .ux-tab-todo{
-  position:absolute; top:8px; right:8px; width:9px; height:9px; border-radius:99px;
-  background:#f59e0b; box-shadow:0 0 0 3px rgba(245,158,11,.22);
+
+.ux-on .ux-tab-num { flex: 0 0 auto; text-align: right; }
+.ux-on .ux-tab-num b {
+    display: block;
+    font-size: 19px; font-weight: 800; line-height: 1;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
 }
-/* Score du jour, en miroir, toujours à l'écran. */
-.ux-on .ux-score{
-  flex:0 0 auto; display:flex; align-items:center; gap:11px;
-  padding:9px 15px; border-radius:14px; color:#fff;
-  background:linear-gradient(150deg,var(--navy,#0B2046),#1b3a72);
+.ux-on .ux-tab-num span {
+    display: block;
+    margin-top: 3px;
+    font-size: 9px; font-weight: 800; letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--gray-400);
 }
-.ux-on .ux-score-n{font-size:26px; font-weight:900; line-height:1; letter-spacing:-.02em}
-.ux-on .ux-score-t{display:flex; flex-direction:column; line-height:1.25}
-.ux-on .ux-score-t span{font-size:9px; font-weight:900; letter-spacing:.09em; text-transform:uppercase; color:rgba(255,255,255,.62)}
-.ux-on .ux-score-t i{font-style:normal; font-size:11.5px; font-weight:700; color:rgba(255,255,255,.85)}
-.ux-on .ux-score--boom{animation:uxScoreBoom .8s cubic-bezier(.2,.7,.3,1)}
-@keyframes uxScoreBoom{
-  0%{box-shadow:0 0 0 0 rgba(251,191,36,.6)}
-  40%{box-shadow:0 0 0 16px rgba(251,191,36,0)}
-  100%{box-shadow:0 0 0 0 transparent}
+
+/* Onglet actif : liseré de couleur en haut plutôt qu'un fond plein. Le fond
+   plein aurait fait concurrence au bouton + , qui doit rester l'élément le plus
+   voyant de l'écran. */
+.ux-on .ux-tab[aria-selected="true"] {
+    border-color: var(--gray-300);
+    box-shadow: 0 2px 4px rgba(11, 32, 70, 0.06), 0 14px 30px -18px rgba(11, 32, 70, 0.4);
+}
+.ux-on .ux-tab[aria-selected="true"]::before {
+    content: '';
+    position: absolute;
+    left: -1px; right: -1px; top: -1px;
+    height: 4px;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--ux-c, #00A7E1);
+}
+.ux-on .ux-tab[aria-selected="true"] .ux-tab-num b { color: var(--ux-c, #00A7E1); }
+
+.ux-on .ux-tab[aria-selected="false"] {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+.ux-on .ux-tab[aria-selected="false"]:hover { background: rgba(255, 255, 255, 0.7); }
+
+/* Pastille : cet onglet n'a rien de saisi. Un découpage en onglets cache le
+   travail restant, il faut le redire sur l'étiquette, sinon un onglet oublié
+   reste oublié toute la journée. */
+.ux-on .ux-tab-todo {
+    position: absolute;
+    top: 8px; right: 8px;
+    width: 9px; height: 9px;
+    border-radius: var(--radius-full);
+    background: var(--warning);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+}
+
+/* Score du jour, en miroir de #day-score, toujours à l'écran. Il n'est jamais
+   calculé ici : le script recopie le texte écrit par saisie.js. */
+.ux-on .ux-score {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 15px;
+    border-radius: var(--radius-lg);
+    color: var(--white);
+    background: linear-gradient(150deg, var(--navy), var(--navy-light));
+}
+.ux-on .ux-score-n {
+    font-size: 26px; font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+.ux-on .ux-score-t { display: flex; flex-direction: column; line-height: 1.25; }
+.ux-on .ux-score-t span {
+    font-size: 9px; font-weight: 800; letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.62);
+}
+.ux-on .ux-score-t i {
+    font-style: normal;
+    font-size: 11.5px; font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+}
+.ux-on .ux-score--boom { animation: uxScoreBoom 0.8s cubic-bezier(0.2, 0.7, 0.3, 1); }
+@keyframes uxScoreBoom {
+    0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6); }
+    40%  { box-shadow: 0 0 0 16px rgba(251, 191, 36, 0); }
+    100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 /* --------------------------------------------------------------------------
    2. PANNEAUX
-   Le script déplace les cartes existantes dans ces panneaux. Les cartes, leurs
-   identifiants et leurs écouteurs ne sont pas touchés : elles changent de
-   parent, rien d'autre.
+
+   Le script déplace les cartes existantes dans ces panneaux. Les cartes, leur
+   balisage, leurs identifiants et leurs écouteurs ne changent pas : elles
+   changent de parent, rien d'autre.
+
+   La grille de saisie passe à une colonne parce que ses enfants directs sont
+   maintenant les panneaux. C'est le panneau qui reprend la grille à deux
+   colonnes de saisie-events.css, avec le même gap et le même point de rupture,
+   pour que .card--wide continue de traverser et que le CRM et le cycle de vente
+   se rangent côte à côte comme aujourd'hui.
    -------------------------------------------------------------------------- */
-.ux-on .ux-panel{display:none}
-.ux-on .ux-panel.is-on{display:block; animation:uxPanel .18s ease-out}
-@keyframes uxPanel{from{opacity:0; transform:translateY(4px)}}
-/* Dans un panneau, la grille redevient une simple colonne : c'est l'onglet qui
-   sépare, plus la colonne. */
-.ux-on .ux-panel > .card{margin-bottom:14px}
-.ux-on .ux-panel > .card:last-child{margin-bottom:0}
-.ux-on .cards-grid--saisie{display:block}
+.ux-on .cards-grid--saisie {
+    grid-template-columns: 1fr;
+    /* 28 px au-dessus de la grille faisaient double emploi avec les 12 px sous
+       la barre d'onglets : trente pixels de blanc gagnés sur la hauteur, et
+       l'objectif du sujet est de ne plus avoir à faire défiler. */
+    margin-top: 8px;
+}
+
+.ux-on .ux-panel { display: none; }
+.ux-on .ux-panel.is-on {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    align-items: start;
+    animation: uxPanel 0.18s ease-out;
+}
+@keyframes uxPanel { from { opacity: 0; transform: translateY(4px); } }
+
+/* Même seuil que .cards-grid--saisie dans saisie-events.css : deux colonnes de
+   170 px sur un téléphone ne servent personne. */
+@media (max-width: 1020px) {
+    .ux-on .ux-panel.is-on { grid-template-columns: 1fr; }
+}
 
 /* --------------------------------------------------------------------------
-   3. LA TUILE DE COMPTEUR
-   Avant : libellé, aide, jauge, champ, moins et plus sur une ligne, six choses
-   de même poids, et le geste utile au milieu.
-   Après : le chiffre domine, le + est seul de sa taille, le − reste visible
-   mais discret parce que c'est une correction, la jauge tient en 5 px.
-   Le champ reste le même <input> qu'avant : taper 37 d'un coup marche toujours,
-   et la logique de saisie.js n'a pas bougé d'une ligne.
+   3. LE CHIFFRE ET LES DEUX BOUTONS
+
+   Le seul endroit où cette feuille retouche l'existant, et uniquement à
+   l'intérieur de .stepper, qui est un flex en ligne dans les deux
+   présentations (colonne et ligne large). Aucun display n'est redéclaré,
+   aucune largeur en pourcentage, aucun flex : rien qui puisse déplacer un
+   élément hors de sa tuile.
+
+   Trois changements, un par intention :
+     - le chiffre passe devant les boutons et grossit : c'est l'information,
+       les boutons ne sont que le moyen ;
+     - le + est le seul élément de cette taille dans la tuile, donc le seul
+       geste que l'oeil trouve sans chercher ;
+     - le − reste visible mais nettement plus petit : corriger est rare, et une
+       correction aussi voyante que l'ajout invite à se tromper.
+
+   Le champ reste le même <input type="number"> qu'avant. Taper 37 d'un coup
+   marche toujours, onType() de saisie.js n'a pas bougé d'une ligne, et c'est
+   voulu : Santiago saisit tantôt au clic, tantôt au total.
    -------------------------------------------------------------------------- */
-.ux-on .metric{
-  background:#fff; border:1px solid var(--border,#e4eaf2); border-radius:12px;
-  padding:11px 12px; display:flex; flex-direction:column; gap:9px;
-  transition:box-shadow .18s ease, border-color .18s ease;
+.ux-on .stepper { gap: 10px; }
+
+.ux-on .metric-input {
+    order: -1;                 /* devant les deux boutons */
+    width: auto;
+    min-width: 64px;
+    text-align: left;
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    padding: 4px 8px;
+    font-variant-numeric: tabular-nums;   /* la largeur ne saute pas de 9 à 10 */
+    /* Bordure transparente sauf en bas : le chiffre se lit comme un chiffre,
+       et le pointillé dit quand même qu'on peut écrire dessus. */
+    border: 1.5px solid transparent;
+    border-bottom: 1.5px dashed var(--gray-300);
+    border-radius: var(--radius-sm);
+    background: transparent;
 }
-.ux-on .metric:hover{
-  box-shadow:0 2px 4px rgba(11,32,70,.06), 0 16px 34px -20px rgba(11,32,70,.45);
-  border-color:color-mix(in srgb, var(--cyan,#00A7E1) 40%, var(--border,#e4eaf2));
+.ux-on .metric-input:hover { background: rgba(0, 167, 225, 0.07); }
+.ux-on .metric-input:focus {
+    border: 1.5px solid var(--cyan);
+    background: var(--white);
 }
-.ux-on .metric-top{display:flex; flex-wrap:wrap; align-items:flex-start; gap:8px}
-.ux-on .metric-label{flex:1 1 100%; min-width:0}
-.ux-on .metric-label b{font-size:12.5px; font-weight:800; line-height:1.25}
-.ux-on .metric-label span{font-size:10.5px; line-height:1.35; overflow-wrap:anywhere}
-.ux-on .stepper{display:flex; align-items:center; gap:8px; width:100%}
-/* Le chiffre du jour, à gauche et en grand. */
-.ux-on .metric-input{
-  order:-1; margin-right:auto;
-  width:4.2ch; min-width:64px; padding:2px 2px;
-  font-size:33px; font-weight:900; letter-spacing:-.03em; line-height:1;
-  text-align:left; color:var(--navy,#0B2046);
-  border:2px solid transparent; border-radius:9px; background:transparent;
-  -moz-appearance:textfield;
+
+.ux-on .stepper-btn--minus {
+    order: 1;
+    width: 34px; height: 34px;
+    font-size: 17px;
+    border-radius: var(--radius-sm);
 }
-.ux-on .metric-input::-webkit-outer-spin-button,
-.ux-on .metric-input::-webkit-inner-spin-button{-webkit-appearance:none; margin:0}
-.ux-on .metric-input:hover{background:color-mix(in srgb, var(--cyan,#00A7E1) 8%, transparent)}
-.ux-on .metric-input:focus{border-color:var(--cyan,#00A7E1); background:#fff; outline:none}
-/* Le retrait : visible, mais clairement secondaire. */
-.ux-on .stepper-btn--minus{
-  width:32px; height:32px; min-width:32px; border-radius:10px;
-  font-size:18px; font-weight:800;
-  background:#f8fafc; border:1px solid var(--border,#e4eaf2); color:var(--muted,#5b6b83);
+
+.ux-on .stepper-btn--plus {
+    order: 2;
+    width: 52px; height: 52px;
+    font-size: 24px;
+    border-radius: 15px;
 }
-.ux-on .stepper-btn--minus:hover{color:#ef4444; border-color:#ef4444; background:#fff}
-/* L'ajout : le seul élément de cette taille dans la tuile, donc le seul geste
-   que l'oeil trouve sans chercher. 54 px, soit au-dessus du minimum tactile. */
-.ux-on .stepper-btn--plus{
-  width:54px; height:54px; min-width:54px; border-radius:16px;
-  font-size:25px; font-weight:800; color:#fff; border:0;
-  background:var(--cyan,#00A7E1);
-  box-shadow:0 8px 18px -8px var(--cyan,#00A7E1);
-  transition:transform .1s ease;
+
+/* La tuile réagit au survol : elle dit qu'elle est cliquable avant qu'on ait
+   visé le bouton. box-shadow et border-color seulement, jamais une propriété
+   de mise en page ni un padding, pour que rien ne bouge au passage de la
+   souris et que les trois colonnes d'un étage restent alignées. */
+.ux-on .metric--col:hover,
+.ux-on .etage-cols .metric--wide:hover {
+    border-color: rgba(0, 167, 225, 0.45);
+    box-shadow: 0 10px 24px -18px rgba(11, 32, 70, 0.55);
 }
-.ux-on .stepper-btn--plus:hover{filter:brightness(1.05)}
-.ux-on .stepper-btn--plus:active{transform:scale(.93)}
-/* Jauge fine, sous le chiffre, objectif écrit en clair. */
-.ux-on .gauge{margin-top:0}
-.ux-on .gauge-track{height:5px; border-radius:99px}
-.ux-on .gauge-legend{font-size:10.5px; font-weight:700}
-/* Compteur calculé : aucun bouton à chercher, fond et bordure différents. */
-.ux-on .metric--total{
-  background:linear-gradient(180deg, color-mix(in srgb, var(--cyan,#00A7E1) 9%, #fff), #fff);
-  border-style:dashed;
-  border-color:color-mix(in srgb, var(--cyan,#00A7E1) 32%, var(--border,#e4eaf2));
-}
-.ux-on .metric-total-val{font-size:30px; font-weight:900; letter-spacing:-.03em}
-/* Les compteurs du cycle de vente gardent leur rendu propre (listes
-   d'événements) : aucune règle ci-dessus ne les concerne. */
-.ux-on .metric--events{gap:10px}
 
 /* --------------------------------------------------------------------------
    4. LES CINÉMATIQUES
-   Trois paliers, calés sur les points réellement gagnés par le clic, lus dans
-   la variation du score affiché par saisie.js. Le barème peut donc changer dans
-   l'écran Barème sans que ces effets deviennent faux.
-     palier 1, moins de 5 points : la tuile respire, le chiffre fait un bond ;
-     palier 2, de 5 à 15 points  : halo qui se propage, étincelles au clic ;
-     palier 3, plus de 15 points : feu d'artifice, gain en grand, score qui pulse.
-   Le retrait a sa cinématique propre, volontairement terne : corriger ne se
-   récompense pas, mais on voit ce qu'on vient de perdre.
-   -------------------------------------------------------------------------- */
-.ux-on .fx-p0{animation:fxP0 .3s ease}
-@keyframes fxP0{0%{background:#fff}45%{background:#f1f5f9}100%{background:#fff}}
-.ux-on .fx-p1{animation:fxP1 .45s ease}
-@keyframes fxP1{
-  0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--cyan,#00A7E1) 50%, transparent)}
-  45%{box-shadow:0 0 0 5px color-mix(in srgb, var(--cyan,#00A7E1) 16%, transparent)}
-  100%{box-shadow:0 0 0 0 transparent}
-}
-.ux-on .fx-p2{animation:fxP2 .6s cubic-bezier(.2,.7,.3,1)}
-@keyframes fxP2{
-  0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--cyan,#00A7E1) 75%, transparent); border-color:var(--cyan,#00A7E1)}
-  55%{box-shadow:0 0 0 13px color-mix(in srgb, var(--cyan,#00A7E1) 0%, transparent); border-color:var(--cyan,#00A7E1)}
-  100%{box-shadow:0 0 0 0 transparent}
-}
-.ux-on .fx-p3{animation:fxP3 .95s cubic-bezier(.2,.7,.3,1); position:relative; z-index:2}
-@keyframes fxP3{
-  0%{box-shadow:0 0 0 0 rgba(251,191,36,.85); border-color:#fbbf24; transform:scale(1)}
-  22%{transform:scale(1.03)}
-  60%{box-shadow:0 0 0 26px rgba(251,191,36,0); border-color:#fbbf24}
-  100%{box-shadow:0 0 0 0 transparent; transform:scale(1)}
-}
-.ux-on .fx-minus{animation:fxMinus .3s ease}
-@keyframes fxMinus{0%,100%{transform:translateX(0)}25%{transform:translateX(-2.5px)}75%{transform:translateX(2.5px)}}
-.ux-on .fx-bump{animation:fxBump .42s cubic-bezier(.2,.7,.3,1)}
-@keyframes fxBump{0%{transform:scale(1)}30%{transform:scale(1.18)}100%{transform:scale(1)}}
-.ux-on .fx-big{animation:fxBig .7s cubic-bezier(.2,.7,.3,1)}
-@keyframes fxBig{0%{transform:scale(1)}25%{transform:scale(1.4); color:#f59e0b}100%{transform:scale(1)}}
 
-/* Le gain qui s'envole. Position fixe : indépendant du défilement. */
-.ux-fx-pop{position:fixed; z-index:9000; font-weight:900; pointer-events:none; white-space:nowrap}
-.ux-fx-pop--s{font-size:14px; color:#10b981; animation:uxPopS .8s cubic-bezier(.2,.7,.3,1) forwards}
-@keyframes uxPopS{from{opacity:0; transform:translateY(4px)}20%{opacity:1}to{opacity:0; transform:translateY(-30px)}}
-.ux-fx-pop--m{font-size:20px; color:#10b981; text-shadow:0 4px 16px rgba(16,185,129,.4); animation:uxPopM 1s cubic-bezier(.2,.7,.3,1) forwards}
-@keyframes uxPopM{from{opacity:0; transform:translateY(6px) scale(.8)}22%{opacity:1; transform:translateY(-8px) scale(1.14)}to{opacity:0; transform:translateY(-52px) scale(1)}}
-.ux-fx-pop--l{
-  font-size:25px; color:#7c4a03; padding:9px 18px; border-radius:99px;
-  background:linear-gradient(135deg,#fde68a,#fbbf24);
-  box-shadow:0 18px 44px -14px rgba(251,191,36,.9);
-  animation:uxPopL 1.5s cubic-bezier(.2,.7,.3,1) forwards;
+   Trois paliers, calés sur les points RÉELLEMENT gagnés par le clic, lus dans
+   la variation du score affiché par saisie.js. Le barème peut donc changer
+   dans l'écran Barème sans que ces effets deviennent faux.
+
+     palier 1, moins de 5 points  la tuile respire, le chiffre fait un bond
+     palier 2, de 5 à 15 points   halo qui se propage, étincelles au clic
+     palier 3, plus de 15 points  feu d'artifice, gain en grand, score qui pulse
+
+   Le retrait a sa cinématique propre, volontairement terne : corriger ne se
+   récompense pas, mais on doit voir ce qu'on vient de perdre.
+
+   Toutes ces animations n'agissent que sur box-shadow, transform et
+   background. Aucune ne touche la mise en page, donc aucune ne peut décaler
+   une tuile voisine pendant qu'elle joue.
+   -------------------------------------------------------------------------- */
+.ux-on .fx-p0 { animation: fxP0 0.3s ease; }
+@keyframes fxP0 {
+    0%   { background: var(--white); }
+    45%  { background: var(--gray-100); }
+    100% { background: var(--white); }
 }
-@keyframes uxPopL{
-  from{opacity:0; transform:translate(-50%,10px) scale(.7)}
-  18%{opacity:1; transform:translate(-50%,-6px) scale(1.1)}
-  70%{opacity:1; transform:translate(-50%,-14px) scale(1)}
-  to{opacity:0; transform:translate(-50%,-46px) scale(.96)}
+
+.ux-on .fx-p1 { animation: fxP1 0.45s ease; }
+@keyframes fxP1 {
+    0%   { box-shadow: 0 0 0 0 rgba(0, 167, 225, 0.5); }
+    45%  { box-shadow: 0 0 0 5px rgba(0, 167, 225, 0.16); }
+    100% { box-shadow: 0 0 0 0 transparent; }
 }
-.ux-fx-pop--minus{font-size:13px; color:var(--muted,#5b6b83); animation:uxPopS .55s ease forwards}
+
+.ux-on .fx-p2 { animation: fxP2 0.6s cubic-bezier(0.2, 0.7, 0.3, 1); }
+@keyframes fxP2 {
+    0%   { box-shadow: 0 0 0 0 rgba(0, 167, 225, 0.75); border-color: var(--cyan); }
+    55%  { box-shadow: 0 0 0 13px rgba(0, 167, 225, 0); border-color: var(--cyan); }
+    100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* z-index sans position:relative : les tuiles d'un étage sont des éléments de
+   grille, et un élément de grille accepte z-index sans être positionné. C'est
+   ce qui évite d'ajouter une position ici, donc tout risque de décalage. */
+.ux-on .fx-p3 { animation: fxP3 0.95s cubic-bezier(0.2, 0.7, 0.3, 1); z-index: 2; }
+@keyframes fxP3 {
+    0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.85); border-color: #fbbf24; transform: scale(1); }
+    22%  { transform: scale(1.03); }
+    60%  { box-shadow: 0 0 0 26px rgba(251, 191, 36, 0); border-color: #fbbf24; }
+    100% { box-shadow: 0 0 0 0 transparent; transform: scale(1); }
+}
+
+.ux-on .fx-minus { animation: fxMinus 0.3s ease; }
+@keyframes fxMinus {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-2.5px); }
+    75%      { transform: translateX(2.5px); }
+}
+
+.ux-on .fx-bump { animation: fxBump 0.42s cubic-bezier(0.2, 0.7, 0.3, 1); }
+@keyframes fxBump {
+    0%   { transform: scale(1); }
+    30%  { transform: scale(1.18); }
+    100% { transform: scale(1); }
+}
+
+.ux-on .fx-big { animation: fxBig 0.7s cubic-bezier(0.2, 0.7, 0.3, 1); }
+@keyframes fxBig {
+    0%   { transform: scale(1); }
+    25%  { transform: scale(1.4); color: var(--warning); }
+    100% { transform: scale(1); }
+}
+
+/* Le gain qui s'envole. position:fixed et non absolute : le script donne des
+   coordonnées de clic, qui sont relatives à la fenêtre. */
+.ux-fx-pop {
+    position: fixed;
+    z-index: 9000;
+    font-weight: 800;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.ux-fx-pop--s {
+    font-size: 14px; color: var(--success);
+    animation: uxPopS 0.8s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+@keyframes uxPopS {
+    from { opacity: 0; transform: translateY(4px); }
+    20%  { opacity: 1; }
+    to   { opacity: 0; transform: translateY(-30px); }
+}
+.ux-fx-pop--m {
+    font-size: 20px; color: var(--success);
+    text-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
+    animation: uxPopM 1s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+@keyframes uxPopM {
+    from { opacity: 0; transform: translateY(6px) scale(0.8); }
+    22%  { opacity: 1; transform: translateY(-8px) scale(1.14); }
+    to   { opacity: 0; transform: translateY(-52px) scale(1); }
+}
+.ux-fx-pop--l {
+    font-size: 25px; color: #7c4a03;
+    padding: 9px 18px;
+    border-radius: var(--radius-full);
+    background: linear-gradient(135deg, #fde68a, var(--warning));
+    box-shadow: 0 18px 44px -14px rgba(251, 191, 36, 0.9);
+    animation: uxPopL 1.5s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+@keyframes uxPopL {
+    from { opacity: 0; transform: translate(-50%, 10px) scale(0.7); }
+    18%  { opacity: 1; transform: translate(-50%, -6px) scale(1.1); }
+    70%  { opacity: 1; transform: translate(-50%, -14px) scale(1); }
+    to   { opacity: 0; transform: translate(-50%, -46px) scale(0.96); }
+}
+.ux-fx-pop--minus {
+    font-size: 13px; color: var(--gray-500);
+    animation: uxPopS 0.55s ease forwards;
+}
+
 /* Le canvas des confettis. Ne capte jamais le clic. */
-#ux-fx-canvas{position:fixed; inset:0; z-index:8500; pointer-events:none}
+#ux-fx-canvas { position: fixed; inset: 0; z-index: 8500; pointer-events: none; }
 
 /* --------------------------------------------------------------------------
    5. TABLETTE ET TÉLÉPHONE
+
    La priorité du moment est l'ordinateur, mais la saisie doit rester utilisable
-   au pouce : onglets défilables, une tuile par ligne, + de 58 px.
+   au pouce : onglets défilables, et les cibles tactiles du projet, 44 px
+   minimum, tenues sur les deux boutons.
+
+   Aucune règle ici ne touche .etage-cols ni .metric--wide : saisie-events.css
+   gère déjà ces deux points de rupture, et les redéclarer était la deuxième
+   erreur de la v23.
    -------------------------------------------------------------------------- */
-@media (max-width:1023px){
-  .ux-on .ux-tabs{flex-wrap:wrap; gap:6px}
-  .ux-on .ux-score{width:100%; order:-1}
-  .ux-on .ux-tab-txt span{display:none}
-}
-@media (max-width:719px){
-  .ux-on .ux-tabs{padding:8px 0 10px}
-  .ux-on .ux-tabs-list{overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px}
-  .ux-on .ux-tab{flex:0 0 auto; padding:9px 12px; border:1px solid var(--border,#e4eaf2)}
-  .ux-on .ux-tab[aria-selected="false"]{border-color:transparent}
-  .ux-on .ux-tab-num{display:none}
-  .ux-on .metric{padding:11px 12px}
-  .ux-on .metric-input{font-size:31px; min-width:56px}
-  .ux-on .stepper-btn--plus{width:58px; height:58px; min-width:58px; border-radius:18px; font-size:27px}
-  .ux-on .stepper-btn--minus{width:36px; height:36px; min-width:36px}
-  .ux-on .etage-cols{grid-template-columns:1fr!important}
+@media (max-width: 1023px) {
+    .ux-on .ux-tabs { flex-wrap: wrap; gap: 6px; }
+    .ux-on .ux-score { width: 100%; order: -1; }
+    .ux-on .ux-tab-txt span { display: none; }
 }
 
-/* Un utilisateur qui a demandé moins d'animations dans son système n'en reçoit
-   aucune, y compris le feu d'artifice. */
-@media (prefers-reduced-motion:reduce){
-  .ux-on *, .ux-on *::before, .ux-on *::after{animation-duration:.001s!important; transition-duration:.001s!important}
+@media (max-width: 719px) {
+    .ux-on .ux-tabs { padding: 8px 0 10px; }
+    /* Les onglets défilent latéralement plutôt que de se comprimer : quatre
+       étiquettes lisibles qui glissent valent mieux que quatre illisibles. */
+    .ux-on .ux-tabs-list { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
+    .ux-on .ux-tab { flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--gray-200); }
+    .ux-on .ux-tab[aria-selected="false"] { border-color: transparent; }
+    .ux-on .ux-tab-num { display: none; }
+    .ux-on .metric-input { font-size: 28px; min-width: 56px; }
+    .ux-on .stepper-btn--plus { width: 56px; height: 56px; font-size: 26px; border-radius: 17px; }
+    .ux-on .stepper-btn--minus { width: 44px; height: 44px; }
+}
+
+/* Quelqu'un qui a demandé moins d'animations dans les réglages de son système
+   n'en reçoit aucune, y compris le feu d'artifice. Le script coupe déjà les
+   confettis de son côté, cette règle couvre le reste. */
+@media (prefers-reduced-motion: reduce) {
+    .ux-on *, .ux-on *::before, .ux-on *::after {
+        animation-duration: 0.001s !important;
+        transition-duration: 0.001s !important;
+    }
 }
