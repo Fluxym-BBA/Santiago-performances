@@ -22,12 +22,7 @@
          son tableau détaillé. -->
     <link rel="stylesheet" href="./css/profil-journee.css">
 
-    <!-- v23 · Refonte ergonomique de la saisie (onglets, tuiles, cinématiques).
-         Chargée en dernier : elle ne fait que surcharger app.css, qui n'a pas
-         été modifié. Toutes ses règles sont préfixées par .ux-on, classe posée
-         par js/saisie-ux.js : si le script ne tourne pas, la page garde son
-         apparence actuelle. -->
-    <link rel="stylesheet" href="./css/saisie-ux.css">
+
 </head>
 <body>
 
@@ -302,9 +297,6 @@
 
 <script src="./js/config.js"></script>
 <script type="module" src="./js/saisie.js"></script>
-<!-- v23 · Couche d'ergonomie : répartit les cartes de saisie.js en onglets,
-     affiche le score en permanence et joue les cinématiques de récompense.
-     Ne calcule rien, n'écrit rien, ne parle pas à Supabase. -->
-<script type="module" src="./js/saisie-ux.js"></script>
+
 </body>
 </html>
