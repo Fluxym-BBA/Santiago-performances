@@ -554,7 +554,7 @@
 
 .etage-head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 14px;
     margin-bottom: 12px;
 }
@@ -705,7 +705,11 @@
     justify-content: space-between;
 }
 
-.metric--col .metric-input { flex: 1 1 auto; min-width: 0; width: auto; }
+/* v24 : le chiffre ne s'étire plus pour remplir la tuile. Il garde sa largeur
+   propre, et c'est justify-content:space-between sur le .stepper qui pousse les
+   deux boutons à droite. Un champ étiré donnait un soulignement en pointillés
+   qui traversait toute la tuile, et rien ne disait plus où était le nombre. */
+.metric--col .metric-input { flex: 0 0 auto; }
 
 .metric--col .gauge { margin-top: 12px; }
 
@@ -718,10 +722,17 @@
    -------------------------------------------------------------------------- */
 .metric--wide {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(240px, 38%);
+    /* v24 : fit-content au lieu d'une largeur minimale fixe. Quand le compteur
+       n'a pas d'objectif, la colonne de droite disparaît au lieu de réserver
+       38 % de vide, et le chiffre remonte contre son libellé au lieu de flotter
+       au milieu de la ligne. La jauge, quand elle est là, garde ses 240 px et ne
+       dépasse pas 38 % de la ligne. */
+    grid-template-columns: minmax(0, 1fr) fit-content(38%);
     align-items: center;
-    gap: 24px;
+    gap: 10px 18px;
 }
+
+.metric--wide > .gauge { min-width: 240px; }
 
 .metric--wide .gauge { margin-top: 0; }
 
@@ -732,6 +743,15 @@
     padding: 14px 16px;
     border: 1px solid var(--gray-200);
     border-radius: var(--radius-md);
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+/* v24 : même réaction au survol que les tuiles en colonne, uniquement là où la
+   ligne large a un cadre. Hors étage, le cadre de la sous-carte suffit : c'est
+   la décision prise ci-dessus, on ne la défait pas au passage. */
+.etage-cols .metric--wide:hover {
+    border-color: rgba(0, 167, 225, 0.45);
+    box-shadow: 0 10px 24px -18px rgba(11, 32, 70, 0.55);
 }
 
 /* --------------------------------------------------------------------------
@@ -850,8 +870,17 @@
 
 .metric-input {
     order: -1;
-    width: auto;
-    min-width: 62px;
+    /* PIÈGE À NE PAS REFAIRE : width:auto sur un <input> ne veut pas dire « la
+       largeur du contenu ». C'est la largeur par défaut du champ, soit une
+       vingtaine de caractères. En police 34 px cela donne près de 400 px, qui
+       écrasaient le libellé à côté et étiraient le soulignement sur toute la
+       tuile. La largeur est donc exprimée en ch, l'unité du chiffre lui-même :
+       assez pour trois chiffres, ce qui couvre tous les compteurs de la journée.
+       Au delà de 999 le champ s'élargit tout seul, sans casser la mise en page,
+       parce que rien ne dépend de cette largeur. */
+    width: 3.4ch;
+    min-width: 0;
+    box-sizing: content-box;
     text-align: left;
     font-size: 34px;
     font-weight: 800;
@@ -925,7 +954,16 @@
    soixante pixels, et c'est voulu : deux compteurs sur dix concentrent
    l'essentiel des clics d'une journée.
    -------------------------------------------------------------------------- */
-.metric--wide .metric-input { font-size: 40px; min-width: 74px; }
+.metric--wide .metric-input { font-size: 40px; }
+
+/* Le libellé d'une ligne large est borné à 320 px, et le chiffre se place juste
+   après lui. Sans cette borne, le libellé prenait tout l'espace disponible et le
+   chiffre se retrouvait tantôt au milieu de la ligne, tantôt à l'extrême droite,
+   selon que le compteur avait un objectif ou non. Deux lignes voisines ne
+   plaçaient plus leur nombre au même endroit, et l'œil devait le chercher à
+   chaque fois. */
+.metric--wide .metric-top { justify-content: flex-start; gap: 22px; }
+.metric--wide .metric-label { flex: 1 1 320px; max-width: 320px; }
 .metric--wide .stepper-btn--plus { width: 62px; height: 62px; font-size: 29px; border-radius: 18px; }
 .metric--wide .stepper-btn--minus { width: 38px; height: 38px; }
 
@@ -997,7 +1035,7 @@
 }
 
 [data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .metric-input,
-[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .metric-input { flex: 1 1 auto; min-width: 0; }
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .metric-input { flex: 0 0 auto; }
 
 /* L'œil de l'objectif se replace en haut à droite de la tuile, comme dans les
    étages, au lieu de rester au milieu de la ligne. Le libellé lui laisse la
@@ -1016,8 +1054,8 @@
    téléphone sans que le bouton soit repoussé hors de la tuile.
    -------------------------------------------------------------------------- */
 @media (max-width: 719px) {
-    .metric-input { font-size: 30px; min-width: 56px; }
-    .metric--wide .metric-input { font-size: 34px; min-width: 62px; }
+    .metric-input { font-size: 30px; }
+    .metric--wide .metric-input { font-size: 34px; }
     .stepper-btn--plus,
     .metric--wide .stepper-btn--plus { width: 60px; height: 60px; font-size: 27px; }
     .stepper-btn--minus,

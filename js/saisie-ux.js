@@ -43,13 +43,13 @@
     { id:'pros',  ico:'📞', couleur:'#00A7E1', titre:'Prospection',
       sous:'Appels, issues, rendez-vous, e-mails', unite:'actions',
       cartes:['[data-card="prospection"]'], total:'[data-total="prospection"]' },
-    { id:'crm',   ico:'🗂️', couleur:'#6366f1', titre:'Enrichissement du CRM',
+    { id:'crm',   ico:'🗂️', couleur:'#6366f1', titre:'CRM',
       sous:'Entreprises et contacts créés', unite:'fiches',
       cartes:['[data-card="crm"]'], total:'[data-total="crm"]' },
     { id:'vente', ico:'🤝', couleur:'#10b981', titre:'Cycle de vente',
       sous:'Événements et sorties de pipeline', unite:'actions',
       cartes:['[data-card="pipeline"]','[data-card="outcome"]'], total:'[data-total="pipeline"]' },
-    { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Ce que la journée dit',
+    { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Bilan de la journée',
       sous:'Taux, décomposition du score, note du jour', unite:'score',
       cartes:[], total:'#day-score' }
   ];
@@ -184,10 +184,11 @@
      exactement au barème en vigueur. */
   const lireScore = () => nombre($('#day-score') ? $('#day-score').textContent : 0);
 
-  let attente = null, minuteur = null;
+  let attente = null, minuteur = null, differe = null;
   function armer(x, y, metric, sens){
     attente = { avant:lireScore(), x, y, metric, sens };
     clearTimeout(minuteur);
+    clearTimeout(differe);
     /* Filet : si le score ne bouge pas (compteur à zéro point, écriture
        refusée, journée verrouillée), on joue quand même un retour discret pour
        que le clic ne paraisse pas perdu. */
@@ -197,7 +198,30 @@
       if(a.sens > 0) celebre(0, a.x, a.y, a.metric);
     }, 900);
   }
+  /* POURQUOI ON ATTEND AVANT DE RÉCOMPENSER — corrigé le 29/08
+
+     Premier essai : on résolvait dès la première mutation du DOM. Résultat, le
+     clic ne déclenchait jamais que l'effet le plus terne, quel que soit le
+     nombre de points gagnés, y compris sur un rendez-vous.
+
+     La cause est dans l'ordre de paint() : elle met d'abord à jour les champs et
+     les totaux de chaque compteur, et n'écrit le score qu'à la toute fin, dans
+     paintDerived(). La première mutation arrive donc alors que #day-score porte
+     encore l'ancienne valeur : le delta valait zéro, et zéro point donne l'effet
+     minimal. La logique était juste, elle regardait simplement trop tôt.
+
+     Chaque mutation repousse maintenant la résolution de 90 ms. paint() enchaîne
+     ses écritures en quelques millisecondes, donc on lit toujours le score final,
+     une seule fois, et l'effet correspond aux points réellement gagnés. Le filet
+     de 900 ms reste au-dessus : si le score ne bouge pas du tout, le clic reçoit
+     quand même un retour discret. */
   function resoudre(){
+    if(!attente) return;
+    clearTimeout(differe);
+    differe = setTimeout(resoudreMaintenant, 90);
+  }
+
+  function resoudreMaintenant(){
     if(!attente) return;
     const a = attente; attente = null;
     clearTimeout(minuteur);

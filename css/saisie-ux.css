@@ -68,69 +68,74 @@
     z-index: 40;
     display: flex;
     align-items: stretch;
-    gap: 8px;
-    padding: 12px 0;
+    gap: 6px;
+    padding: 6px;
     margin-top: 20px;
-    /* Le fond reprend celui du body (--gray-50), sinon les tuiles qui passent
-       dessous en défilant restent visibles à travers la barre. */
-    background: linear-gradient(180deg, var(--gray-50) 74%, rgba(249, 250, 251, 0));
+    /* Une vraie barre, avec un fond opaque et un cadre. La v24 laissait les
+       onglets flotter sur le fond de la page : sans contenant, quatre boutons
+       espacés ne se lisent pas comme des onglets, et la barre paraissait posée
+       « dans les airs ». Le fond opaque est de toute façon obligatoire, puisque
+       la barre est collante et que les tuiles défilent derrière. */
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: 14px;
+    box-shadow: 0 6px 18px -12px rgba(11, 32, 70, 0.45);
 }
 
-.ux-on .ux-tabs-list { display: flex; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.ux-on .ux-tabs-list { display: flex; gap: 6px; flex: 1 1 auto; min-width: 0; }
 
 .ux-on .ux-tab {
     flex: 1 1 0;
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 11px;
-    padding: 11px 13px;
-    border-radius: var(--radius-lg);
+    gap: 10px;
+    padding: 9px 12px;
+    border: 0;
+    border-radius: 10px;
     text-align: left;
-    background: var(--white);
-    border: 1px solid var(--gray-200);
-    box-shadow: 0 1px 2px rgba(11, 32, 70, 0.05);
-    transition: background 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    background: transparent;
+    /* Le liseré de l'onglet actif est une ombre intérieure et non une bordure :
+       une bordure changerait la taille de la boîte, et les quatre onglets
+       sauteraient de deux pixels à chaque changement d'onglet. */
+    box-shadow: none;
+    transition: background 0.16s ease, box-shadow 0.16s ease;
     position: relative;
 }
 
 .ux-on .ux-tab:hover { background: var(--gray-50); }
-.ux-on .ux-tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.ux-on .ux-tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
 
-/* La couleur de l'onglet arrive par --ux-c, écrite en ligne par le script :
-   une seule règle sert les quatre onglets. */
 .ux-on .ux-tab-ico {
     flex: 0 0 auto;
-    width: 34px; height: 34px;
+    width: 32px; height: 32px;
     border-radius: var(--radius-md);
     display: grid;
     place-items: center;
-    font-size: 16px;
+    font-size: 15px;
     background: var(--gray-100);
 }
 
 .ux-on .ux-tab-txt { flex: 1 1 auto; min-width: 0; }
 
-/* Aucun texte tronqué, c'est une règle du projet : un libellé long passe à la
-   ligne, la tuile grandit. */
 .ux-on .ux-tab-txt b {
     display: block;
-    font-size: 13.5px; font-weight: 800; line-height: 1.2;
+    font-size: 13px; font-weight: 800; line-height: 1.25;
     color: var(--navy);
     overflow-wrap: anywhere;
 }
-.ux-on .ux-tab-txt span {
-    display: block;
-    margin-top: 2px;
-    font-size: 11px; font-weight: 500; line-height: 1.3;
-    color: var(--gray-400);
-    overflow-wrap: anywhere;
-}
+
+/* Le sous-titre de l'onglet est masqué. Sur quatre onglets côte à côte il
+   passait sur deux ou trois lignes, chaque onglet prenait une hauteur
+   différente et l'ensemble penchait. Le sous-titre reste dans le HTML : il est
+   lu par les lecteurs d'écran et reparaîtra si l'on repasse la barre à la
+   verticale un jour. */
+.ux-on .ux-tab-txt span { display: none; }
 
 .ux-on .ux-tab-num { flex: 0 0 auto; text-align: right; }
 .ux-on .ux-tab-num b {
     display: block;
-    font-size: 19px; font-weight: 800; line-height: 1;
+    font-size: 18px; font-weight: 800; line-height: 1;
     color: var(--navy);
     font-variant-numeric: tabular-nums;
 }
@@ -142,56 +147,42 @@
     color: var(--gray-400);
 }
 
-/* Onglet actif : liseré de couleur en haut plutôt qu'un fond plein. Le fond
-   plein aurait fait concurrence au bouton + , qui doit rester l'élément le plus
-   voyant de l'écran. */
+/* L'onglet actif : fond gris clair et trait de couleur sous le texte. Le fond
+   reste neutre pour ne pas concurrencer le bouton +, qui doit rester l'élément
+   le plus voyant de l'écran. */
 .ux-on .ux-tab[aria-selected="true"] {
-    border-color: var(--gray-300);
-    box-shadow: 0 2px 4px rgba(11, 32, 70, 0.06), 0 14px 30px -18px rgba(11, 32, 70, 0.4);
+    background: var(--gray-100);
+    box-shadow: inset 0 -3px 0 0 var(--ux-c, #00A7E1);
 }
-.ux-on .ux-tab[aria-selected="true"]::before {
-    content: '';
-    position: absolute;
-    left: -1px; right: -1px; top: -1px;
-    height: 4px;
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    background: var(--ux-c, #00A7E1);
-}
+.ux-on .ux-tab[aria-selected="true"] .ux-tab-ico { background: var(--white); }
 .ux-on .ux-tab[aria-selected="true"] .ux-tab-num b { color: var(--ux-c, #00A7E1); }
-
-.ux-on .ux-tab[aria-selected="false"] {
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-}
-.ux-on .ux-tab[aria-selected="false"]:hover { background: rgba(255, 255, 255, 0.7); }
 
 /* Pastille : cet onglet n'a rien de saisi. Un découpage en onglets cache le
    travail restant, il faut le redire sur l'étiquette, sinon un onglet oublié
    reste oublié toute la journée. */
 .ux-on .ux-tab-todo {
     position: absolute;
-    top: 8px; right: 8px;
-    width: 9px; height: 9px;
+    top: 6px; right: 6px;
+    width: 8px; height: 8px;
     border-radius: var(--radius-full);
     background: var(--warning);
-    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.2);
 }
 
-/* Score du jour, en miroir de #day-score, toujours à l'écran. Il n'est jamais
-   calculé ici : le script recopie le texte écrit par saisie.js. */
+/* Score du jour, toujours à l'écran. Il n'est jamais calculé ici : le script
+   recopie le texte écrit par saisie.js. */
 .ux-on .ux-score {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 11px;
-    padding: 9px 15px;
-    border-radius: var(--radius-lg);
+    gap: 10px;
+    padding: 8px 14px;
+    border-radius: 10px;
     color: var(--white);
     background: linear-gradient(150deg, var(--navy), var(--navy-light));
 }
 .ux-on .ux-score-n {
-    font-size: 26px; font-weight: 800; line-height: 1;
+    font-size: 24px; font-weight: 800; line-height: 1;
     font-variant-numeric: tabular-nums;
 }
 .ux-on .ux-score-t { display: flex; flex-direction: column; line-height: 1.25; }
@@ -202,7 +193,7 @@
 }
 .ux-on .ux-score-t i {
     font-style: normal;
-    font-size: 11.5px; font-weight: 600;
+    font-size: 11px; font-weight: 600;
     color: rgba(255, 255, 255, 0.85);
 }
 .ux-on .ux-score--boom { animation: uxScoreBoom 0.8s cubic-bezier(0.2, 0.7, 0.3, 1); }
@@ -406,9 +397,8 @@
    erreur de la v23.
    -------------------------------------------------------------------------- */
 @media (max-width: 1023px) {
-    .ux-on .ux-tabs { flex-wrap: wrap; gap: 6px; }
-    .ux-on .ux-score { width: 100%; order: -1; }
-    .ux-on .ux-tab-txt span { display: none; }
+    .ux-on .ux-tabs { flex-wrap: wrap; }
+    .ux-on .ux-score { width: 100%; order: -1; justify-content: center; }
 }
 
 @media (max-width: 719px) {
@@ -416,8 +406,7 @@
     /* Les onglets défilent latéralement plutôt que de se comprimer : quatre
        étiquettes lisibles qui glissent valent mieux que quatre illisibles. */
     .ux-on .ux-tabs-list { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
-    .ux-on .ux-tab { flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--gray-200); }
-    .ux-on .ux-tab[aria-selected="false"] { border-color: transparent; }
+    .ux-on .ux-tab { flex: 0 0 auto; }
     .ux-on .ux-tab-num { display: none; }
     /* Les tailles des compteurs sur écran étroit sont dans saisie-events.css,
        avec le reste de leur mise en page. */
