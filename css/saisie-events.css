@@ -671,11 +671,20 @@
 .metric--col {
     display: flex;
     flex-direction: column;
-    padding: 14px 16px 16px;
+    padding: 14px 16px 14px;
     border: 1px solid var(--gray-200);
     border-bottom: 1px solid var(--gray-200);
     border-radius: var(--radius-md);
     background: var(--white);
+    /* v24 : la tuile se soulève au survol. Uniquement bordure et ombre, jamais
+       une marge ni un padding, sinon les trois colonnes d'un étage se
+       décaleraient au passage de la souris. */
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.metric--col:hover {
+    border-color: rgba(0, 167, 225, 0.45);
+    box-shadow: 0 10px 24px -18px rgba(11, 32, 70, 0.55);
 }
 
 .metric--col:last-child { border-bottom: 1px solid var(--gray-200); }
@@ -781,6 +790,240 @@
     .etage-num { margin-left: -16px; width: 20px; height: 20px; line-height: 20px; font-size: 11px; }
     .etage-tot-num b { font-size: 22px; }
     .metric-total-val b { font-size: 19px; }
+}
+
+/* ==========================================================================
+   LA HIÉRARCHIE DE LA TUILE (v24)
+
+   POURQUOI CETTE SECTION EXISTE
+   Jusqu'ici, dans un compteur, tout avait le même poids visuel : le libellé, le
+   sous-titre, la jauge, le champ, le − et le +. Six éléments de même force, donc
+   aucun point d'entrée. L'œil doit choisir, et choisir fatigue. Sur un écran
+   qu'on ouvre tous les jours pendant des mois, cette fatigue décide si les
+   chiffres sont saisis ou non, et c'est le seul test qui compte pour cet outil.
+
+   Trois décisions, une par élément :
+
+     LE CHIFFRE DOMINE. C'est l'information. Il passe de 19 à 34 px et se place
+     avant les boutons. Il reste le même <input type="number"> qu'avant : taper
+     37 d'un coup fonctionne exactement comme avant, parce que Santiago saisit
+     tantôt au clic, tantôt au total, selon les jours.
+
+     LE + EST LE PLUS GROS ÉLÉMENT DE L'ÉCRAN. Cinquante-six pixels, contre
+     trente-huit avant. C'est le geste répété cent fois par jour ; il doit se
+     trouver sans être cherché, et se viser sans être visé.
+
+     LE − S'EFFACE. Trente-six pixels, gris, sans dégradé. Corriger est rare. Un
+     − aussi voyant que le + invite à se tromper, et une erreur de clic dans un
+     compteur d'activité déclarative ne se rattrape que de mémoire.
+
+   CE QUE CETTE SECTION NE FAIT PAS
+   Elle ne change aucun balisage. saisie.js n'a pas été modifié d'une ligne :
+   mêmes classes, mêmes identifiants, mêmes attributs data-act, data-key,
+   data-oeil, data-ech, donc tous les écouteurs et toutes les fonctions
+   existantes sont intacts. Elle ne touche pas non plus aux jauges, aux totaux
+   calculés par la base, à l'œil de visibilité ni aux lignes du cycle de vente.
+
+   PORTÉE
+   Ces règles surchargent .metric-input et .stepper-btn de app.css. C'est sans
+   effet ailleurs : saisie-events.css n'est chargé que par index.html, et ces
+   deux classes ne sont utilisées que par la saisie. app.css reste inchangé, ce
+   qui évite d'entrer en collision avec les autres chantiers en cours.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Le chiffre
+
+   order:-1 le fait passer devant les deux boutons. La propriété est posée sur
+   l'enfant d'un .stepper, qui est un flex en ligne dans les trois présentations
+   du compteur : la colonne, la ligne large et la ligne simple. Elle ne peut donc
+   pas déplacer le champ hors de sa tuile.
+
+   Bordure transparente sauf en bas, en pointillés : le chiffre se lit comme un
+   chiffre, et le pointillé dit quand même qu'on peut écrire dessus. Le cadre
+   complet ne revient qu'au moment où on écrit.
+
+   tabular-nums : sans elle, la largeur du champ saute en passant de 9 à 10, et
+   les trois colonnes d'un étage se décalent pendant la saisie.
+   -------------------------------------------------------------------------- */
+.stepper { gap: 10px; }
+
+.metric-input {
+    order: -1;
+    width: auto;
+    min-width: 62px;
+    text-align: left;
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    padding: 2px 8px;
+    font-variant-numeric: tabular-nums;
+    border: 1.5px solid transparent;
+    border-bottom: 1.5px dashed var(--gray-300);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+.metric-input:hover { background: rgba(0, 167, 225, 0.07); }
+
+.metric-input:focus {
+    border: 1.5px solid var(--cyan);
+    background: var(--white);
+}
+
+/* --------------------------------------------------------------------------
+   Les deux boutons
+   -------------------------------------------------------------------------- */
+.stepper-btn--minus {
+    order: 1;
+    width: 36px; height: 36px;
+    font-size: 17px;
+    background: transparent;
+    border: 1px solid var(--gray-200);
+    color: var(--gray-400);
+}
+
+.stepper-btn--minus:hover:not(:disabled) {
+    background: var(--gray-100);
+    border-color: var(--gray-300);
+    color: var(--danger);
+}
+
+.stepper-btn--plus {
+    order: 2;
+    width: 56px; height: 56px;
+    font-size: 26px;
+    border-radius: 16px;
+    box-shadow: 0 10px 22px -10px rgba(0, 167, 225, 0.75);
+}
+
+/* Le bouton s'enfonce au clic. Un compteur qui ne répond pas au geste laisse
+   croire que le clic est perdu, et fait cliquer deux fois. */
+.stepper-btn--plus:active:not(:disabled) { transform: scale(0.93); }
+
+/* --------------------------------------------------------------------------
+   Le libellé cède la première place au chiffre
+
+   Restreint aux compteurs saisissables : les totaux calculés et les lignes du
+   cycle de vente gardent leur libellé tel quel, puisqu'ils n'ont pas de chiffre
+   géant à côté pour prendre le relais.
+   -------------------------------------------------------------------------- */
+.metric--col .metric-label b,
+.metric--wide .metric-label b { font-size: 13.5px; }
+
+.metric--col .metric-label span,
+.metric--wide .metric-label span { font-size: 11.5px; line-height: 1.35; }
+
+/* --------------------------------------------------------------------------
+   La ligne large : le compteur le plus utilisé de la journée
+
+   Les appels passés et les e-mails envoyés sont seuls sur leur ligne et se
+   comptent par dizaines. Leur chiffre et leur bouton sont donc encore un cran
+   au-dessus des autres. C'est le seul endroit de l'écran où une cible dépasse
+   soixante pixels, et c'est voulu : deux compteurs sur dix concentrent
+   l'essentiel des clics d'une journée.
+   -------------------------------------------------------------------------- */
+.metric--wide .metric-input { font-size: 40px; min-width: 74px; }
+.metric--wide .stepper-btn--plus { width: 62px; height: 62px; font-size: 29px; border-radius: 18px; }
+.metric--wide .stepper-btn--minus { width: 38px; height: 38px; }
+
+/* --------------------------------------------------------------------------
+   Les cartes hors entonnoir : CRM et résultat du jour
+
+   Ces deux cartes rendent leurs compteurs en lignes simples, l'une sous l'autre.
+   À deux ou trois compteurs dans une demi-largeur, cela laissait une colonne de
+   blanc à droite du libellé et obligeait à faire défiler pour les atteindre.
+
+   Ils passent en grille de tuiles, comme les étages, PAR LE CSS SEUL : aucune
+   variante n'est ajoutée dans saisie.js, donc aucun risque sur le balisage.
+   Sont exclus les totaux calculés par la base et les lignes du cycle de vente,
+   qui ont besoin de toute la largeur pour leur champ d'entreprise et leur liste.
+   -------------------------------------------------------------------------- */
+[data-metrics="crm"],
+[data-metrics="outcome"] {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+    align-items: start;
+    margin-top: 4px;
+}
+
+[data-metrics="crm"] > .metric--events,
+[data-metrics="crm"] > .metric--total,
+[data-metrics="outcome"] > .metric--events,
+[data-metrics="outcome"] > .metric--total { grid-column: 1 / -1; }
+
+/* La tuile de ces deux cartes, obtenue sans la classe .metric--col : mêmes
+   cadre, même empilement, même alignement des boutons en bas. */
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total),
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) {
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    padding: 14px 16px;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: var(--white);
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total):hover,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total):hover {
+    border-color: rgba(0, 167, 225, 0.45);
+    box-shadow: 0 10px 24px -18px rgba(11, 32, 70, 0.55);
+}
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) > .metric-top,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) > .metric-top {
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+}
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .metric-label b,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .metric-label b { font-size: 13.5px; }
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .metric-label span,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .metric-label span { font-size: 11.5px; line-height: 1.35; }
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .stepper,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .stepper {
+    width: 100%;
+    margin-top: auto;
+    justify-content: space-between;
+}
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .metric-input,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .metric-input { flex: 1 1 auto; min-width: 0; }
+
+/* L'œil de l'objectif se replace en haut à droite de la tuile, comme dans les
+   étages, au lieu de rester au milieu de la ligne. Le libellé lui laisse la
+   place : sans ce padding, un titre long passerait dessous. */
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .oeil,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .oeil { position: absolute; top: 8px; right: 8px; }
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .metric-label,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .metric-label { padding-right: 26px; }
+
+/* --------------------------------------------------------------------------
+   Écrans étroits
+
+   La cible du pouce passe à 60 px et le − à 44, le minimum tactile du projet.
+   Le chiffre redescend légèrement pour que le tout tienne dans une colonne de
+   téléphone sans que le bouton soit repoussé hors de la tuile.
+   -------------------------------------------------------------------------- */
+@media (max-width: 719px) {
+    .metric-input { font-size: 30px; min-width: 56px; }
+    .metric--wide .metric-input { font-size: 34px; min-width: 62px; }
+    .stepper-btn--plus,
+    .metric--wide .stepper-btn--plus { width: 60px; height: 60px; font-size: 27px; }
+    .stepper-btn--minus,
+    .metric--wide .stepper-btn--minus { width: 44px; height: 44px; }
+    [data-metrics="crm"],
+    [data-metrics="outcome"] { grid-template-columns: 1fr; }
 }
 
 /* ==========================================================================

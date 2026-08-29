@@ -22,6 +22,13 @@
          son tableau détaillé. -->
     <link rel="stylesheet" href="./css/profil-journee.css">
 
+    <!-- v24 · Onglets de la saisie et cinématiques de récompense.
+         Chargée en dernier, elle ne contient QUE des classes qui lui sont
+         propres, préfixées ux- et fx-. La mise en page des compteurs, elle,
+         vit dans saisie-events.css : c'est la leçon de la v23, qui la
+         surchargeait depuis cette feuille et vidait les tuiles des étages. -->
+    <link rel="stylesheet" href="./css/saisie-ux.css">
+
 
 </head>
 <body>
@@ -297,6 +304,13 @@
 
 <script src="./js/config.js"></script>
 <script type="module" src="./js/saisie.js"></script>
+
+    <!-- v24 · Répartit les cartes de saisie.js dans les quatre onglets, garde le
+         score du jour à l'écran et joue les cinématiques. Ne calcule aucun
+         score, n'écrit rien, ne parle pas à Supabase : il lit le score déjà
+         affiché par saisie.js et déplace des cartes existantes. saisie.js n'est
+         pas modifié, tous ses écouteurs restent en place. -->
+    <script type="module" src="./js/saisie-ux.js"></script>
 
 </body>
 </html>

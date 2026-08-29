@@ -34,17 +34,17 @@
    colonne, hors de la tuile, et .card porte overflow:hidden. D'où des
    tuiles avec un libellé et rien d'autre.
 
-   RÈGLE TENUE ICI, SANS EXCEPTION : cette feuille ne redéclare AUCUNE
-   propriété de mise en page (display, flex-direction, flex-wrap, flex,
-   grid-template, position) sur un sélecteur qui ne lui appartient pas.
-   Seule exception assumée et documentée : .cards-grid--saisie passe à une
-   colonne, parce que les enfants de la grille sont désormais les panneaux
-   d'onglets et non plus les cartes.
+   RÈGLE TENUE ICI, SANS EXCEPTION : cette feuille ne touche à AUCUN sélecteur
+   du projet, sauf un seul, .cards-grid--saisie, qui passe à une colonne parce
+   que les enfants de la grille sont désormais les panneaux d'onglets et non plus
+   les cartes. Tout le reste ne concerne que ses propres classes, préfixées ux-
+   et fx-.
 
-   Ce qu'elle ne touche plus du tout, alors que la v23 y touchait :
-   .metric, .metric-top, .metric-label, .metric--col, .metric--wide,
-   .metric--total, .metric-total-val, .metric--events, .gauge et tous ses
-   enfants, .etage et tous ses enfants, .oeil.
+   Ce qu'elle ne touche plus du tout, alors que la v23 y touchait : .metric,
+   .metric-top, .metric-label, .metric--col, .metric--wide, .metric-total-val,
+   .metric--events, .stepper, .stepper-btn, .metric-input, .gauge et tous ses
+   enfants, .etage et tous ses enfants, .oeil. La hiérarchie de la tuile est
+   passée dans css/saisie-events.css, à sa place.
 
    Deuxième correction : la v23 utilisait --bg, --border, --muted et
    color-mix(). Aucune de ces trois variables n'existe dans app.css, les
@@ -250,75 +250,18 @@
 }
 
 /* --------------------------------------------------------------------------
-   3. LE CHIFFRE ET LES DEUX BOUTONS
+   3. LA HIÉRARCHIE DE LA TUILE : ELLE N'EST PLUS ICI
 
-   Le seul endroit où cette feuille retouche l'existant, et uniquement à
-   l'intérieur de .stepper, qui est un flex en ligne dans les deux
-   présentations (colonne et ligne large). Aucun display n'est redéclaré,
-   aucune largeur en pourcentage, aucun flex : rien qui puisse déplacer un
-   élément hors de sa tuile.
+   Le grand chiffre, le + dominant et le − effacé sont désormais dans
+   css/saisie-events.css, section « LA HIÉRARCHIE DE LA TUILE (v24) », c'est à
+   dire dans le fichier qui possède déjà toute la mise en page de la saisie.
 
-   Trois changements, un par intention :
-     - le chiffre passe devant les boutons et grossit : c'est l'information,
-       les boutons ne sont que le moyen ;
-     - le + est le seul élément de cette taille dans la tuile, donc le seul
-       geste que l'oeil trouve sans chercher ;
-     - le − reste visible mais nettement plus petit : corriger est rare, et une
-       correction aussi voyante que l'ajout invite à se tromper.
-
-   Le champ reste le même <input type="number"> qu'avant. Taper 37 d'un coup
-   marche toujours, onType() de saisie.js n'a pas bougé d'une ligne, et c'est
-   voulu : Santiago saisit tantôt au clic, tantôt au total.
+   La v23 les écrivait ici, en surcharge, et c'est ce qui a cassé l'écran :
+   surcharger depuis une feuille extérieure oblige à deviner les règles qu'on
+   recouvre, et une propriété de mise en page devinée de travers vide les tuiles.
+   Une mise en page se corrige là où elle est écrite. Cette feuille ne garde que
+   ce qui n'existe nulle part ailleurs : les onglets et les cinématiques.
    -------------------------------------------------------------------------- */
-.ux-on .stepper { gap: 10px; }
-
-.ux-on .metric-input {
-    order: -1;                 /* devant les deux boutons */
-    width: auto;
-    min-width: 64px;
-    text-align: left;
-    font-size: 30px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
-    padding: 4px 8px;
-    font-variant-numeric: tabular-nums;   /* la largeur ne saute pas de 9 à 10 */
-    /* Bordure transparente sauf en bas : le chiffre se lit comme un chiffre,
-       et le pointillé dit quand même qu'on peut écrire dessus. */
-    border: 1.5px solid transparent;
-    border-bottom: 1.5px dashed var(--gray-300);
-    border-radius: var(--radius-sm);
-    background: transparent;
-}
-.ux-on .metric-input:hover { background: rgba(0, 167, 225, 0.07); }
-.ux-on .metric-input:focus {
-    border: 1.5px solid var(--cyan);
-    background: var(--white);
-}
-
-.ux-on .stepper-btn--minus {
-    order: 1;
-    width: 34px; height: 34px;
-    font-size: 17px;
-    border-radius: var(--radius-sm);
-}
-
-.ux-on .stepper-btn--plus {
-    order: 2;
-    width: 52px; height: 52px;
-    font-size: 24px;
-    border-radius: 15px;
-}
-
-/* La tuile réagit au survol : elle dit qu'elle est cliquable avant qu'on ait
-   visé le bouton. box-shadow et border-color seulement, jamais une propriété
-   de mise en page ni un padding, pour que rien ne bouge au passage de la
-   souris et que les trois colonnes d'un étage restent alignées. */
-.ux-on .metric--col:hover,
-.ux-on .etage-cols .metric--wide:hover {
-    border-color: rgba(0, 167, 225, 0.45);
-    box-shadow: 0 10px 24px -18px rgba(11, 32, 70, 0.55);
-}
 
 /* --------------------------------------------------------------------------
    4. LES CINÉMATIQUES
@@ -377,18 +320,28 @@
     75%      { transform: translateX(2.5px); }
 }
 
+/* ATTENTION, POINT DE RENCONTRE AVEC LE CODE EXISTANT
+   onBump() appelle flash(key), qui pose .metric-input--flash sur le champ, et
+   app.css y attache animation:flash, un fond cyan avec un léger grossissement.
+   Nos deux classes visent le même élément. Comme « animation » est une propriété
+   unique et non cumulative, la dernière feuille chargée gagne : nos animations
+   remplacent celle d'app.css au lieu de s'y ajouter.
+
+   Elles reprennent donc son fond cyan à l'identique. Rien n'est perdu à l'écran,
+   et surtout aucune ligne de saisie.js n'a eu à changer : flash() est toujours
+   appelée, sa classe est toujours posée, seul son rendu est enrichi. */
 .ux-on .fx-bump { animation: fxBump 0.42s cubic-bezier(0.2, 0.7, 0.3, 1); }
 @keyframes fxBump {
-    0%   { transform: scale(1); }
+    0%   { transform: scale(1); background: rgba(0, 167, 225, 0.25); }
     30%  { transform: scale(1.18); }
-    100% { transform: scale(1); }
+    100% { transform: scale(1); background: transparent; }
 }
 
 .ux-on .fx-big { animation: fxBig 0.7s cubic-bezier(0.2, 0.7, 0.3, 1); }
 @keyframes fxBig {
-    0%   { transform: scale(1); }
+    0%   { transform: scale(1); background: rgba(251, 191, 36, 0.3); }
     25%  { transform: scale(1.4); color: var(--warning); }
-    100% { transform: scale(1); }
+    100% { transform: scale(1); background: transparent; }
 }
 
 /* Le gain qui s'envole. position:fixed et non absolute : le script donne des
@@ -466,9 +419,8 @@
     .ux-on .ux-tab { flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--gray-200); }
     .ux-on .ux-tab[aria-selected="false"] { border-color: transparent; }
     .ux-on .ux-tab-num { display: none; }
-    .ux-on .metric-input { font-size: 28px; min-width: 56px; }
-    .ux-on .stepper-btn--plus { width: 56px; height: 56px; font-size: 26px; border-radius: 17px; }
-    .ux-on .stepper-btn--minus { width: 44px; height: 44px; }
+    /* Les tailles des compteurs sur écran étroit sont dans saisie-events.css,
+       avec le reste de leur mise en page. */
 }
 
 /* Quelqu'un qui a demandé moins d'animations dans les réglages de son système
