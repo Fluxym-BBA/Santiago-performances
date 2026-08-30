@@ -32,6 +32,53 @@ export const supabase = createClient(
      'sales' : cycle de vente
    Les deux valeurs pour un compteur partagé. Un compte qui a les deux métiers
    voit l'union, dans l'ordre de déclaration ci-dessous. */
+
+/* ==========================================================================
+   OUVRIR OU FERMER UN COMPTEUR À UN MÉTIER
+   Écrit le 30/08/2026, en ouvrant les rendez-vous aux commerciaux, parce que
+   la question va se reposer et que la réponse n'était écrite nulle part.
+
+   UN SEUL LEVIER : le champ `jobs` de l'entrée concernée, ci-dessous. Il n'y a
+   rien d'autre à toucher, et surtout rien à écrire ailleurs.
+
+   CE QUI SUIT TOUT SEUL
+     metricsFor(profil)      page de saisie, tableau de bord, calendrier
+     metricsForAny(profils)  colonnes et classements de l'écran Équipe
+     objectifs.js            la liste réglable, filtrée par m.jobs
+     weightJobs(clé)         le rangement des poids dans l'écran Barème : un
+                             compteur ouvert aux deux métiers passe de lui-même
+                             du groupe « Propres au BDR » au groupe « Communs »
+   Aucun de ces cinq points ne redéclare la liste. Ils la lisent tous ici.
+
+   CE QUI NE SUIT PAS, ET QUI EST VOULU
+     activity_targets  aucun objectif n'existe pour le métier qui vient
+                       d'hériter du compteur. Ses jauges afficheront « Objectif :
+                       non défini » jusqu'à ce que quelqu'un les règle dans
+                       l'écran Objectifs. C'est le bon comportement : un objectif
+                       inventé par le code vaut moins que pas d'objectif du tout.
+     SCORE_WEIGHTS     le barème est AVEUGLE au métier. Un poids s'applique à
+                       quiconque remplit la colonne. Ouvrir un compteur, c'est
+                       donc ouvrir ses points, immédiatement et sans réglage.
+     SALES_EVENT_KINDS liste écrite en clair, délibérément non dérivée d'ici.
+                       Voir sa propre note : c'est un contrat avec la base, pas
+                       une mise en page.
+
+   CE QUE LA BASE EN PENSE : RIEN. Vérifié le 30/08/2026 sur les scripts du
+   dépôt. Il n'existe aucune dimension métier côté serveur.
+     metric_allowed()  liste blanche PLATE, sans métier (v14.1). Les trois
+                       compteurs de rendez-vous y sont déjà.
+     activity_targets  accepte n'importe quelle métrique pour n'importe quel
+                       métier ; la seule contrainte est metric <> ''.
+     trg_daily_activity_entonnoir, v_daily_kpi, la formule de score de la vue :
+                       aucun ne regarde is_bdr ni is_sales.
+   Conséquence, et c'est le point important : OUVRIR OU FERMER UN COMPTEUR À UN
+   MÉTIER NE DEMANDE JAMAIS DE MIGRATION.
+
+   AJOUTER UN COMPTEUR QUI N'EXISTE PAS, en revanche, en demande une, et dans
+   cet ordre : colonne sur daily_activity, entrée dans metric_allowed(), colonne
+   sur score_weights s'il doit peser, puis seulement l'entrée ici. Le code passé
+   avant la base répond « Métrique non autorisée » à chaque clic.
+   ========================================================================== */
 export const METRICS = [
     {
         key: 'companies_created', target: 'companies_target', group: 'crm',
@@ -132,17 +179,24 @@ export const METRICS = [
     {
         /* Rendez-vous OBTENU par la prospection, à ne pas confondre avec le
            RDV1 plus bas, qui est le rendez-vous TENU par le commercial. Deux
-           personnes, deux événements, deux compteurs : les additionner
-           compterait deux fois la même rencontre. */
+           événements distincts, deux compteurs : les additionner compterait
+           deux fois la même rencontre.
+
+           OUVERT AUX COMMERCIAUX LE 30/08/2026. Jusque-là l'étage 3 était
+           réservé au BDR et la phrase ci-dessus se lisait « deux personnes ».
+           Elle ne tient plus : un commercial qui prospecte lui-même obtient le
+           rendez-vous ET le tient. Ce que cela change au score est écrit sur
+           meetings_booked, plus bas. Aucune migration : voir le bloc « ouvrir
+           ou fermer un compteur à un métier » en tête de METRICS. */
         key: 'meetings_rescheduled', target: 'meetings_resched_target', group: 'calls',
-        level: 3, jobs: ['bdr'],
+        level: 3, jobs: ['bdr', 'sales'],
         label: 'RDV reprogrammé', short: 'RDV reprog.',
         hint: 'Un rendez-vous existant, annulé ou manqué, reposé', color: '#f59e0b',
         since: '2026-08-27'
     },
     {
         key: 'meetings_new', target: 'meetings_new_target', group: 'calls',
-        level: 3, jobs: ['bdr'],
+        level: 3, jobs: ['bdr', 'sales'],
         label: 'RDV, nouveau contact', short: 'RDV nouveau',
         hint: 'Rendez-vous avec un contact nouveau, ou revu après {mois} mois',
         color: '#10b981',
@@ -150,15 +204,34 @@ export const METRICS = [
     },
     {
         key: 'meetings_known', target: 'meetings_known_target', group: 'calls',
-        level: 3, jobs: ['bdr'],
+        level: 3, jobs: ['bdr', 'sales'],
         label: 'RDV, contact connu', short: 'RDV connu',
         hint: 'Rendez-vous avec un contact déjà connu', color: '#059669',
         since: '2026-08-27'
     },
     {
+        /* LE DOUBLE COMPTE, ASSUMÉ ET ÉCRIT ICI POUR QU'IL NE SE DÉCOUVRE PAS
+           DANS SIX MOIS.
+
+           Depuis le 30/08/2026 ce total est ouvert aux commerciaux, et le barème
+           est aveugle au métier : un commercial qui prospecte lui-même encaisse
+           25 points le jour où il décroche le rendez-vous, puis 25 points de plus
+           le jour où il le tient, via first_meetings. Cinquante points pour une
+           seule rencontre.
+
+           Ce n'est pas une erreur de calcul, c'est le prix d'un choix. Jusqu'ici
+           ces 50 points se partageaient entre deux personnes, un BDR et un
+           commercial ; ils vont désormais parfois à la même. Un commercial nourri
+           par un BDR reste donc structurellement en dessous d'un commercial qui
+           prospecte seul, à rencontres égales.
+
+           Deux façons de le corriger le jour où ça gêne, aucune n'est faite :
+           baisser le poids de first_meetings, ou déclarer un poids propre à
+           meetings_booked par métier, ce que score_weights ne sait pas faire
+           aujourd'hui, sa clé étant la métrique seule. */
         key: 'meetings_booked', target: 'meetings_target', group: 'calls',
         level: 3, derived: ['meetings_rescheduled', 'meetings_new', 'meetings_known'],
-        jobs: ['bdr'],
+        jobs: ['bdr', 'sales'],
         label: 'Rendez-vous obtenus', short: 'RDV',
         hint: 'Somme des trois catégories ci-dessus', color: '#10b981'
     },
