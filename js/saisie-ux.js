@@ -1,4 +1,26 @@
-/* v24.2 — Les points d'un clic sont connus AVANT le clic.
+/* v25 — L'ergonomie de la maquette v2, appliquée pour de vrai.
+
+   TROIS CHANGEMENTS PAR RAPPORT À LA v24.2
+
+   1. Les onglets suivent le découpage de la maquette validée, et il est
+      cohérent : les e-mails ne sont plus dans l'onglet des appels mais avec
+      l'enrichissement du CRM. Ce sont les deux activités au clavier de la
+      journée, elles se saisissent ensemble ; l'entonnoir téléphonique se
+      saisit à part, avec le casque sur les oreilles.
+
+   2. Le compteur de chaque onglet est calculé à partir des compteurs qu'il
+      contient réellement, et non plus recopié d'un total de carte. Le total
+      « prospection » écrit par saisie.js additionne les appels et les
+      e-mails : recopié sur l'onglet des appels, il annonçait vingt-sept
+      actions au-dessus de vingt et un appels.
+
+   3. Les deux blocs de lecture de la maquette sont là : l'entonnoir du jour
+      dans l'onglet des appels, et « d'où viennent les points » dans le bilan.
+      Les deux sont calculés depuis ce qui est déjà à l'écran, sans une seule
+      requête de plus.
+
+   RAPPEL DE LA v24.2, qui reste vrai : les points d'un clic sont connus AVANT
+   le clic.
 
    La version précédente lisait la variation de #day-score après coup. C'était
    fragile pour deux raisons, toutes deux constatées à l'écran :
@@ -13,7 +35,7 @@
 
    Les points sont maintenant calculés à partir du barème lui-même, sans le
    dupliquer, et l'effet part dans le même geste que le clic. */
-import { METRICS, SCORE_WEIGHTS } from './api.js';
+import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
 
 (() => {
   'use strict';
@@ -34,19 +56,40 @@ import { METRICS, SCORE_WEIGHTS } from './api.js';
      Un onglet dont toutes les cartes sont masquées par saisie.js (selon le
      métier de la personne) disparaît de lui-même : un BDR voit trois onglets,
      un commercial en voit quatre. */
+  /* Définition des onglets, dans l'ordre de la maquette v2.
+
+     `cartes`  les cartes de index.html à ranger dans le panneau ;
+     `compte`  les compteurs dont la somme s'affiche sur l'étiquette. Ce sont des
+               CLÉS DE MÉTRIQUE, pas un total de carte : c'est la seule façon que
+               le nombre annoncé par l'onglet soit exactement celui de ce qu'il
+               contient ;
+     `total`   le total de carte que cette couche prend en charge, quand le
+               découpage en onglets a rendu faux celui de saisie.js.
+
+     Un onglet dont toutes les cartes sont masquées par saisie.js selon le métier
+     de la personne disparaît de lui-même : un BDR voit trois onglets, un
+     commercial en voit trois autres. */
   const ONGLETS = [
-    { id:'pros',  ico:'📞', couleur:'#00A7E1', titre:'Prospection',
-      sous:'Appels, issues, rendez-vous, e-mails', unite:'actions',
-      cartes:['[data-card="prospection"]'], total:'[data-total="prospection"]' },
-    { id:'crm',   ico:'🗂️', couleur:'#6366f1', titre:'Enrichissement du CRM',
-      sous:'Entreprises et contacts créés', unite:'fiches',
-      cartes:['[data-card="crm"]'], total:'[data-total="crm"]' },
+    { id:'appels', ico:'📞', couleur:'#00A7E1', titre:'Appels et rendez-vous',
+      sous:'Passés, décrochés, rendez-vous obtenus', unite:'appels',
+      cartes:['[data-card="prospection"]'],
+      compte:['calls_made'],
+      total:{ sel:'[data-total="prospection"]', cles:['calls_made'] } },
+
+    { id:'crm', ico:'🗂️', couleur:'#6366f1', titre:'E-mails et CRM',
+      sous:'Envois, entreprises, contacts', unite:'actions',
+      cartes:['[data-card="emails"]', '[data-card="crm"]'],
+      compte:['emails_sent', 'companies_created', 'contacts_created'],
+      total:{ sel:'[data-total="emails"]', cles:['emails_sent'] } },
+
     { id:'vente', ico:'🤝', couleur:'#10b981', titre:'Cycle de vente',
       sous:'Événements et sorties de pipeline', unite:'actions',
-      cartes:['[data-card="pipeline"]','[data-card="outcome"]'], total:'[data-total="pipeline"]' },
+      cartes:['[data-card="pipeline"]', '[data-card="outcome"]'],
+      compte:['first_meetings', 'proposals_sent', 'no_go', 'deals_dropped', 'deals_lost'] },
+
     { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Ce que la journée dit',
-      sous:'Taux, décomposition du score, note du jour', unite:'score',
-      cartes:[], total:'#day-score' }
+      sous:'Taux, points, note du jour', unite:'points',
+      cartes:[], compte:null }
   ];
 
   const $  = (s, r) => (r || document).querySelector(s);
@@ -160,6 +203,47 @@ import { METRICS, SCORE_WEIGHTS } from './api.js';
   /* Trois paliers, les mêmes que les cinématiques : la couleur du bouton annonce
      l'effet qu'il va déclencher, et la pastille dit combien il rapporte. */
   function palierDe(points){ return points >= 10 ? 3 : points >= 4 ? 2 : 1; }
+
+  /* Valeur affichée d'un compteur, lue à l'écran et jamais recalculée.
+
+     Trois cas, dans cet ordre :
+       - un total dérivé (appels aboutis, rendez-vous obtenus, appels avec
+         échange) est la somme de ses parts. On refait l'addition plutôt que de
+         lire le total affiché, exactement pour la raison expliquée dans
+         paintDerived() de saisie.js : la réponse de la base arrive trois cents
+         millisecondes après la frappe, et lire un total encore ancien afficherait
+         un taux calculé sur l'avant-dernière valeur ;
+       - un compteur saisissable a un champ #in-<clé> ;
+       - un compteur du cycle de vente n'a pas de champ mais un #count-<clé>,
+         puisque ses lignes viennent d'événements.
+     Un compteur absent de l'écran, parce qu'il n'est pas du métier de la
+     personne, vaut zéro sans faire d'histoire. */
+  function valeurDe(cle){
+    const m = METRIC_BY_KEY[cle];
+    if(m && m.derived) return m.derived.reduce((t, k) => t + valeurDe(k), 0);
+    const champ = document.getElementById('in-' + cle);
+    if(champ) return nombre(champ.value);
+    const compte = document.getElementById('count-' + cle);
+    if(compte) return nombre(compte.textContent);
+    return 0;
+  }
+  const somme = cles => (cles || []).reduce((t, k) => t + valeurDe(k), 0);
+
+  /* Les libellés du barème sont réglables depuis la base : on les échappe avant
+     de les injecter, comme partout ailleurs dans le projet. */
+  const echappe = t => String(t == null ? '' : t)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  /* Couleur de lecture d'un compteur. Reprise de la maquette validée : la même
+     famille de bleus pour l'entonnoir téléphonique, le vert pour ce qui conclut,
+     l'ambre et les violets pour le travail au clavier. */
+  const COULEURS = {
+    calls_made:'#00A7E1', calls_connected:'#0ea5e9', calls_engaged:'#0284c7',
+    meetings_booked:'#10b981', first_meetings:'#10b981', proposals_sent:'#059669',
+    emails_sent:'#f59e0b', companies_created:'#6366f1', contacts_created:'#8b5cf6'
+  };
+  const couleurDe = cle => COULEURS[cle] || 'var(--cyan)';
 
   /* La récompense dépend des points réellement gagnés, pas du compteur touché. */
   /* ON NE TOUCHE PLUS AU NOMBRE. app.css animait déjà le champ via flash(),
@@ -314,11 +398,14 @@ import { METRICS, SCORE_WEIGHTS } from './api.js';
       liste.appendChild(b);
 
       const pan = document.createElement('div');
-      pan.className = 'ux-panel';
+      /* Une classe par onglet : la maquette ne met pas les mêmes colonnes dans
+         l'entonnoir téléphonique et dans le bilan. */
+      pan.className = 'ux-panel ux-panel--' + p.o.id;
       pan.dataset.ux = p.o.id;
       pan.setAttribute('role', 'tabpanel');
       g.appendChild(pan);
       p.cartes.forEach(c => pan.appendChild(c)); /* déplacement, pas recréation */
+      poserBlocs(p.o.id, pan);
       panneaux[p.o.id] = { pan, bouton:b, conf:p.o, cartes:p.cartes };
     });
 
@@ -403,18 +490,244 @@ import { METRICS, SCORE_WEIGHTS } from './api.js';
     });
   }
 
+  /* ------------------------------------------- les deux blocs de lecture (v25)
+
+     La maquette validée ne se contente pas de compter : elle donne à lire. Deux
+     blocs, tous les deux calculés à partir de ce qui est DÉJÀ à l'écran, donc
+     sans une requête de plus et sans rien ajouter à la base.
+
+       l'entonnoir du jour        onglet des appels, colonne de droite
+       d'où viennent les points   onglet du bilan
+
+     Les autres blocs de la maquette qui manquent encore, l'histogramme des
+     quatorze derniers jours, la série de saisie et l'anneau d'objectif, ont
+     tous besoin de données que cet écran ne charge pas. Ils sont volontairement
+     laissés de côté ici plutôt que remplis de chiffres inventés.
+
+     RÈGLE D'ÉCRITURE, la même que pour les pastilles : on ne réécrit un bloc que
+     si son contenu a changé. Ces blocs vivent dans la grille surveillée par
+     l'observateur ; écrire à chaque passage relancerait l'observateur en boucle. */
+  let boiteEntonnoir = null, boitePoints = null;
+  let dernierEntonnoir = '', dernierPoints = '';
+
+  function boite(titre, classe){
+    const d = document.createElement('div');
+    d.className = 'ux-box ' + classe;
+    d.innerHTML = '<div class="ux-box-h"></div><div class="ux-box-b"></div>';
+    $('.ux-box-h', d).textContent = titre;
+    return d;
+  }
+
+  let colonneTotaux = null;
+
+  function poserBlocs(id, pan){
+    if(id === 'appels'){
+      const col = document.createElement('div');
+      col.className = 'ux-col';
+      colonneTotaux = document.createElement('div');
+      colonneTotaux.className = 'ux-tots';
+      boiteEntonnoir = boite("L'entonnoir du jour", 'ux-box--funnel');
+      col.appendChild(colonneTotaux);
+      col.appendChild(boiteEntonnoir);
+      pan.appendChild(col);
+    }
+    if(id === 'bilan') rangerBilan(pan);
+  }
+
+  /* Les totaux calculés quittent l'en-tête de leur étage pour la colonne de
+     droite. Ils sont DÉPLACÉS : #total-calls_connected, #gauge-meetings_booked
+     et l'œil de chacun gardent leur identifiant, donc saisie.js continue de les
+     peindre sans savoir qu'ils ont changé de place.
+
+     Appelée à chaque rafraîchissement et pas seulement au démarrage : si
+     buildCards() reconstruit les cartes, les totaux repoussent dans leur
+     en-tête et cette fonction les remet où il faut. Elle ne fait rien quand il
+     n'y a rien à déplacer, donc elle ne coûte rien. */
+  function deplacerTotaux(){
+    if(!colonneTotaux) return;
+    const restes = document.querySelectorAll('.etage-head > .etage-tot');
+    if(!restes.length) return;
+    restes.forEach(tot => {
+      const cle = tot.dataset.metric;
+      const pts = pointsDuClic(cle);
+      if(pts > 0 && !$('.ux-pts', tot)){
+        const b = document.createElement('span');
+        b.className = 'ux-pts';
+        b.setAttribute('aria-hidden', 'true');
+        b.textContent = pts + (pts > 1 ? ' pts' : ' pt');
+        tot.appendChild(b);
+      }
+      colonneTotaux.appendChild(tot);
+    });
+  }
+
+  /* Le bilan reprend la disposition de la maquette : les taux en tuiles sur une
+     rangée, puis deux colonnes, les points à gauche et la note à droite.
+
+     TOUT EST DÉPLACÉ, RIEN N'EST RECRÉÉ. #kpi-connect, #kpi-engage, #kpi-meeting,
+     #kpi-effort, #kpi-prev, #day-notes et #score-explain gardent leurs
+     identifiants et leur place dans le document : saisie.js continue d'écrire
+     dedans sans savoir que le décor a changé. C'est aussi pour cela qu'aucun taux
+     n'est recalculé ici : il n'y a qu'un seul endroit qui les calcule. */
+  function rangerBilan(pan){
+    const corps = $('.card-body', pan);
+    if(!corps || corps.dataset.uxRange) return;
+    corps.dataset.uxRange = '1';
+
+    const taux = ['#kpi-connect', '#kpi-engage', '#kpi-meeting', '#kpi-effort', '#kpi-prev']
+      .map(sel => { const el = $(sel, corps); return el ? el.closest('.metric') : null; })
+      .filter(Boolean);
+    if(taux.length){
+      const g = document.createElement('div');
+      g.className = 'ux-rates';
+      corps.insertBefore(g, corps.firstChild);
+      taux.forEach(m => g.appendChild(m));
+    }
+
+    const deux = document.createElement('div');
+    deux.className = 'ux-bilan-2';
+
+    boitePoints = boite("D'où viennent les points", 'ux-box--points');
+    deux.appendChild(boitePoints);
+
+    const zone = $('#day-notes', corps);
+    if(zone){
+      const note = boite('📝 Note du jour', 'ux-box--note');
+      const titre = zone.previousElementSibling;
+      if(titre && titre.classList.contains('subcard-title')) titre.remove();
+      $('.ux-box-b', note).appendChild(zone);
+      deux.appendChild(note);
+    }
+
+    corps.appendChild(deux);
+    /* Le « comment est calculé ce score ? » repasse en dernier : c'est un replié
+       de référence, il n'a rien à faire entre les taux et la note. */
+    const expl = $('#score-explain', corps);
+    if(expl) corps.appendChild(expl);
+  }
+
+  /* L'entonnoir du jour. Quatre barres et trois taux, calculés sur les valeurs
+     de l'écran. Il ne remplace pas les taux du bilan : ici on lit des VOLUMES qui
+     se rétrécissent, là-bas des POURCENTAGES. La maquette montrait les deux, et
+     c'est le dessin qui fait comprendre le métier en un coup d'œil. */
+  function peindreEntonnoir(){
+    if(!boiteEntonnoir) return;
+    const dispo = !!document.getElementById('in-calls_made');
+    if(boiteEntonnoir.hidden !== !dispo) boiteEntonnoir.hidden = !dispo;
+    if(!dispo) return;
+
+    const a = valeurDe('calls_made'), b = valeurDe('calls_connected'),
+          e = valeurDe('calls_engaged'), r = valeurDe('meetings_booked');
+    /* Largeurs rapportées aux appels passés, avec un plancher de 5 % : une barre
+       de zéro pixel de large ne se lit pas comme un zéro, elle se lit comme un
+       bogue d'affichage. Le nombre est de toute façon écrit à droite. */
+    const max = Math.max(a, 1);
+    const l = n => Math.max(5, Math.round(n / max * 100));
+    const pc = (x, y) => y > 0 ? Math.round(x / y * 100) + ' %' : '–';
+    const ligne = (lab, n, w, c) =>
+      '<div class="ux-f-row"><span class="ux-f-lab">' + lab + '</span>'
+      + '<span class="ux-f-track"><span class="ux-f-fill" style="width:' + w + '%;background:' + c + '">'
+      + (n > 0 ? n : '') + '</span></span><span class="ux-f-n">' + n + '</span></div>';
+    const inter = (g1, d1) => '<div class="ux-f-rate"><span>' + g1 + '</span><span>' + d1 + '</span></div>';
+
+    const html =
+      ligne('Appels passés', a, l(a), '#00A7E1')
+      + inter('soit', '<b>' + pc(b, a) + '</b> de décrochés')
+      + ligne('Décrochés', b, l(b), '#0ea5e9')
+      + inter('dont', '<b>' + pc(e, b) + '</b> avec un vrai échange')
+      + ligne('Avec échange', e, l(e), '#0284c7')
+      + inter('qui donnent', '<b>' + pc(r, e) + '</b> de rendez-vous'
+              + (r > 0 ? ' · ' + Math.round(a / r) + ' appels par rendez-vous' : ''))
+      + ligne('Rendez-vous', r, l(r), '#10b981');
+
+    if(html === dernierEntonnoir) return;
+    dernierEntonnoir = html;
+    $('.ux-box-b', boiteEntonnoir).innerHTML = html;
+  }
+
+  /* D'où viennent les points. Le barème vient de la base, les valeurs de
+     l'écran : ce bloc dit donc toujours la vérité du jour, y compris après un
+     réglage dans l'écran Barème.
+
+     Le total affiché en bas est la somme des lignes, et non le score lu dans
+     #day-score. Les deux doivent être égaux ; s'ils divergent un jour, c'est un
+     écart réel entre le barème du navigateur et celui de la vue SQL, et il vaut
+     mieux le voir que le masquer en recopiant le score. */
+  function peindrePoints(){
+    if(!boitePoints) return;
+    const lignes = SCORE_WEIGHTS
+      .map(w => ({ cle:w.key, icone:w.icon, label:w.label, poids:Number(w.w) || 0, v:valeurDe(w.key) }))
+      .filter(x => x.poids > 0 && x.v > 0)
+      .map(x => { x.pts = x.v * x.poids; return x; })
+      .sort((x, y) => y.pts - x.pts);
+    const total = lignes.reduce((t, x) => t + x.pts, 0);
+
+    const html = lignes.length
+      ? lignes.map(x => {
+          const part = total > 0 ? Math.round(x.pts / total * 100) : 0;
+          return '<div class="ux-sr" style="--ux-tc:' + couleurDe(x.cle) + '">'
+            + '<span>' + echappe(x.icone) + '</span>'
+            + '<span class="ux-sr-l">' + echappe(x.label) + '</span>'
+            + '<span class="ux-sr-c">' + x.v + ' × ' + x.poids + '</span>'
+            + '<span class="ux-sr-v">' + x.pts + ' pts</span>'
+            + '<span class="ux-sr-share"><i style="width:' + part + '%"></i></span></div>';
+        }).join('')
+        + '<div class="ux-sr ux-sr--tot"><span>Σ</span><span class="ux-sr-l">Total du jour</span>'
+        + '<span class="ux-sr-c"></span><span class="ux-sr-v">' + total + ' pts</span></div>'
+      : '<p class="ux-vide">Rien de saisi pour le moment. Le premier appel du jour vaut déjà un point.</p>';
+
+    if(html === dernierPoints) return;
+    dernierPoints = html;
+    $('.ux-box-b', boitePoints).innerHTML = html;
+  }
+
+  /* Les deux totaux de carte que cette couche reprend à sa charge.
+
+     saisie.js écrit dans [data-total="prospection"] la somme des appels ET des
+     e-mails, ce qui était juste quand les deux vivaient dans la même carte. Ils
+     sont maintenant dans deux cartes et deux onglets : le nombre affiché en
+     face de « Appels et rendez-vous » doit être celui des appels.
+
+     On ne se bat pas avec saisie.js sur le même nœud : son total est masqué par
+     la feuille de style et le nôtre est écrit à côté. Sinon la valeur clignoterait
+     de 27 à 21 à chaque enregistrement. Sans le script, la feuille ne s'applique
+     pas et le total d'origine réapparaît tel quel. */
+  function peindreTotaux(){
+    Object.keys(panneaux).forEach(k => {
+      const conf = panneaux[k].conf;
+      if(!conf.total) return;
+      const src = $(conf.total.sel);
+      if(!src) return;
+      let mien = src.nextElementSibling;
+      if(!mien || !mien.classList.contains('ux-total')){
+        mien = document.createElement('span');
+        mien.className = 'ux-total';
+        src.parentNode.insertBefore(mien, src.nextSibling);
+      }
+      const txt = String(somme(conf.total.cles));
+      if(mien.textContent !== txt) mien.textContent = txt;
+    });
+  }
+
   /* Chiffres des onglets, pastille « rien de saisi », score en miroir. */
   function rafraichir(){
     poserPastilles();
+    deplacerTotaux();
+    peindreTotaux();
+    peindreEntonnoir();
+    peindrePoints();
     const sc = lireScore();
     const n = $('#ux-score-n');
     if(n && n.textContent !== String(sc)) n.textContent = sc;
     Object.keys(panneaux).forEach(k => {
       const e = panneaux[k];
-      const src = e.conf.total ? $(e.conf.total) : null;
-      const v = src ? nombre(src.textContent) : 0;
+      /* Le nombre de l'onglet est la somme de SES compteurs, calculée ici. La
+         v24 recopiait un total de carte, et l'onglet des appels annonçait la
+         somme des appels et des e-mails. L'onglet du bilan, lui, n'a pas de
+         compteur : il affiche le score. */
+      const v = e.conf.compte ? somme(e.conf.compte) : sc;
       const cible = $('.ux-tab-num b', e.bouton);
-      if(cible) cible.textContent = v;
+      if(cible && cible.textContent !== String(v)) cible.textContent = v;
       /* Un onglet masqué par le métier reste masqué. */
       e.bouton.hidden = !e.cartes.some(c => !estMasquee(c));
       const manque = v === 0 && k !== 'bilan' && !e.bouton.hidden;

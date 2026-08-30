@@ -143,35 +143,64 @@
                  n'appartient au métier de la personne affichée. -->
             <section class="card card--wide" data-card="prospection">
                 <div class="card-header">
-                    <div class="card-icon card-icon--cyan">🎯</div>
+                    <div class="card-icon card-icon--cyan">📞</div>
                     <div>
-                        <div class="card-title">Prospection</div>
-                        <div class="card-subtitle">Mes actions sortantes du jour</div>
+                        <!-- TITRE CHANGÉ EN v25 : la carte ne contient plus que le
+                             téléphone, les e-mails ayant leur propre carte juste en
+                             dessous. « Prospection » couvrait les deux et devenait
+                             faux ; il devenait surtout incohérent avec l'onglet du
+                             même nom, qui n'avait pas le même contenu. -->
+                        <div class="card-title">Appels et rendez-vous</div>
+                        <div class="card-subtitle">Passés, décrochés, rendez-vous obtenus</div>
                     </div>
-                    <div class="card-total"><span data-total="prospection">0</span><small>actions</small></div>
+                    <div class="card-total"><span data-total="prospection">0</span><small>appels</small></div>
                 </div>
                 <div class="card-body card-body--pros">
 
                     <!-- SOUS-CARTE : LES APPELS, EN TROIS LIGNES
 
-                         data-sub-for porte maintenant la sous-carte entière et
-                         non plus son seul titre : un groupe hors métier fait
-                         disparaître le cadre avec lui, au lieu de laisser un
-                         encadré vide. buildCards() n'a pas changé de sélecteur. -->
+                         data-sub-for porte la sous-carte entière et non plus son
+                         seul titre : un groupe hors métier fait disparaître le cadre
+                         avec lui, au lieu de laisser un encadré vide.
+                         buildCards() n'a pas changé de sélecteur.
+
+                         Le titre « 📞 Appels téléphoniques » a été retiré en v25 :
+                         il répétait mot pour mot celui de la carte, qui est juste
+                         au-dessus. Le cadre de la sous-carte est neutralisé par
+                         saisie-events.css quand elle est seule dans la carte, sinon
+                         on lisait deux encadrés imbriqués sans rien entre eux. -->
                     <section class="subcard" data-sub-for="calls">
-                        <div class="subcard-title">📞 Appels téléphoniques</div>
                         <div data-metrics="calls"></div>
                     </section>
 
-                    <!-- SOUS-CARTE : LES E-MAILS
-                         Un seul compteur, donc une ligne large : le mettre en
-                         colonne étroite à côté de rien aurait fabriqué un vide. -->
-                    <section class="subcard" data-sub-for="emails">
-                        <div class="subcard-title">✉️ E-mails de prospection</div>
-                        <div data-metrics="emails"></div>
-                    </section>
-
                 </div>
+            </section>
+
+            <!-- CARTE 1 bis : LES E-MAILS (v25)
+
+                 SORTIE DE LA CARTE PROSPECTION. Elle y était en sous-carte, ce qui
+                 mettait l'envoi d'e-mails dans le même bloc que l'entonnoir
+                 téléphonique alors que le geste, le rythme et l'outil n'ont rien à
+                 voir. Regroupée ici avec l'enrichissement du CRM, comme dans la
+                 maquette validée : ce sont les deux activités « au clavier » de la
+                 journée, et elles se saisissent ensemble.
+
+                 data-metrics="emails" est posé sur le corps de la carte, comme pour
+                 le CRM : buildCards() cherche cet attribut dans tout le document, il
+                 le trouve ici sans rien changer à saisie.js.
+
+                 data-sub-for="emails" est conservé pour que la carte disparaisse
+                 chez quelqu'un qui n'a pas ce compteur dans son métier. -->
+            <section class="card" data-card="emails" data-sub-for="emails">
+                <div class="card-header">
+                    <div class="card-icon card-icon--warning">✉️</div>
+                    <div>
+                        <div class="card-title">E-mails de prospection</div>
+                        <div class="card-subtitle">Mes envois sortants du jour</div>
+                    </div>
+                    <div class="card-total"><span data-total="emails">0</span><small>e-mails</small></div>
+                </div>
+                <div class="card-body" data-metrics="emails"></div>
             </section>
 
             <!-- CARTE 2 : ENRICHISSEMENT DU CRM (BDR) -->

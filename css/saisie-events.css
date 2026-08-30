@@ -1232,3 +1232,146 @@
     flex-wrap: wrap;
     row-gap: 2px;
 }
+
+/* ==========================================================================
+   v25 — LES E-MAILS SORTENT DE LA CARTE PROSPECTION
+
+   index.html ne met plus les e-mails en sous-carte des appels : ils ont leur
+   propre carte, rangée avec l'enrichissement du CRM. Deux conséquences de mise
+   en page, écrites ici parce que c'est ce fichier qui possède la mise en page de
+   l'écran de saisie.
+   ========================================================================== */
+
+/* 1. La sous-carte des appels est désormais seule dans la carte. Son cadre
+      dessinait alors un encadré à l'intérieur d'un encadré, sans rien entre les
+      deux traits. On garde l'élément, parce que saisie.js s'en sert pour faire
+      disparaître le groupe chez qui n'a pas les appels dans son métier, mais on
+      lui retire toute apparence. Le sélecteur :only-child fait que le cadre
+      revient tout seul le jour où une deuxième sous-carte reviendrait. */
+.card-body--pros > .subcard:only-child {
+    margin-top: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+
+/* 2. La ligne des e-mails passe en une colonne dans sa nouvelle carte.
+
+      buildCards() rend le groupe emails en variante « wide », c'est à dire
+      libellé à gauche et jauge à droite. C'était juste dans une carte de mille
+      deux cents pixels ; dans une carte de moitié, le libellé plafonné à 320 px
+      et la jauge à 240 px minimum se disputent la largeur et la jauge finit
+      écrasée. Empilées, les deux respirent, et le compteur reste sur la même
+      ligne que son nombre. */
+[data-metrics="emails"] .metric--wide {
+    grid-template-columns: 1fr;
+    row-gap: 4px;
+}
+
+/* La jauge n'a plus besoin de son plancher de 240 px : elle occupe toute la
+   largeur de la carte. Le garder l'empêcherait de se réduire sur un téléphone. */
+[data-metrics="emails"] .metric--wide > .gauge { min-width: 0; }
+
+/* ==========================================================================
+   v26 — L'EN-TÊTE D'ÉTAGE COMPACTE, ET LE TOTAL QUI S'EN VA
+
+   Dans la maquette validée, un étage tient sur une ligne : « 1 · PASSÉS · tous
+   les appels sortants ». Le total calculé, lui, n'est pas dans l'en-tête mais
+   dans la colonne de droite, avec l'entonnoir.
+
+   Deux raisons de le sortir, et la seconde compte plus que la première :
+     - l'en-tête de l'étage 3 réservait 272 px à un bloc haut de trois lignes
+       (jauge comprise), ce qui creusait un vide blanc à côté du titre ;
+     - un total calculé N'EST PAS SAISISSABLE. Le mettre au milieu de ce qui se
+       clique invite à essayer de le cliquer. Rangé à droite avec les autres
+       chiffres de lecture, la colonne de gauche ne contient plus que ce sur
+       quoi on peut agir.
+   ========================================================================== */
+.etage-titre {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+}
+.etage-titre b {
+    font-size: 12.5px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+.etage-titre span { font-size: 11.5px; }
+
+/* Le total déplacé par la couche UX dans la colonne de droite. La largeur fixe
+   de 272 px est écrite quelques centaines de lignes plus haut, dans ce
+   fichier : c'est donc ici qu'on la défait, et pas depuis une feuille voisine.
+   Sans le script, ce sélecteur ne correspond à rien et l'en-tête reprend sa
+   forme d'origine. */
+.ux-tots .etage-tot {
+    position: relative;
+    width: auto;
+    padding: 14px 16px 15px;
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+}
+.ux-tots .etage-tot .etage-tot-num { align-items: center; }
+.ux-tots .etage-tot .etage-tot-num b { font-size: 30px; }
+.ux-tots .etage-tot .gauge { margin-top: 12px; }
+
+/* Le rappel « reste 277 en 23 jours ouvrés » passe en gris discret. Il reste
+   affiché, parce que c'est la seule ligne de l'écran qui traduit un objectif
+   annuel en effort quotidien, mais il ne doit pas peser autant que le compteur
+   lui-même : en bleu vif, il attirait l'œil avant le nombre saisi. */
+.gauge-rest {
+    color: var(--gray-400);
+    font-size: 10.5px;
+    font-weight: 600;
+}
+
+/* La ligne large repasse sur une seule colonne (v26).
+
+   Elle était en deux colonnes, le compteur à gauche et la jauge à droite. La
+   maquette validée met la jauge en pleine largeur sous le compteur, et elle a
+   raison sur trois points : la barre est deux fois plus longue donc deux fois
+   plus lisible, la légende « 223 sur 500 » n'est plus coupée, et la tuile se
+   lit dans le même ordre que toutes les autres, action puis progression.
+
+   Cette règle vient après celle de la v24 et la remplace ; elle rend aussi
+   inutile le cas particulier écrit plus haut pour les e-mails, qui reste sans
+   effet mais sans dommage. */
+.metric--wide {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+}
+.metric--wide > .gauge { min-width: 0; }
+
+/* ==========================================================================
+   v26 — LA TUILE EN COLONNE DÉBORDAIT
+
+   Vu au banc de rendu, présent depuis la v24 : dans une tuile d'étage, le gros
+   bouton « + » sortait du cadre par la droite. La ligne du bas contient quatre
+   choses côte à côte, et la somme dépassait la largeur disponible :
+
+     le nombre       ~70 px  (34 px de corps, 3,4 caractères de large)
+     la pastille     ~48 px  (« 25 pts »)
+     le moins         36 px
+     le plus          56 px
+     trois écarts     24 px
+     ------------------------
+     total          ~234 px  pour 218 px utiles dans une tuile de 250 px
+
+   Les boutons ne rétrécissent pas (flex-shrink: 0, à raison : un bouton qui
+   maigrit devient une cible qu'on rate), donc c'est le dernier de la ligne qui
+   sortait. On ne corrige pas en autorisant le retour à la ligne, ce qui ferait
+   sauter la hauteur des tuiles d'un étage à l'autre, mais en rendant chaque
+   pièce un peu plus compacte. La hiérarchie est conservée : le nombre reste
+   deux fois plus gros que le libellé, et le « + » reste une fois et demie plus
+   grand que le « − ».
+   ========================================================================== */
+.metric--col .metric-input { font-size: 30px; width: 2.4ch; flex: 0 1 auto; min-width: 0; }
+.metric--col .stepper { gap: 6px; }
+.metric--col .stepper-btn--plus { width: 52px; height: 52px; font-size: 24px; border-radius: 15px; }
+.metric--col .ux-pts { font-size: 9.5px; padding: 2px 6px; }
+
+/* Ceinture et bretelles : si un jour un libellé de barème plus long élargit la
+   pastille, c'est elle qui cède, jamais le bouton. */
+.metric--col .ux-pts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

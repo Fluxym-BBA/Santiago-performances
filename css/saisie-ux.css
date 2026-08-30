@@ -85,7 +85,11 @@
 .ux-on .ux-tabs-list { display: flex; gap: 6px; flex: 1 1 auto; min-width: 0; }
 
 .ux-on .ux-tab {
-    flex: 1 1 0;
+    /* 0 1 auto et non 1 1 0 : chaque onglet prend la largeur de son titre. En
+       parts égales, « Appels et rendez-vous » et « CRM » recevaient la même
+       place, donc le premier passait sur deux lignes pendant que le second
+       flottait dans du vide. */
+    flex: 0 1 auto;
     min-width: 0;
     display: flex;
     align-items: center;
@@ -102,6 +106,15 @@
     transition: background 0.16s ease, box-shadow 0.16s ease;
     position: relative;
 }
+
+/* UN ONGLET MASQUÉ DOIT DISPARAÎTRE.
+
+   Le script pose l'attribut hidden sur l'onglet dont toutes les cartes sont hors
+   du métier de la personne. Sauf que display: flex ci-dessus l'emporte sur la
+   règle [hidden] { display: none } du navigateur : jusqu'à la v24.2, un BDR
+   voyait un onglet « Cycle de vente » vide, et un commercial un onglet
+   « Appels » vide. Vu au banc de rendu, corrigé ici. */
+.ux-on .ux-tab[hidden] { display: none; }
 
 .ux-on .ux-tab:hover { background: var(--gray-50); }
 .ux-on .ux-tab:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
@@ -122,7 +135,12 @@
     display: block;
     font-size: 13px; font-weight: 800; line-height: 1.25;
     color: var(--navy);
-    overflow-wrap: anywhere;
+    /* Sur une seule ligne, coupée par des points de suspension si la barre est
+       trop étroite. Un titre d'onglet sur deux lignes déséquilibre la barre
+       entière, et sous 719 px les onglets défilent de toute façon. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Le sous-titre de l'onglet est masqué. Sur quatre onglets côte à côte il
@@ -233,6 +251,26 @@
     animation: uxPanel 0.18s ease-out;
 }
 @keyframes uxPanel { from { opacity: 0; transform: translateY(4px); } }
+
+/* 2 bis. UNE DISPOSITION PAR ONGLET (v25)
+
+   La maquette validée ne met pas les mêmes colonnes dans les trois onglets, et
+   c'est ce qui fait que chacun tient sur un écran.
+
+     appels   les compteurs à gauche, l'entonnoir du jour à droite
+     crm      les e-mails et le CRM côte à côte
+     vente    le cycle de vente et les sorties côte à côte
+     bilan    une seule colonne, le bloc se divise lui-même à l'intérieur
+
+   La carte des appels porte .card--wide, qui vaut grid-column: 1 / -1 dans
+   saisie-events.css. Dans la grille de la page c'est exact : la carte traverse.
+   Dans un panneau à deux colonnes, cela l'obligerait à traverser aussi, et
+   l'entonnoir passerait dessous. Remise à grid-column: auto, ici et nulle part
+   ailleurs. C'est la seule propriété de mise en page du projet que cette feuille
+   surcharge, et elle le fait sur un sélecteur qu'elle possède, .ux-panel. */
+.ux-on .ux-panel--appels.is-on { grid-template-columns: minmax(0, 1fr) 320px; }
+.ux-on .ux-panel--appels .card--wide { grid-column: auto; }
+.ux-on .ux-panel--bilan.is-on { grid-template-columns: 1fr; }
 
 /* Même seuil que .cards-grid--saisie dans saisie-events.css : deux colonnes de
    170 px sur un téléphone ne servent personne. */
@@ -440,3 +478,213 @@
         transition-duration: 0.001s !important;
     }
 }
+
+/* --------------------------------------------------------------------------
+   6. LES BLOCS DE LECTURE (v25)
+
+   Trois blocs repris de la maquette validée : l'entonnoir du jour, les taux en
+   tuiles et « d'où viennent les points ». Tous les trois sont du balisage que
+   cette feuille possède, sauf les tuiles de taux, qui sont les .metric du
+   « Résultat du jour » DÉPLACÉES dans une grille par le script. On les habille
+   ici, on ne les recrée pas : leurs identifiants restent ceux que saisie.js
+   remplit.
+   -------------------------------------------------------------------------- */
+.ux-on .ux-box {
+    background: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-lg);
+    padding: 16px 18px 18px;
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(11, 32, 70, 0.06));
+}
+
+.ux-on .ux-box-h {
+    font-size: 11.5px; font-weight: 900;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--gray-400);
+    margin-bottom: 12px;
+}
+
+.ux-on .ux-vide {
+    margin: 0;
+    font-size: 12.5px; line-height: 1.5;
+    color: var(--gray-500);
+}
+
+/* L'entonnoir. Trois colonnes fixes : le libellé aligné à droite contre sa
+   barre, la barre, le nombre. Les libellés alignés à droite font que les quatre
+   barres commencent au même pixel, sans quoi l'entonnoir ne se lit pas comme un
+   entonnoir. */
+.ux-on .ux-box--funnel .ux-box-b { display: flex; flex-direction: column; gap: 7px; }
+
+.ux-on .ux-f-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr) 34px;
+    align-items: center;
+    gap: 9px;
+}
+.ux-on .ux-f-lab {
+    font-size: 11px; font-weight: 800; line-height: 1.2;
+    text-align: right;
+    color: var(--gray-600);
+}
+.ux-on .ux-f-track {
+    height: 28px;
+    border-radius: 9px;
+    background: var(--gray-100);
+    overflow: hidden;
+}
+/* La largeur est animée, jamais la hauteur ni la position : une barre qui pousse
+   ne peut pas décaler la tuile voisine pendant qu'elle pousse. */
+.ux-on .ux-f-fill {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    min-width: 30px;
+    padding: 0 9px;
+    border-radius: 9px;
+    color: var(--white);
+    font-size: 12.5px; font-weight: 900;
+    font-variant-numeric: tabular-nums;
+    transition: width 0.4s cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.ux-on .ux-f-n {
+    font-size: 12px; font-weight: 900;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
+}
+.ux-on .ux-f-rate {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 9px;
+    font-size: 10.5px; font-weight: 700;
+    color: var(--gray-400);
+}
+.ux-on .ux-f-rate span:first-child { text-align: right; }
+.ux-on .ux-f-rate b { color: var(--gray-600); font-weight: 900; }
+
+/* Les taux du bilan, en tuiles.
+
+   Le script déplace les cinq lignes .metric dans cette grille. Deux règles
+   seulement les concernent, et aucune ne touche à une propriété de mise en page
+   que saisie-events.css aurait déjà posée : ces lignes-là sont des .metric
+   ordinaires, pas des .metric--col ni des .metric--wide. C'est précisément la
+   distinction que la v23 n'avait pas faite. */
+.ux-on .ux-rates {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+.ux-on .ux-rates .metric {
+    padding: 12px 14px;
+    border: 1px solid var(--gray-200);
+    border-bottom: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: var(--gray-50);
+}
+/* column-reverse et non column : le nombre est le dernier enfant dans le HTML de
+   index.html, et c'est lui qui doit se lire en premier. Inverser en CSS évite de
+   toucher au HTML, donc de casser l'ordre de lecture d'un lecteur d'écran, qui
+   entend bien « taux d'appels aboutis » puis sa valeur. */
+.ux-on .ux-rates .metric-top {
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    gap: 6px;
+}
+.ux-on .ux-rates .metric-label { flex: 0 0 auto; }
+.ux-on .ux-rates .metric-label b { font-size: 12px; }
+.ux-on .ux-rates .metric-label span { font-size: 10.5px; }
+
+/* Le bilan se divise en deux : les points à gauche, la note à droite. */
+.ux-on .ux-bilan-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: start;
+}
+.ux-on .ux-box--note .ux-box-b { display: flex; }
+.ux-on .ux-box--note .notes-area { margin: 0; }
+
+/* D'où viennent les points. Une ligne par action, la barre de part en dessous :
+   le lecteur voit d'un coup que ses deux rendez-vous font la moitié de sa
+   journée et ses quarante appels un quart. */
+.ux-on .ux-box--points .ux-box-b { display: flex; flex-direction: column; }
+
+.ux-on .ux-sr {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto 62px;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--gray-100);
+    font-size: 12.5px;
+}
+.ux-on .ux-sr:last-child { border-bottom: 0; }
+.ux-on .ux-sr-l { font-weight: 700; color: var(--gray-600); }
+.ux-on .ux-sr-c {
+    font-size: 11px; font-weight: 700;
+    color: var(--gray-400);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.ux-on .ux-sr-v {
+    text-align: right; font-weight: 900;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
+}
+.ux-on .ux-sr-share {
+    grid-column: 1 / -1;
+    height: 4px;
+    border-radius: var(--radius-full);
+    background: var(--gray-100);
+    overflow: hidden;
+}
+.ux-on .ux-sr-share i {
+    display: block; height: 100%;
+    background: var(--ux-tc, var(--cyan));
+    transition: width 0.3s ease;
+}
+.ux-on .ux-sr--tot {
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--gray-200);
+    border-bottom: 0;
+}
+.ux-on .ux-sr--tot .ux-sr-l { color: var(--navy); font-weight: 900; }
+
+/* Les deux totaux de carte repris par le script.
+
+   Celui de saisie.js est masqué et non remplacé : le script écrit son nombre
+   dans un frère juste à côté. Se battre à deux pour le même nœud de texte ferait
+   clignoter la valeur à chaque enregistrement. Sans le script, .ux-on n'est pas
+   posé, ces règles ne s'appliquent pas et les totaux d'origine réapparaissent. */
+.ux-on [data-total="prospection"],
+.ux-on [data-total="emails"] { display: none; }
+
+/* --------------------------------------------------------------------------
+   6 bis. LES BLOCS DE LECTURE SUR UN PETIT ÉCRAN
+
+   Même seuil que le reste : sous 1020 px tout passe en une colonne. L'entonnoir
+   se retrouve alors SOUS les compteurs, ce qui est le bon ordre : on saisit
+   d'abord, on lit ensuite.
+   -------------------------------------------------------------------------- */
+@media (max-width: 1020px) {
+    .ux-on .ux-panel--appels.is-on { grid-template-columns: 1fr; }
+    .ux-on .ux-bilan-2 { grid-template-columns: 1fr; }
+}
+
+/* --------------------------------------------------------------------------
+   7. LA COLONNE DE LECTURE (v26)
+
+   Tout ce qui se lit et ne se saisit pas est rassemblé à droite : les totaux
+   calculés d'abord, l'entonnoir ensuite. À gauche, uniquement ce qui se clique.
+   C'est la répartition de la maquette validée, et c'est aussi ce qui permet de
+   ne plus faire défiler l'onglet.
+   -------------------------------------------------------------------------- */
+.ux-on .ux-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ux-on .ux-tots { display: flex; flex-direction: column; gap: 14px; }
+
+/* La pastille de points des totaux calculés. Posée en haut à droite parce que
+   ces blocs n'ont pas de « + » à côté duquel se ranger. */
+.ux-on .ux-tots .ux-pts { position: absolute; top: 12px; right: 14px; }
+.ux-on .ux-tots .etage-tot-num .oeil { margin-right: 46px; }
