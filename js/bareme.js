@@ -30,9 +30,9 @@
       lecture juste pour comparer deux individus.
 
    4. UN SEUL BARÈME, DEUX MÉTIERS. Le sélecteur de métier ne crée pas un
-      barème par métier : il choisit ce qu'on regarde. Les douze champs restent
+      barème par métier : il choisit ce qu'on regarde. Les dix-huit champs restent
       dans le DOM, cachés en display:none, et l'enregistrement porte toujours
-      sur les douze poids. Deux raisons de tenir ce choix : une valeur tapée
+      sur les dix-huit poids. Deux raisons de tenir ce choix : une valeur tapée
       puis masquée n'est pas perdue au changement de vue, et les huit poids
       propres à un métier n'ont de toute façon aucun effet sur l'autre, qui ne
       saisit jamais ces actions. Ce qui n'est pas comparable, c'est le score
@@ -77,6 +77,20 @@ const JOB_VIEWS = [
    écrite ici : elle est demandée à weightJobs(), qui la lit dans METRICS. Un
    poids dont les deux métiers se servent est « commun », les autres sont
    propres à leur métier. */
+/* Les trois totaux de l'entonnoir, sortis du rangement par métier depuis la v30.
+
+   Ce sont des colonnes du barème comme les autres, mais elles ne se règlent plus
+   de la même façon : depuis la v30 les points vivent dans les six catégories, et
+   ces trois-là sont à zéro. Les laisser mélangées aux catégories, dans le groupe
+   « Communs aux deux métiers », c'était offrir six champs et trois pièges au
+   milieu, tous nommés « Rendez-vous » ou presque.
+
+   Elles ne sont pas retirées de l'écran pour autant. Elles sont la seule chose
+   qui donne encore des points aux journées d'avant l'entonnoir, et un poids qui
+   existe en base sans apparaître nulle part est un poids que personne ne pourra
+   corriger le jour où il aura été mis là par erreur. */
+const LEGACY_KEYS = ['calls_connected', 'calls_engaged', 'meetings_booked'];
+
 const WEIGHT_GROUPS = [
     {
         key: 'both', title: 'Communs aux deux métiers',
@@ -92,6 +106,14 @@ const WEIGHT_GROUPS = [
         key: 'sales', title: 'Propres au commercial',
         note: 'Sans effet sur le score d\'un BDR, qui ne saisit jamais ces actions.',
         match: j => j.includes('sales') && !j.includes('bdr')
+    },
+    {
+        key: 'legacy', title: 'Les trois totaux, avant l\'entonnoir',
+        note: 'À laisser à zéro. Un total S\'AJOUTE à chacune de ses catégories, il ne la remplace pas : '
+            + 'mettre 5 ici donne 5 points de plus à chacun des trois rendez-vous. Ces poids ne servent plus '
+            + 'qu\'aux journées antérieures à l\'entonnoir, où le détail par catégorie n\'existait pas.',
+        keys: LEGACY_KEYS,
+        hint: 's\'ajoute à chacune de ses catégories'
     }
 ];
 
@@ -145,21 +167,34 @@ function formWeights() {
     return out;
 }
 
-/** Les poids d'un groupe, dans l'ordre de SCORE_WEIGHTS. */
-const weightsOfGroup = g => SCORE_WEIGHTS.filter(x => g.match(weightJobs(x.key)));
+/* Les poids d'un groupe, dans l'ordre de SCORE_WEIGHTS.
+
+   Un groupe qui nomme ses clés les prend telles quelles. Les autres se servent
+   dans METRICS, en laissant de côté ce qu'un groupe explicite a déjà réclamé :
+   sans ce retrait, les trois totaux apparaîtraient deux fois à l'écran, une fois
+   parmi les communs et une fois dans leur propre bloc, avec le même id de champ.
+   Deux <input> de même id, c'est formWeights() qui ne lit plus que le premier. */
+function weightsOfGroup(g) {
+    if (g.keys) return SCORE_WEIGHTS.filter(x => g.keys.includes(x.key));
+    return SCORE_WEIGHTS.filter(x =>
+        !LEGACY_KEYS.includes(x.key) && g.match(weightJobs(x.key)));
+}
 
 /** Vrai si ce groupe de poids est visible dans la vue métier courante. */
 function groupVisible(g) {
     const want = jobOf().jobs;
     if (!want) return true;
     if (g.key === 'both') return true;
+    /* Les totaux hérités concernent les deux métiers et sont surtout un piège :
+       ils restent visibles quelle que soit la vue. */
+    if (g.key === 'legacy') return true;
     return want.includes(g.key);
 }
 
 /**
  * Construit les champs depuis SCORE_WEIGHTS, groupés par métier.
  *
- * Les douze champs sont écrits à chaque fois, y compris ceux d'un métier qu'on
+ * Les dix-huit champs sont écrits à chaque fois, y compris ceux d'un métier qu'on
  * ne regarde pas : c'est ce qui permet à formWeights() de lire une valeur tapée
  * avant un changement de vue au lieu de la remplacer par le poids enregistré.
  * Le masquage est fait en display:none inline, sans classe nouvelle dans
@@ -172,12 +207,12 @@ function renderWeights() {
     const cur = currentWeights();
     const allowed = canWriteAny(myProfile());
 
-    const fieldHtml = x => `
+    const fieldHtml = (x, g) => `
         <div class="field">
             <label for="w-${x.key}">${x.icon} ${escapeHtml(x.label)}</label>
             <input type="number" id="w-${x.key}" min="0" max="1000" step="1"
                    inputmode="numeric" value="${cur[x.key]}" ${allowed ? '' : 'disabled'}>
-            <p class="field-note">points par ${escapeHtml(x.label.toLowerCase())}</p>
+            <p class="field-note">${escapeHtml(g.hint || `points par ${x.label.toLowerCase()}`)}</p>
         </div>`;
 
     grid.innerHTML = WEIGHT_GROUPS.map(g => {
@@ -187,7 +222,7 @@ function renderWeights() {
         <div data-wgroup="${g.key}"${groupVisible(g) ? '' : ' style="display:none"'}>
             <p class="seg-label">${escapeHtml(g.title)}
                 <span class="td-muted">· ${escapeHtml(g.note)}</span></p>
-            <div class="form-grid">${list.map(fieldHtml).join('')}</div>
+            <div class="form-grid">${list.map(x => fieldHtml(x, g)).join('')}</div>
         </div>`;
     }).join('');
 

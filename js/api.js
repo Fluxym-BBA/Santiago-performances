@@ -357,9 +357,50 @@ export const isEventMetric = key => SALES_EVENT_KINDS.includes(key);
    vue SQL applique exactement le même repli, avec les mêmes nombres. */
 export const SCORE_WEIGHTS = [
     { key: 'calls_made', w: 1, icon: '📞', label: 'Appel passé', plural: 'appels passés' },
-    { key: 'calls_connected', w: 2, icon: '✅', label: 'Appel abouti', plural: 'appels aboutis' },
-    { key: 'calls_engaged', w: 4, icon: '💬', label: 'Appel avec échange', plural: 'appels avec échange' },
-    { key: 'meetings_booked', w: 25, icon: '🤝', label: 'Rendez-vous', plural: 'rendez-vous' },
+
+    /* LES SIX CATÉGORIES DE L'ENTONNOIR, arrivées avec la migration v30 du
+       30/08/2026.
+
+       L'entonnoir de la v14 a coupé les appels aboutis et les rendez-vous en
+       trois catégories chacun, et la page de saisie les compte séparément depuis.
+       Le barème, lui, était resté celui de la v8 : les trois rendez-vous valaient
+       25 points tous les trois, les deux échanges 6 points tous les deux, et le
+       propriétaire de l'outil n'avait aucun moyen de dire qu'un rendez-vous
+       reposé après une annulation pèse moins qu'un rendez-vous arraché à un
+       contact qui n'avait jamais répondu.
+
+       Les replis ci-dessous reproduisent EXACTEMENT ce que valait chaque
+       catégorie avant la v30, par héritage du total qui la contient : un abouti
+       sans échange héritait des 2 points de calls_connected, un échange héritait
+       de 2 + 4, un rendez-vous des 25 de meetings_booked. Le repli ne change donc
+       rien pour personne, il déplace le nombre là où il se règle.
+
+       Ordre voulu : les catégories suivent celui de la page de saisie, étage 2
+       puis étage 3. L'écran Barème lit ce tableau dans l'ordre, et un barème qui
+       se lit comme l'écran de saisie est un barème qu'on relit sans se tromper. */
+    { key: 'calls_dead_end', w: 2, icon: '🔇', label: 'Abouti sans échange', plural: 'aboutis sans échange' },
+    { key: 'calls_engaged_new', w: 6, icon: '🌱', label: 'Échange, nouveau contact', plural: 'échanges, nouveau contact' },
+    { key: 'calls_engaged_known', w: 6, icon: '🔁', label: 'Échange, contact connu', plural: 'échanges, contact connu' },
+    { key: 'meetings_rescheduled', w: 25, icon: '♻️', label: 'RDV reprogrammé', plural: 'RDV reprogrammés' },
+    { key: 'meetings_new', w: 25, icon: '⭐', label: 'RDV, nouveau contact', plural: 'RDV, nouveau contact' },
+    { key: 'meetings_known', w: 25, icon: '🤝', label: 'RDV, contact connu', plural: 'RDV, contact connu' },
+
+    /* LES TROIS TOTAUX HÉRITÉS, à zéro depuis la v30.
+
+       Ils ne sont pas supprimés, et ce n'est pas de la prudence mal placée : ce
+       sont les seules colonnes remplies pour les journées d'AVANT l'entonnoir,
+       où les six catégories sont restées nulles. Les laisser à zéro efface ces
+       journées du score, et c'est la décision prise le 30/08/2026 en connaissance
+       de cause ; mais la colonne reste, réglable, pour que ce soit récupérable
+       d'un chiffre.
+
+       ATTENTION EN LES RÉGLANT : un total S'AJOUTE à sa catégorie, il ne la
+       remplace pas. Mettre 5 sur meetings_booked donne 5 points de plus à CHACUN
+       des trois rendez-vous. L'écran Barème le dit à cet endroit. */
+    { key: 'calls_connected', w: 0, icon: '✅', label: 'Total « aboutis »', plural: 'appels aboutis' },
+    { key: 'calls_engaged', w: 0, icon: '💬', label: 'Total « avec échange »', plural: 'appels avec échange' },
+    { key: 'meetings_booked', w: 0, icon: '🧮', label: 'Total « rendez-vous »', plural: 'rendez-vous' },
+
     { key: 'emails_sent', w: 1, icon: '✉️', label: 'E-mail envoyé', plural: 'e-mails envoyés' },
     { key: 'companies_created', w: 2, icon: '🏢', label: 'Entreprise créée', plural: 'entreprises créées' },
     { key: 'contacts_created', w: 2, icon: '👤', label: 'Contact créé', plural: 'contacts créés' },

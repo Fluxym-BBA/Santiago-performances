@@ -61,11 +61,15 @@
              aucune valeur n'est écrite ici, faute de quoi une métrique
              supplémentaire n'apparaîtrait jamais dans cet écran.
 
-             Le sélecteur de métier ne masque QUE l'affichage. Les douze
+             Le sélecteur de métier ne masque QUE l'affichage. Les dix-huit
              champs restent tous dans le DOM, cachés en display:none, pour
              deux raisons : une valeur tapée puis masquée n'est pas perdue au
              changement de vue, et l'enregistrement porte toujours sur les
-             douze poids, puisqu'il n'existe qu'un seul barème.
+             dix-huit poids, puisqu'il n'existe qu'un seul barème.
+
+             Douze poids jusqu'à la v30, dix-huit depuis : les six catégories
+             de l'entonnoir ont enfin le leur, et les trois totaux qui les
+             contiennent sont passés dans un groupe à part, à laisser à zéro.
              ============================================================ -->
 
         <section class="chart-card chart-card--wide">
@@ -148,12 +152,23 @@
                         fait tenir la vue d'équipe. La page Performances signale la date du dernier
                         changement quand la période affichée le précède, pour que personne ne croie à
                         une erreur.</dd>
+                    <dt>Un total ne remplace pas ses catégories, il s'y ajoute</dt>
+                    <dd>Un appel abouti est de trois sortes, un rendez-vous obtenu aussi. Depuis la
+                        v30, ce sont ces six <b>catégories</b> qui portent les points, et les trois
+                        <b>totaux</b> qui les contiennent sont à zéro. Le champ d'un total n'est pas
+                        une valeur par défaut : il s'ajoute à chacune de ses catégories. Mettre 5 sur
+                        « Total rendez-vous » donne 5 points de plus aux trois rendez-vous à la fois.</dd>
+                    <dd>Ces trois totaux ne sont pas là pour être réglés. Ils sont la seule chose qui
+                        donne encore des points aux journées <b>antérieures à l'entonnoir</b>, où le
+                        détail par catégorie n'était pas saisi. À zéro, ces journées-là ne valent plus
+                        que leurs appels passés et leurs e-mails. C'est assumé.</dd>
                     <dt>Deux métiers, un seul barème</dt>
-                    <dd>Le BDR et le commercial ne partagent que quatre compteurs sur douze : contacts
-                        créés, appels, aboutis, échanges. Les huit autres sont propres à un métier, donc
-                        leur poids ne change rien au score de l'autre : régler le RDV1 à 40 points ne
-                        touche aucun BDR, qui n'en saisit jamais. C'est ce qui permet de garder
-                        <b>un seul barème</b> pour les deux métiers.</dd>
+                    <dd>Le BDR et le commercial partagent onze poids sur dix-huit : les appels et
+                        toutes leurs suites, les rendez-vous obtenus depuis la v29, et les contacts
+                        créés. Les sept autres sont propres à un métier, donc leur poids ne change rien
+                        au score de l'autre : régler le RDV1 à 40 points ne touche aucun BDR, qui n'en
+                        saisit jamais. C'est ce qui permet de garder <b>un seul barème</b> pour les
+                        deux métiers.</dd>
                     <dd>Ce qui n'est pas comparable, en revanche, c'est le <b>score</b> d'un BDR et
                         celui d'un commercial : ils ne se composent pas des mêmes actions. La vue
                         d'équipe classe donc chaque métier séparément, et ne compare entre métiers que
