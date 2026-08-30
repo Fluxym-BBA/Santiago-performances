@@ -272,6 +272,18 @@
 .ux-on .ux-panel--appels .card--wide { grid-column: auto; }
 .ux-on .ux-panel--bilan.is-on { grid-template-columns: 1fr; }
 
+/* Le profil de la journée (v28). Une seule colonne : le bloc gère déjà sa
+   propre mise en page, une ligne par activité, et une demi-largeur écraserait
+   les listes déroulantes et les boutons de pourcentage.
+
+   La marge basse de .dayprofile (22 px) séparait le bloc des cartes quand il
+   était au-dessus d'elles. Dans un panneau il n'a plus rien en dessous : ces
+   22 px sont du blanc en fin de page. Elle est annulée ici et non dans
+   profil-journee.css, qui est partagée avec le tableau de bord et n'a pas à
+   savoir que la saisie a des onglets. */
+.ux-on .ux-panel--profil.is-on { grid-template-columns: 1fr; }
+.ux-on .ux-panel--profil .dayprofile { margin-bottom: 0; }
+
 /* Même seuil que .cards-grid--saisie dans saisie-events.css : deux colonnes de
    170 px sur un téléphone ne servent personne. */
 @media (max-width: 1020px) {
@@ -328,6 +340,26 @@
 .ux-on .metric[data-ux-palier="3"] .stepper-btn--plus {
     background: linear-gradient(135deg, #10b981, #059669);
     box-shadow: 0 10px 22px -10px rgba(16, 185, 129, 0.85);
+}
+
+/* EXCEPTION : LE RENDEZ-VOUS REPROGRAMMÉ (v28)
+
+   Trois boutons verts identiques sur l'étage 3, et rien ne distinguait le
+   rendez-vous arraché à un contact nouveau du rendez-vous annulé qu'on repose.
+   L'ambre est celui déclaré pour meetings_rescheduled dans METRICS (js/api.js) :
+   la même couleur que sa pastille au tableau de bord et que sa courbe.
+
+   data-ux-ton est posé par js/saisie-ux.js, comme data-ux-palier. Cette feuille
+   ne s'accroche toujours qu'à des attributs qu'elle a elle-même fait poser.
+   Placée après les règles de palier : elle les recouvre quel que soit le poids
+   du rendez-vous dans le barème. */
+.ux-on .metric[data-ux-ton="reprise"] .stepper-btn--plus {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    box-shadow: 0 10px 22px -10px rgba(245, 158, 11, 0.85);
+}
+.ux-on .metric[data-ux-ton="reprise"] .ux-pts {
+    background: rgba(245, 158, 11, 0.16);
+    color: #b45309;
 }
 
 /* --------------------------------------------------------------------------

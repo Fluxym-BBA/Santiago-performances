@@ -1,4 +1,19 @@
-/* v25 — L'ergonomie de la maquette v2, appliquée pour de vrai.
+/* v28 — Le profil de la journée devient un onglet, et le rendez-vous
+   reprogrammé cesse d'être vert.
+
+   1. #day-profile quitte le haut de la page pour un quatrième onglet. Il est
+      déplacé, pas recréé : même élément, même identifiant, mêmes écouteurs.
+      C'était le dernier bloc à pousser les compteurs vers le bas, et donc à
+      ramener le défilement que ce chantier cherche à supprimer.
+
+   2. Le « + » du rendez-vous reprogrammé passe à l'ambre de METRICS. Voir la
+      note sur TONS, plus bas.
+
+   Ce qui suit est l'en-tête de la v25 et reste vrai.
+
+   ---------------------------------------------------------------------------
+
+   v25 — L'ergonomie de la maquette v2, appliquée pour de vrai.
 
    TROIS CHANGEMENTS PAR RAPPORT À LA v24.2
 
@@ -91,7 +106,31 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
 
     { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Ce que la journée dit',
       sous:'Taux, points, note du jour', unite:'points',
-      cartes:[], compte:null }
+      cartes:[], compte:null },
+
+    /* v28. Le profil de la journée était le dernier bloc à occuper le haut de la
+       page de saisie, au-dessus des cartes, donc à pousser tous les compteurs
+       vers le bas et à forcer un défilement le jour où il contient deux ou trois
+       activités. Il devient un onglet, comme le reste.
+
+       Il ne perd rien en montant dans la barre : c'est même le seul endroit où
+       son remplissage se voit sans faire défiler quoi que ce soit, puisque le
+       nombre d'activités déclarées s'affiche sur l'étiquette.
+
+       `element` au lieu de `cartes` : ce bloc n'est pas dans la grille des
+       cartes, il est au-dessus. Le panneau va le chercher là où il est.
+
+       `sansPoint` : pas de pastille ambre « rien de saisi ». Ce bloc est
+       facultatif et sans effet sur le score, c'est écrit noir sur blanc dans
+       index.html ; le jour où il se lit comme un contrôle horaire, il cesse
+       d'être rempli. Un rappel visuel permanent est exactement ce qu'il ne faut
+       pas. */
+    { id:'profil', ico:'🕘', couleur:'#8b5cf6', titre:'Profil de la journée',
+      sous:'À quoi la journée a servi', unite:'activités',
+      cartes:[], compte:null, sansPoint:true,
+      element:'#day-profile',
+      valeur:() => compteProfil(),
+      uniteDe:v => (v > 1 ? 'activités' : 'activité') }
   ];
 
   const $  = (s, r) => (r || document).querySelector(s);
@@ -206,6 +245,24 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
      l'effet qu'il va déclencher, et la pastille dit combien il rapporte. */
   function palierDe(points){ return points >= 10 ? 3 : points >= 4 ? 2 : 1; }
 
+  /* EXCEPTION DE COULEUR, PAR COMPTEUR (v28)
+
+     Le palier suffit presque partout : la couleur du bouton dit ce que le geste
+     rapporte. Presque, parce qu'un rendez-vous reprogrammé rapporte aujourd'hui
+     exactement autant qu'un rendez-vous arraché à un contact nouveau, vingt-cinq
+     points, et se peignait donc du même vert. Reposer un rendez-vous annulé est
+     un rattrapage, pas une conquête : trois boutons verts identiques sur l'étage
+     3 laissaient croire l'inverse.
+
+     L'ambre n'est pas choisi ici : c'est déjà la couleur de meetings_rescheduled
+     dans METRICS (js/api.js), celle que portent la pastille du tableau de bord et
+     les graphiques. Une seule source, pas de divergence possible.
+
+     L'attribut est posé par le script, jamais par saisie.js : la feuille de style
+     continue de n'agir que sur des sélecteurs qu'elle possède, et sans le script
+     rien ne change. */
+  const TONS = { meetings_rescheduled: 'reprise' };
+
   /* Valeur affichée d'un compteur, lue à l'écran et jamais recalculée.
 
      Trois cas, dans cet ordre :
@@ -230,6 +287,21 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
     return 0;
   }
   const somme = cles => (cles || []).reduce((t, k) => t + valeurDe(k), 0);
+
+  /* Nombre d'activités réellement déclarées dans le profil de la journée. Lu à
+     l'écran, comme tout le reste de cette couche : une ligne dont la liste
+     déroulante est encore sur « Choisir une activité… » ne compte pas, ce qui
+     est exactement la règle de profilVrai() dans saisie.js. On la relit plutôt
+     que de l'importer, pour ne pas donner à cette couche une prise sur l'état
+     interne de saisie.js. */
+  function compteProfil(){
+    const box = document.getElementById('day-profile');
+    if(!box) return 0;
+    return $$('.dp-line', box).filter(li => {
+      const sel = $('.dp-kind', li);
+      return sel && sel.value;
+    }).length;
+  }
 
   /* Les libellés du barème sont réglables depuis la base : on les échappe avant
      de les injecter, comme partout ailleurs dans le projet. */
@@ -543,6 +615,14 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
         const carte = sc ? sc.closest('.card') : null;
         if(carte) cartes = [carte];
       }
+      /* Un onglet peut réclamer un bloc qui n'est pas dans la grille : c'est le
+         cas du profil de la journée, posé par index.html entre la barre de date
+         et les cartes. Il est DÉPLACÉ, pas recopié, donc #day-profile garde son
+         identifiant, son contenu et l'écouteur que saisie.js lui a posé. */
+      if(o.element){
+        const el = document.querySelector(o.element);
+        if(el) cartes = [el];
+      }
       return { o, cartes, visible:cartes.some(c => !estMasquee(c)) };
     }).filter(p => p.cartes.length > 0);
 
@@ -667,6 +747,10 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
       const pts = pointsDuClic(cle);
       const pal = palierDe(pts);
       if(String(m.dataset.uxPalier) !== String(pal)) m.dataset.uxPalier = pal;
+      const ton = TONS[cle] || '';
+      if(String(m.dataset.uxTon || '') !== ton){
+        if(ton) m.dataset.uxTon = ton; else delete m.dataset.uxTon;
+      }
       let b = $('.ux-pts', st);
       if(!b){
         b = document.createElement('span');
@@ -916,12 +1000,22 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
          v24 recopiait un total de carte, et l'onglet des appels annonçait la
          somme des appels et des e-mails. L'onglet du bilan, lui, n'a pas de
          compteur : il affiche le score. */
-      const v = e.conf.compte ? somme(e.conf.compte) : sc;
+      const v = e.conf.valeur ? e.conf.valeur()
+             : e.conf.compte ? somme(e.conf.compte)
+             : sc;
       const cible = $('.ux-tab-num b', e.bouton);
       if(cible && cible.textContent !== String(v)) cible.textContent = v;
+      /* Unité variable, pour les onglets où le singulier se remarque. Les autres
+         gardent leur mot fixe : « 1 appels » se lit mal aussi, mais c'est un
+         autre sujet et le corriger ici toucherait des onglets hors périmètre. */
+      if(e.conf.uniteDe){
+        const u = $('.ux-tab-num span', e.bouton);
+        const mot = e.conf.uniteDe(v);
+        if(u && u.textContent !== mot) u.textContent = mot;
+      }
       /* Un onglet masqué par le métier reste masqué. */
       e.bouton.hidden = !e.cartes.some(c => !estMasquee(c));
-      const manque = v === 0 && k !== 'bilan' && !e.bouton.hidden;
+      const manque = v === 0 && k !== 'bilan' && !e.conf.sansPoint && !e.bouton.hidden;
       let point = $('.ux-tab-todo', e.bouton);
       if(manque && !point){
         point = document.createElement('span');
