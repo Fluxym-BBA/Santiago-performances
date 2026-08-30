@@ -87,11 +87,26 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
      de la personne disparaît de lui-même : un BDR voit trois onglets, un
      commercial en voit trois autres. */
   const ONGLETS = [
+    /* v28.1. Le nombre porté par cette étiquette est celui des RENDEZ-VOUS, pas
+       celui des appels. Le total de la carte, lui, reste en appels : le détail de
+       l'effort se lit à l'intérieur, l'étiquette annonce le résultat.
+
+       C'est le seul chiffre visible quand l'onglet est fermé, et c'est le seul
+       qui compte vraiment. Contrepartie assumée : il reste à zéro une bonne
+       partie de la matinée, alors que « 42 appels » valorisait tout de suite. La
+       pastille ambre « rien de saisi » ne s'y trompe pas, elle continue de
+       regarder `compte`, donc elle ne s'allume pas sur une journée à quarante
+       appels et zéro rendez-vous.
+
+       Repli sur les appels pour un commercial, qui n'a pas les compteurs de
+       rendez-vous. Voir aLEcran(). */
     { id:'appels', ico:'📞', couleur:'#00A7E1', titre:'Appels et rendez-vous',
       sous:'Passés, décrochés, rendez-vous obtenus', unite:'appels',
       cartes:['[data-card="prospection"]'],
-      compte:['calls_made'],
-      total:{ sel:'[data-total="prospection"]', cles:['calls_made'] } },
+      compte:['calls_made', 'meetings_booked'],
+      total:{ sel:'[data-total="prospection"]', cles:['calls_made'] },
+      valeur:() => valeurDe(aLEcran('meetings_booked') ? 'meetings_booked' : 'calls_made'),
+      uniteDe:() => (aLEcran('meetings_booked') ? 'RDV' : 'appels') },
 
     { id:'crm', ico:'🗂️', couleur:'#6366f1', titre:'E-mails et CRM',
       sous:'Envois, entreprises, contacts', unite:'actions',
@@ -103,10 +118,6 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
       sous:'Événements et sorties de pipeline', unite:'actions',
       cartes:['[data-card="pipeline"]', '[data-card="outcome"]'],
       compte:['first_meetings', 'proposals_sent', 'no_go', 'deals_dropped', 'deals_lost'] },
-
-    { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Ce que la journée dit',
-      sous:'Taux, points, note du jour', unite:'points',
-      cartes:[], compte:null },
 
     /* v28. Le profil de la journée était le dernier bloc à occuper le haut de la
        page de saisie, au-dessus des cartes, donc à pousser tous les compteurs
@@ -130,7 +141,14 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
       cartes:[], compte:null, sansPoint:true,
       element:'#day-profile',
       valeur:() => compteProfil(),
-      uniteDe:v => (v > 1 ? 'activités' : 'activité') }
+      uniteDe:v => (v > 1 ? 'activités' : 'activité') },
+
+    /* Le bilan est passé APRÈS le profil en v28.1 : on décrit d'abord la journée
+       qu'on vient de vivre, on lit ensuite ce qu'elle donne. Un onglet qui ne se
+       saisit pas n'a rien à faire avant les trois qui se saisissent. */
+    { id:'bilan', ico:'⚡', couleur:'#0ea5e9', titre:'Ce que la journée dit',
+      sous:'Taux, points, note du jour', unite:'points',
+      cartes:[], compte:null }
   ];
 
   const $  = (s, r) => (r || document).querySelector(s);
@@ -287,6 +305,23 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
     return 0;
   }
   const somme = cles => (cles || []).reduce((t, k) => t + valeurDe(k), 0);
+
+  /* Ce compteur est-il À L'ÉCRAN ? À ne pas confondre avec « vaut-il zéro ».
+
+     valeurDe() rend zéro dans les deux cas, et c'est voulu pour une addition.
+     Mais un commercial n'a AUCUN compteur de rendez-vous sur sa page : les trois
+     catégories de l'étage 3 sont réservées au BDR dans METRICS. Afficher
+     « 0 RDV » en permanence sur son onglet serait un reproche pour un chiffre
+     qu'il n'a même pas le droit de saisir. On teste donc la présence, et l'onglet
+     retombe sur les appels.
+
+     Un total dérivé est présent dès qu'une seule de ses parts l'est. */
+  function aLEcran(cle){
+    const m = METRIC_BY_KEY[cle];
+    if(m && m.derived) return m.derived.some(k => aLEcran(k));
+    return !!(document.getElementById('in-' + cle)
+           || document.getElementById('count-' + cle));
+  }
 
   /* Nombre d'activités réellement déclarées dans le profil de la journée. Lu à
      l'écran, comme tout le reste de cette couche : une ligne dont la liste
@@ -1000,8 +1035,14 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
          v24 recopiait un total de carte, et l'onglet des appels annonçait la
          somme des appels et des e-mails. L'onglet du bilan, lui, n'a pas de
          compteur : il affiche le score. */
+      /* Deux nombres distincts, et c'est volontaire :
+           `v`     ce que l'étiquette AFFICHE (les rendez-vous, pour les appels) ;
+           `saisi` ce qui dit si la section a été remplie, donc si la pastille
+                   ambre doit s'allumer. Les confondre allumerait la pastille sur
+                   une journée à quarante appels sans rendez-vous. */
+      const saisi = e.conf.compte ? somme(e.conf.compte) : null;
       const v = e.conf.valeur ? e.conf.valeur()
-             : e.conf.compte ? somme(e.conf.compte)
+             : saisi !== null ? saisi
              : sc;
       const cible = $('.ux-tab-num b', e.bouton);
       if(cible && cible.textContent !== String(v)) cible.textContent = v;
@@ -1015,7 +1056,8 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
       }
       /* Un onglet masqué par le métier reste masqué. */
       e.bouton.hidden = !e.cartes.some(c => !estMasquee(c));
-      const manque = v === 0 && k !== 'bilan' && !e.conf.sansPoint && !e.bouton.hidden;
+      const manque = (saisi === null ? v : saisi) === 0
+        && k !== 'bilan' && !e.conf.sansPoint && !e.bouton.hidden;
       let point = $('.ux-tab-todo', e.bouton);
       if(manque && !point){
         point = document.createElement('span');
