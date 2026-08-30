@@ -182,8 +182,26 @@ alter table public.score_weights enable trigger trg_score_weights_touch;
 
    Les valeurs de repli des trois totaux passent de 2, 4 et 25 à zéro : elles
    décrivent le modèle, et dans le nouveau modèle un total ne pèse rien.
+
+   ⚠ LA CLAUSE « with (security_invoker = true) » N'EST PAS DÉCORATIVE.
+
+   Vérifié en direct sur la base le 30/08/2026, par un test créé puis détruit :
+   un CREATE OR REPLACE VIEW sans clause WITH **efface les reloptions** de la
+   vue existante. Il ne les conserve pas. La vue retombe donc en security
+   definer, c'est-à-dire qu'elle s'exécute avec les droits de son propriétaire et
+   que la Row Level Security de daily_activity NE S'APPLIQUE PLUS. N'importe quel
+   compte authentifié lisant /rest/v1/v_daily_kpi verrait les journées de tout le
+   monde.
+
+   La première version de ce fichier reproduisait le CREATE OR REPLACE de la v14,
+   qui n'avait pas la clause. Elle a ouvert la brèche pendant les quelques minutes
+   qui ont séparé son exécution du contrôle des advisors, refermée par un
+   « alter view public.v_daily_kpi set (security_invoker = true) ».
+
+   RÈGLE : toute réécriture d'une vue de ce dépôt porte la clause. Les trois vues
+   concernées sont v_daily_kpi, v_team_daily et v_best_day.
    --------------------------------------------------------------------------- */
-create or replace view public.v_daily_kpi as
+create or replace view public.v_daily_kpi with (security_invoker = true) as
 select d.id,
     d.user_id,
     d.activity_date,
@@ -295,4 +313,35 @@ commit;
 
    Les trois derniers doivent être à zéro, les six du milieu doivent porter ce
    que la page de saisie affichait hier sur ses pastilles.
+
+   CONTRÔLE DE SÉCURITÉ, à ne jamais oublier après avoir touché une vue
+
+   select c.relname, c.reloptions
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'v';
+
+   Les trois vues doivent porter {security_invoker=true}. Une seule à NULL est une
+   fuite de RLS, pas un détail de style.
+
+   CONTRÔLE DE NEUTRALITÉ
+
+   Pour toute journée dont la ventilation est cohérente, le score est
+   mathématiquement inchangé : l'ancien calcul valait
+   2·(sans_échange + nouveau + connu) + 7·(nouveau + connu), le nouveau vaut
+   2·sans_échange + 9·nouveau + 9·connu. C'est la même chose. Un écart non nul
+   dénonce donc une journée dont les totaux ne correspondent pas à leur détail,
+   jamais une erreur de barème.
+
+   select k.activity_date, k.productivity_score - (
+            d.calls_made * 1 + d.calls_connected * 2
+          + coalesce(d.calls_engaged, 0) * 7 + d.meetings_booked * 25
+          + d.emails_sent * 2 + d.companies_created * 3 + d.contacts_created * 2
+          + coalesce(d.first_meetings, 0) * 25
+          + coalesce(d.proposals_sent, 0) * 15) as ecart
+     from public.v_daily_kpi k
+     join public.daily_activity d
+       on d.user_id = k.user_id and d.activity_date = k.activity_date
+    where ...;
+
+   Remplace les poids par ceux d'avant ta migration.
    --------------------------------------------------------------------------- */
