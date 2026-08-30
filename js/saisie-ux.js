@@ -35,7 +35,7 @@
 
    Les points sont maintenant calculés à partir du barème lui-même, sans le
    dupliquer, et l'effet part dans le même geste que le clic. */
-import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
+import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO } from './api.js';
 
 (() => {
   'use strict';
@@ -272,7 +272,7 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
     }
     /* Palier 3 : le jalon de la journée. */
     anime(metric, 'fx-p3', 1100);
-    anime($('.ux-score'), 'ux-score--boom', 900);
+    anime($('.ux-ring'), 'ux-ring--boom', 900);
     bulle(x, y, '🎉 +' + points + ' points', 'ux-fx-pop--l');
     const P = ['#fbbf24', '#f59e0b', '#10b981', '#00A7E1', '#6366f1', '#f472b6', '#ffffff'];
     const W = window.innerWidth, H = window.innerHeight;
@@ -390,10 +390,145 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
     if(champ) champ.dataset.uxAvant = nombre(champ.value);
   }, true);
 
+  /* ------------------------------------------------- le bandeau du score (v27)
+
+     Le bloc de la maquette validée : le score du jour dans son anneau, ce qu'il
+     vaut par rapport à hier, et ce qu'il a déjà rapporté dans le mois.
+
+     L'objectif du jour en points, présent sur la maquette, N'EST PAS REPRIS. Il
+     n'existe pas dans le modèle de données et une somme d'objectifs journaliers
+     multipliée par leurs poids donnerait un chiffre faux dès qu'un compteur n'a
+     pas d'objectif défini. Un pourcentage faux est pire que pas de pourcentage.
+
+     UNE SEULE REQUÊTE, et elle sert aux deux chiffres à la fois : la plage va du
+     premier du mois au jour affiché, en remontant à la veille si elle tombe le
+     mois d'avant. fetchRange existe déjà dans api.js et lit la même vue que le
+     tableau de bord, donc rien de neuf côté base.
+
+     LES SCORES DES JOURS PASSÉS SONT RECALCULÉS À CHAQUE AFFICHAGE, à partir des
+     lignes brutes gardées en mémoire et du barème courant. Les stocker une fois
+     calculés figerait le cumul du mois au barème qui était en vigueur au
+     chargement de la page, et un réglage dans l'écran Barème ne se verrait plus.
+
+     Le score du jour affiché n'est jamais pris dans la requête mais toujours lu
+     dans #day-score : sans cela, le cumul du mois ne bougerait pas d'un pouce
+     pendant qu'on saisit. */
+  let bandeau = null, moisLignes = null, moisCharge = null, moisEnCours = false;
+
+  const jourAffiche = () => {
+    const p = $('#day-picker');
+    return p && p.value ? p.value : null;
+  };
+
+  function poserBandeau(){
+    const hote = $('.page-hero .page-container');
+    if(!hote || hote.dataset.uxHero) return;
+    hote.dataset.uxHero = '1';
+    hote.classList.add('ux-hero-wrap');
+
+    /* Le titre et son chapeau sont regroupés dans un bloc, pour que le bandeau
+       vienne se poser à côté et non en dessous. Déplacement, pas recréation. */
+    const txt = document.createElement('div');
+    txt.className = 'ux-hero-txt';
+    while(hote.firstChild) txt.appendChild(hote.firstChild);
+    hote.appendChild(txt);
+
+    bandeau = document.createElement('div');
+    bandeau.className = 'ux-hero';
+    bandeau.innerHTML =
+      '<div class="ux-ring"><b id="ux-hero-score">0</b><span>score</span></div>'
+      + '<div class="ux-hero-l">'
+      + '<div class="ux-hero-line" id="ux-hero-prev"></div>'
+      + '<div class="ux-hero-line" id="ux-hero-mois"></div>'
+      + '<div class="ux-hero-line ux-hero-save" id="ux-hero-save"></div>'
+      + '</div>';
+    hote.appendChild(bandeau);
+
+    /* L'état d'enregistrement est recopié depuis #save-status, qui est écrit par
+       saisie.js. On ne redit pas nous-mêmes qu'une écriture a réussi : une
+       deuxième source de vérité sur ce point précis serait un mensonge en
+       puissance le jour où l'enregistrement échoue. */
+    const src = $('#save-status');
+    if(src) new MutationObserver(() => copierEtat()).observe(src, { childList:true, characterData:true, subtree:true });
+
+    /* La date affichée change sans que les compteurs bougent forcément : on
+       surveille son libellé pour relancer la requête du mois. */
+    const lab = $('#day-label');
+    if(lab) new MutationObserver(() => rafraichir()).observe(lab, { childList:true, characterData:true, subtree:true });
+  }
+
+  function copierEtat(){
+    const cible = $('#ux-hero-save'), src = $('#save-status');
+    if(!cible) return;
+    const t = src && src.textContent.trim() ? src.textContent.trim() : 'Enregistré au fil de la saisie';
+    if(cible.textContent !== t) cible.textContent = t;
+  }
+
+  function chargerMois(){
+    const iso = jourAffiche();
+    if(!iso || moisEnCours || iso === moisCharge) return;
+    moisEnCours = true;
+    const debut = iso.slice(0, 8) + '01';
+    const veille = addDaysISO(iso, -1);
+    fetchRange(veille < debut ? veille : debut, iso)
+      .then(lignes => { moisLignes = lignes || []; moisCharge = iso; })
+      /* En cas d'échec on ne réessaie pas en boucle et on ne dit rien de faux :
+         les deux lignes disparaissent, le score reste. */
+      .catch(() => { moisLignes = null; moisCharge = iso; })
+      .then(() => { moisEnCours = false; rafraichir(); });
+  }
+
+  function peindreBandeau(sc){
+    if(!bandeau) return;
+    const n = $('#ux-hero-score');
+    if(n && n.textContent !== String(sc)) n.textContent = sc;
+    copierEtat();
+    chargerMois();
+
+    const iso = jourAffiche();
+    const lp = $('#ux-hero-prev'), lm = $('#ux-hero-mois');
+    if(!iso || !moisLignes){
+      if(lp) lp.hidden = true;
+      if(lm) lm.hidden = true;
+      return;
+    }
+    const veille = addDaysISO(iso, -1), debut = iso.slice(0, 8) + '01';
+    let hier = null, cumul = sc;
+    moisLignes.forEach(r => {
+      const d = String(r.activity_date).slice(0, 10);
+      const v = scoreOf(r);
+      if(d === veille) hier = v;
+      if(d >= debut && d < iso) cumul += v;
+    });
+
+    const ecart = hier === null ? null : sc - hier;
+    const txtP = ecart === null
+      ? 'Pas de saisie la veille'
+      : ecart === 0 ? 'Même score qu\'hier'
+      : (ecart > 0 ? '+' : '\u2212') + Math.abs(ecart) + ' pts par rapport à hier';
+    ecrire(lp, txtP, ecart === null ? 'flat' : ecart > 0 ? 'up' : ecart < 0 ? 'down' : 'flat');
+    ecrire(lm, fmtMille(cumul) + ' points cumulés ce mois-ci', '');
+  }
+
+  function ecrire(el, txt, ton){
+    if(!el) return;
+    if(el.hidden) el.hidden = false;
+    if(el.textContent !== txt) el.textContent = txt;
+    const c = 'ux-hero-line' + (ton ? ' ux-hero-line--' + ton : '');
+    if(el.className !== c) el.className = c;
+  }
+
+  /* Un séparateur de milliers : « 3 112 » se lit d'un coup d'œil, « 3112 »
+     demande de compter les chiffres. Espace insécable ordinaire et non fine :
+     l'espace fine U+202F manque dans certaines polices système et se rend alors
+     avec une largeur nulle, ce qui rendait le séparateur invisible. */
+  const fmtMille = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+
   /* ------------------------------------------------------------- onglets */
   let barre = null, panneaux = {}, actif = null;
 
   function grille(){ return $('.cards-grid--saisie'); }
+
 
   function construire(){
     const g = grille();
@@ -421,13 +556,13 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
     liste.className = 'ux-tabs-list';
     barre.appendChild(liste);
 
-    const score = document.createElement('div');
-    score.className = 'ux-score';
-    score.innerHTML = '<span class="ux-score-n" id="ux-score-n">0</span>'
-      + '<span class="ux-score-t"><span>Score du jour</span><i id="ux-score-i">mis à jour à chaque saisie</i></span>';
-    barre.appendChild(score);
+    /* Le score a quitté la barre d'onglets en v27 : il est maintenant dans le
+       bandeau du haut, comme dans la maquette validée, et l'onglet « Ce que la
+       journée dit » l'affiche déjà en permanence sur son étiquette. Le garder
+       ici en aurait fait un troisième exemplaire du même chiffre. */
 
     g.parentNode.insertBefore(barre, g);
+    poserBandeau();
 
     plan.forEach(p => {
       const b = document.createElement('button');
@@ -774,8 +909,7 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
     peindreEntonnoir();
     peindrePoints();
     const sc = lireScore();
-    const n = $('#ux-score-n');
-    if(n && n.textContent !== String(sc)) n.textContent = sc;
+    peindreBandeau(sc);
     Object.keys(panneaux).forEach(k => {
       const e = panneaux[k];
       /* Le nombre de l'onglet est la somme de SES compteurs, calculée ici. La
