@@ -1375,3 +1375,50 @@
 /* Ceinture et bretelles : si un jour un libellé de barème plus long élargit la
    pastille, c'est elle qui cède, jamais le bouton. */
 .metric--col .ux-pts { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* ==========================================================================
+   v26.1 — LE MÊME DÉBORDEMENT, DANS LES CARTES CRM ET SORTIES
+
+   La v26 avait corrigé les tuiles d'étage (.metric--col) et oublié celles des
+   cartes CRM et Sorties, qui obtiennent la même forme sans porter la même
+   classe. Elles étaient même plus exposées : leur colonne minimale était de
+   196 px contre 236 px pour les étages, soit 164 px utiles pour une ligne du
+   bas qui en demande 189. Le « + » sortait donc du cadre à tous les coups.
+
+   Deux corrections, et la première compte autant que la seconde : la colonne
+   minimale passe à 236 px, la même que les étages. Il n'y avait aucune raison
+   qu'un compteur du CRM soit plus étroit qu'un compteur d'appel, et deux
+   largeurs de tuile différentes sur le même écran se voient.
+   ========================================================================== */
+[data-metrics="crm"],
+[data-metrics="outcome"] { grid-template-columns: repeat(auto-fit, minmax(236px, 1fr)); }
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .metric-input,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .metric-input {
+    font-size: 30px;
+    width: 2.4ch;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .stepper,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .stepper { gap: 6px; }
+
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .stepper-btn--plus,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .stepper-btn--plus {
+    width: 52px; height: 52px; font-size: 24px; border-radius: 15px;
+}
+[data-metrics="crm"] > .metric:not(.metric--events):not(.metric--total) .ux-pts,
+[data-metrics="outcome"] > .metric:not(.metric--events):not(.metric--total) .ux-pts {
+    font-size: 9.5px; padding: 2px 6px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+
+/* Les tuiles d'une même carte se mettent à la même hauteur (v26.1).
+
+   Elles étaient calées en haut : un libellé de trois lignes à côté d'un libellé
+   de deux suffisait à décaler les deux nombres, les deux « + » et les deux
+   jauges. Étirées, le stepper que margin-top: auto colle déjà en bas se
+   retrouve à la même hauteur d'une tuile à l'autre, et l'œil balaye une ligne
+   de boutons au lieu d'un escalier. */
+[data-metrics="crm"],
+[data-metrics="outcome"] { align-items: stretch; }

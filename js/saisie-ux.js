@@ -44,13 +44,15 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
      déclenche le palier intermédiaire. Sans ce plafond, quatre rendez-vous
      saisis d'affilée donnent quatre feux d'artifice, et l'effet devient une
      gêne au lieu d'une récompense. Mettre 0 pour n'en plafonner aucun. */
-  const FX_BIG_COOLDOWN_MS = 6000;
+  /* Durée pendant laquelle une cinématique occupe l'écran, par palier. Ce n'est
+     pas la durée de l'animation la plus longue mais celle au bout de laquelle
+     une nouvelle peut partir sans se marcher dessus. */
+  const FX_DUREE = { 0: 380, 1: 500, 2: 720, 3: 1400 };
   const SEUIL_PALIER_2 = 5;   /* points : en dessous, effet discret */
   const SEUIL_PALIER_3 = 16;  /* points : à partir de là, feu d'artifice */
   const CLE_ONGLET = 'cockpit_saisie_onglet';
 
   const reduced = window.matchMedia('(prefers-reduced-motion:reduce)').matches;
-  let dernierFeu = 0;
 
   /* Définition des onglets. L'ordre compte, il suit le déroulé de la journée.
      Un onglet dont toutes les cartes sont masquées par saisie.js (selon le
@@ -254,23 +256,21 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
   function celebre(points, x, y, metric){
     if(points <= 0){
       anime(metric, 'fx-p0', 400);
-      return;
+      return 0;
     }
     if(points < SEUIL_PALIER_2){
       anime(metric, 'fx-p1', 500);
       bulle(x, y, '+' + points + ' pt' + (points > 1 ? 's' : ''), 'ux-fx-pop--s');
-      return;
+      return 1;
     }
-    const feuPossible = FX_BIG_COOLDOWN_MS === 0 || (Date.now() - dernierFeu) > FX_BIG_COOLDOWN_MS;
-    if(points < SEUIL_PALIER_3 || !feuPossible){
+    if(points < SEUIL_PALIER_3){
       anime(metric, 'fx-p2', 700);
       bulle(x, y, '+' + points + ' pts', 'ux-fx-pop--m');
       salve(x, y, 14, { haut:true, vitesse:3.4, pousse:1.6, taille:4, vie:46,
         couleurs:['#00A7E1', '#0ea5e9', '#6ee7b7', '#a5f3fc'] });
-      return;
+      return 2;
     }
     /* Palier 3 : le jalon de la journée. */
-    dernierFeu = Date.now();
     anime(metric, 'fx-p3', 1100);
     anime($('.ux-score'), 'ux-score--boom', 900);
     bulle(x, y, '🎉 +' + points + ' points', 'ux-fx-pop--l');
@@ -280,6 +280,51 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
     setTimeout(() => salve(W * .24, H * .42, 40, { vitesse:5.4, taille:5, vie:78, carre:true, couleurs:P }), 160);
     setTimeout(() => salve(W * .76, H * .40, 40, { vitesse:5.4, taille:5, vie:78, carre:true, couleurs:P }), 300);
     setTimeout(() => salve(W * .50, H * .28, 52, { vitesse:6.8, taille:6, vie:88, carre:true, couleurs:P }), 440);
+    return 3;
+  }
+
+  /* --------------------------------------------------- une seule à la fois
+
+     PROBLÈME OBSERVÉ EN LIGNE : deux rendez-vous cliqués coup sur coup ne
+     donnaient pas deux fois le feu d'artifice. La v24 limitait le palier 3 à
+     une fois toutes les six secondes, pour éviter qu'une saisie en rafale ne
+     transforme l'écran en 14 juillet permanent. Sauf que ce garde-fou est
+     invisible : pour qui clique, la récompense devient imprévisible, et une
+     récompense imprévisible ne récompense plus rien.
+
+     Remplacé par un verrou honnête : une cinématique à la fois, et les clics
+     qui arrivent pendant qu'elle joue sont CUMULÉS puis joués ensemble à la
+     fin. Trois conséquences, toutes voulues :
+
+       - deux rendez-vous cliqués lentement donnent deux feux d'artifice ;
+       - quatre rendez-vous cliqués en rafale, typiquement une saisie de fin de
+         journée, donnent un seul feu d'artifice de cent points, plus gros que
+         chacun des quatre ;
+       - le cumul peut faire monter de palier. Douze appels cliqués vite valent
+         douze points et déclenchent le feu d'artifice, ce qu'un seul appel ne
+         fait jamais. C'est exactement ce qu'on veut encourager.
+
+     Le retrait ne passe pas par la file : il est court, terne, et corriger une
+     erreur ne doit jamais attendre son tour. */
+  let fxOccupe = false, fxAttente = null;
+
+  function fete(points, x, y, metric){
+    if(fxOccupe){
+      if(fxAttente){
+        fxAttente.points += points;
+        fxAttente.x = x; fxAttente.y = y; fxAttente.metric = metric;
+      } else fxAttente = { points:points, x:x, y:y, metric:metric };
+      return;
+    }
+    fxOccupe = true;
+    const palier = celebre(points, x, y, metric) || 0;
+    setTimeout(() => {
+      fxOccupe = false;
+      if(!fxAttente) return;
+      const f = fxAttente;
+      fxAttente = null;
+      fete(f.points, f.x, f.y, f.metric);
+    }, FX_DUREE[palier] || 500);
   }
 
   /* ------------------------------------------------------- lecture du score
@@ -309,7 +354,7 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
         perdus > 0 ? '\u2212' + perdus + ' pts' : 'retiré', 'ux-fx-pop--minus');
       return;
     }
-    celebre(pointsDuClic(cle), ev.clientX, ev.clientY, metric);
+    fete(pointsDuClic(cle), ev.clientX, ev.clientY, metric);
   }, true);
 
   /* Saisie directe au clavier. Un seul nombre tapé peut valoir plusieurs
@@ -320,10 +365,22 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS } from './api.js';
     const avant = nombre(champ.dataset.uxAvant);
     const apres = nombre(champ.value);
     champ.dataset.uxAvant = apres;
-    if(apres <= avant) return;
+    if(apres === avant) return;
     const r = champ.getBoundingClientRect();
-    celebre(pointsDuClic(champ.dataset.key) * (apres - avant),
-      r.left + r.width / 2, r.top, champ.closest('.metric'));
+    const x = r.left + r.width / 2, y = r.top;
+    const metric = champ.closest('.metric');
+    const unite = pointsDuClic(champ.dataset.key);
+
+    /* Un nombre tapé plus grand qu'avant vaut exactement autant de clics : la
+       personne qui saisit ses quarante appels d'un coup en fin de journée a le
+       droit à la même récompense que celle qui a cliqué quarante fois. */
+    if(apres > avant){ fete(unite * (apres - avant), x, y, metric); return; }
+
+    /* Un nombre corrigé vers le bas prend la cinématique terne du retrait, pour
+       la même raison qu'au clic : on doit voir ce qu'on vient de perdre. */
+    const perdus = unite * (avant - apres);
+    anime(metric, 'fx-minus', 400);
+    bulle(x, y, perdus > 0 ? '\u2212' + perdus + ' pts' : 'corrigé', 'ux-fx-pop--minus');
   }, true);
 
   /* La valeur d'avant est mémorisée à la prise de focus : sans elle, impossible
