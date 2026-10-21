@@ -243,6 +243,21 @@ export const METRICS = [
         label: 'E-mails envoyés', short: 'E-mails',
         hint: 'E-mails de prospection sortants', color: '#f59e0b'
     },
+    {
+        /* v31. Hors entonnoir, comme l'e-mail : une inscription n'est ni une
+           issue d'appel ni un rendez-vous, et elle ne s'additionne à aucun
+           total. Elle pèse au départ autant qu'un RDV avec un contact connu,
+           puis son poids se règle seul dans l'écran Barème.
+
+           Rangée dans le groupe 'emails' : même carte de saisie, même panneau
+           du tableau de bord. Réservée au BDR comme l'e-mail ; ajouter 'sales'
+           ici suffirait, sans migration. */
+        key: 'webinar_registrations', target: 'webinar_target', group: 'emails',
+        jobs: ['bdr'],
+        label: 'Inscriptions webinar', short: 'Webinar',
+        hint: 'Prospect ou client inscrit à un webinar suite à ton invitation',
+        color: '#ec4899'
+    },
 
     /* ---- Cycle de vente, métier commercial -------------------------------
        Aucune contrainte croisée entre ces cinq compteurs, volontairement : une
@@ -402,6 +417,10 @@ export const SCORE_WEIGHTS = [
     { key: 'meetings_booked', w: 0, icon: '🧮', label: 'Total « rendez-vous »', plural: 'rendez-vous' },
 
     { key: 'emails_sent', w: 1, icon: '✉️', label: 'E-mail envoyé', plural: 'e-mails envoyés' },
+    /* v31. Repli à 25 comme meetings_known : en base le poids démarre à la valeur
+       de meetings_known puis se règle seul, et le repli ne sert que si la table
+       du barème est injoignable. Même nombre que dans la vue v_daily_kpi. */
+    { key: 'webinar_registrations', w: 25, icon: '🎟️', label: 'Inscription webinar', plural: 'inscriptions webinar' },
     { key: 'companies_created', w: 2, icon: '🏢', label: 'Entreprise créée', plural: 'entreprises créées' },
     { key: 'contacts_created', w: 2, icon: '👤', label: 'Contact créé', plural: 'contacts créés' },
     /* Le RDV1 vaut autant que le rendez-vous obtenu : pour un commercial, c'est
