@@ -109,9 +109,9 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
       uniteDe:() => (aLEcran('meetings_booked') ? 'RDV' : 'appels') },
 
     { id:'crm', ico:'🗂️', couleur:'#6366f1', titre:'E-mails et CRM',
-      sous:'Envois, webinars, entreprises, contacts', unite:'actions',
+      sous:'Envois, entreprises, contacts', unite:'actions',
       cartes:['[data-card="emails"]', '[data-card="crm"]'],
-      compte:['emails_sent', 'webinar_registrations', 'companies_created', 'contacts_created'],
+      compte:['emails_sent', 'companies_created', 'contacts_created'],
       total:{ sel:'[data-total="emails"]', cles:['emails_sent'] } },
 
     { id:'vente', ico:'🤝', couleur:'#10b981', titre:'Cycle de vente',

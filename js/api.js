@@ -110,6 +110,7 @@ export const METRICS = [
          Étage 3   meetings_rescheduled   un rendez-vous existant, reposé
                    meetings_new           rendez-vous, contact nouveau
                    meetings_known         rendez-vous, contact connu
+                   webinar_registrations  rendez-vous, inscription webinar (v32)
 
        `level` porte l'étage, et sert au rendu en escalier de la page de saisie.
        `derived` marque les deux totaux : ils s'affichent, ils ne se saisissent
@@ -210,6 +211,22 @@ export const METRICS = [
         since: '2026-08-27'
     },
     {
+        /* v32. Quatrième catégorie de l'étage 3 : le contact, joint par
+           téléphone, s'est inscrit à un webinar. C'est une issue d'appel comme
+           les trois autres : elle entre dans le total meetings_booked, donc dans
+           le taux de rendez-vous et dans « appels par rendez-vous ».
+
+           Son poids est le sien (colonne webinar_registrations de score_weights),
+           copié de meetings_known à la création puis réglable seul dans l'écran
+           Barème. Elle n'entre pas dans total_actions : l'appel qui l'a produite
+           y est déjà. Ouverte aux deux métiers, comme les trois autres. */
+        key: 'webinar_registrations', target: 'webinar_target', group: 'calls',
+        level: 3, jobs: ['bdr', 'sales'],
+        label: 'RDV, inscription webinar', short: 'RDV webinar',
+        hint: "Le contact, joint par téléphone, s'est inscrit à un webinar",
+        color: '#a855f7'
+    },
+    {
         /* LE DOUBLE COMPTE, ASSUMÉ ET ÉCRIT ICI POUR QU'IL NE SE DÉCOUVRE PAS
            DANS SIX MOIS.
 
@@ -230,10 +247,10 @@ export const METRICS = [
            meetings_booked par métier, ce que score_weights ne sait pas faire
            aujourd'hui, sa clé étant la métrique seule. */
         key: 'meetings_booked', target: 'meetings_target', group: 'calls',
-        level: 3, derived: ['meetings_rescheduled', 'meetings_new', 'meetings_known'],
+        level: 3, derived: ['meetings_rescheduled', 'meetings_new', 'meetings_known', 'webinar_registrations'],
         jobs: ['bdr', 'sales'],
         label: 'Rendez-vous obtenus', short: 'RDV',
-        hint: 'Somme des trois catégories ci-dessus', color: '#10b981'
+        hint: 'Somme des quatre catégories ci-dessus', color: '#10b981'
     },
     {
         /* Réservé au BDR faute de demande, pas par principe : un commercial en
@@ -242,21 +259,6 @@ export const METRICS = [
         jobs: ['bdr'],
         label: 'E-mails envoyés', short: 'E-mails',
         hint: 'E-mails de prospection sortants', color: '#f59e0b'
-    },
-    {
-        /* v31. Hors entonnoir, comme l'e-mail : une inscription n'est ni une
-           issue d'appel ni un rendez-vous, et elle ne s'additionne à aucun
-           total. Elle pèse au départ autant qu'un RDV avec un contact connu,
-           puis son poids se règle seul dans l'écran Barème.
-
-           Rangée dans le groupe 'emails' : même carte de saisie, même panneau
-           du tableau de bord. Réservée au BDR comme l'e-mail ; ajouter 'sales'
-           ici suffirait, sans migration. */
-        key: 'webinar_registrations', target: 'webinar_target', group: 'emails',
-        jobs: ['bdr'],
-        label: 'Inscriptions webinar', short: 'Webinar',
-        hint: 'Prospect ou client inscrit à un webinar suite à ton invitation',
-        color: '#ec4899'
     },
 
     /* ---- Cycle de vente, métier commercial -------------------------------
@@ -399,6 +401,10 @@ export const SCORE_WEIGHTS = [
     { key: 'meetings_rescheduled', w: 25, icon: '♻️', label: 'RDV reprogrammé', plural: 'RDV reprogrammés' },
     { key: 'meetings_new', w: 25, icon: '⭐', label: 'RDV, nouveau contact', plural: 'RDV, nouveau contact' },
     { key: 'meetings_known', w: 25, icon: '🤝', label: 'RDV, contact connu', plural: 'RDV, contact connu' },
+    /* v32. Repli à 25 comme meetings_known : en base le poids est copié de
+       meetings_known à la création puis se règle seul, et le repli ne sert que si
+       la table du barème est injoignable. Même nombre que dans v_daily_kpi. */
+    { key: 'webinar_registrations', w: 25, icon: '🎟️', label: 'RDV, inscription webinar', plural: 'RDV, inscription webinar' },
 
     /* LES TROIS TOTAUX HÉRITÉS, à zéro depuis la v30.
 
@@ -417,10 +423,6 @@ export const SCORE_WEIGHTS = [
     { key: 'meetings_booked', w: 0, icon: '🧮', label: 'Total « rendez-vous »', plural: 'rendez-vous' },
 
     { key: 'emails_sent', w: 1, icon: '✉️', label: 'E-mail envoyé', plural: 'e-mails envoyés' },
-    /* v31. Repli à 25 comme meetings_known : en base le poids démarre à la valeur
-       de meetings_known puis se règle seul, et le repli ne sert que si la table
-       du barème est injoignable. Même nombre que dans la vue v_daily_kpi. */
-    { key: 'webinar_registrations', w: 25, icon: '🎟️', label: 'Inscription webinar', plural: 'inscriptions webinar' },
     { key: 'companies_created', w: 2, icon: '🏢', label: 'Entreprise créée', plural: 'entreprises créées' },
     { key: 'contacts_created', w: 2, icon: '👤', label: 'Contact créé', plural: 'contacts créés' },
     /* Le RDV1 vaut autant que le rendez-vous obtenu : pour un commercial, c'est
