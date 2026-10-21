@@ -421,7 +421,7 @@ function ligneHtml(m, variante) {
 const ETAGES = {
     1: { titre: 'Ce que j\'ai lancé', sous: 'Tous les appels passés, aboutis ou non' },
     2: { titre: "J'ai eu quelqu'un", sous: 'Trois issues, jamais deux fois le même appel' },
-    3: { titre: "J'ai obtenu un rendez-vous", sous: "Trois catégories, jamais deux fois le même rendez-vous" }
+    3: { titre: "J'ai obtenu un rendez-vous", sous: "Quatre catégories, jamais deux fois le même rendez-vous" }
 };
 
 function buildCards() {
@@ -1576,7 +1576,7 @@ function paintDerived() {
        toujours nul. Pour qui a les deux métiers, les additionner est bien le
        sens voulu : ce sont deux rencontres différentes. */
     const rdv = num('meetings_rescheduled') + num('meetings_new') + num('meetings_known')
-              + num('first_meetings');
+              + num('webinar_registrations') + num('first_meetings');
 
     $('#kpi-connect').textContent = calls > 0 ? `${fmtDec((conn / calls) * 100)} %` : '–';
     // Non mesuré et zéro ne s'affichent pas pareil : le premier est une absence
