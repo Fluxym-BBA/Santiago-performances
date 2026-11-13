@@ -597,6 +597,7 @@ function rankRates(ms) {
     const has = k => ms.some(m => m.key === k);
     const out = [];
     if (has('calls_made')) out.push({ th: 'Réponse %', get: a => a.connect_rate });
+    if (has('calls_made')) out.push({ th: 'Argum. %', get: a => a.argued_rate });
     if (has('meetings_booked')) out.push({ th: 'RDV %', get: a => a.meeting_rate });
     return out;
 }
@@ -801,7 +802,32 @@ const METRIC_LABEL = {
     calls_connected: 'Appels aboutis',
     meetings_booked: 'Rendez-vous obtenus',
     emails_sent: 'E-mails envoyés',
-    meeting_rate: 'Taux de RDV'
+    meeting_rate: 'Taux de RDV',
+    connect_rate: 'Taux de réponse',
+    argued_rate: 'Taux d\'appels argumentés'
+};
+
+/* Les trois taux que la vue d'équipe sait tracer, personne par personne. Chacun
+   dit d'où viennent son numérateur et son dénominateur : l'info-bulle les donne
+   toujours, parce qu'un taux sans ses volumes ne se lit pas. */
+const RATE_DEFS = {
+    connect_rate: {
+        meta: 'Taux de réponse, recalculé depuis les volumes',
+        num: a => a.calls_connected, den: a => a.calls_made,
+        numLabel: 'réponses', denLabel: 'appels', denWord: 'appels'
+    },
+    argued_rate: {
+        meta: 'Taux d\'appels argumentés, recalculé depuis les volumes',
+        // Les appels des seules journées où l'échange est compté : sans cela le
+        // numérateur et le dénominateur ne porteraient pas sur les mêmes jours.
+        num: a => a.calls_engaged, den: a => a.measured_calls_made,
+        numLabel: 'échanges', denLabel: 'appels', denWord: 'appels'
+    },
+    meeting_rate: {
+        meta: 'Taux de rendez-vous, recalculé depuis les volumes',
+        num: a => a.meetings_booked, den: a => a.calls_connected,
+        numLabel: 'RDV', denLabel: 'aboutis', denWord: 'appels aboutis'
+    }
 };
 
 /* --------------------------------------------------------------------------
@@ -856,6 +882,33 @@ const CHARTS = [
         render: (host, shown, ctx) => drawBars(host, shown, 'meetings_booked', ctx)
     },
     {
+        key: 'response', icon: '📲', wide: true,
+        title: 'Taux de réponse',
+        sub: () => 'Appels décrochés pour cent appels passés',
+        metric: 'connect_rate',
+        note: ctx => `Un appel est « répondu » dès que quelqu'un décroche, quelle que soit la suite : sans
+            échange, échange avec un nouveau contact, échange avec un contact connu. Le taux est recalculé
+            depuis les volumes du ${granWord(ctx.gran)}, jamais moyenné. Il mesure la qualité du fichier et
+            des horaires d'appel plus que celle du discours : voir le taux d'appels argumentés pour la suite.`,
+        hover: () => `le taux de chacun sur le moment pointé, avec les volumes de réponses et d'appels
+            qui ont servi à le calculer.`,
+        render: (host, shown, ctx) => drawRates(host, shown, ctx, 'connect_rate')
+    },
+    {
+        key: 'argued', icon: '🗣️', wide: true,
+        title: 'Taux d\'appels argumentés',
+        sub: () => 'Appels avec échange pour cent appels passés',
+        metric: 'argued_rate',
+        note: ctx => `Seules comptent les deux issues avec échange (nouveau contact et contact connu), rapportées
+            à tous les appels passés, comme le taux de réponse : l'écart entre les deux courbes d'une même
+            personne est la part de ses décrochés qui s'arrêtent avant toute conversation. Le taux est calculé
+            sur les journées où l'échange est compté : la courbe s'interrompt avant, sans zéro inventé.
+            Recalculé depuis les volumes du ${granWord(ctx.gran)}, jamais moyenné.`,
+        hover: () => `le taux de chacun sur le moment pointé, avec les volumes d'échanges et d'appels
+            qui ont servi à le calculer.`,
+        render: (host, shown, ctx) => drawRates(host, shown, ctx, 'argued_rate')
+    },
+    {
         key: 'rate', icon: '🎯', wide: true,
         title: 'Taux de rendez-vous',
         sub: () => 'Rendez-vous obtenus pour cent appels aboutis',
@@ -865,7 +918,7 @@ const CHARTS = [
             ne veut rien dire. L'info-bulle donne les volumes pour trancher.`,
         hover: () => `le taux de chacun sur le moment pointé, avec les volumes d'appels aboutis et
             de rendez-vous qui ont servi à le calculer.`,
-        render: (host, shown, ctx) => drawRates(host, shown, ctx)
+        render: (host, shown, ctx) => drawRates(host, shown, ctx, 'meeting_rate')
     }
 ];
 
@@ -912,16 +965,17 @@ function drawBars(host, shown, key, ctx) {
     });
 }
 
-function drawRates(host, shown, ctx) {
+function drawRates(host, shown, ctx, rateKey = 'meeting_rate') {
     const bk = bucketsOf(shown, ctx);
     if (!bk.length || !bk[0].list.length) return host.innerHTML = emptyStateHtml();
     const gran = ctx.gran;
+    const def = RATE_DEFS[rateKey];
 
     lineChart(host, {
         labels: bk[0].list.map(b => b.label),
         series: bk.map(b => ({
             name: b.name, color: b.color,
-            values: b.list.map(x => agg(x.rows).meeting_rate)
+            values: b.list.map(x => agg(x.rows)[rateKey])
         })),
         height: ctx.big ? 460 : 300,
         tip: i => {
@@ -929,25 +983,25 @@ function drawRates(host, shown, ctx) {
             const label = gran === 'day' ? formatLong(first.key) : first.label;
             const vals = bk.map(b => {
                 const a = agg(b.list[i] ? b.list[i].rows : []);
-                return { name: b.name, color: b.color, rate: a.meeting_rate,
-                         conn: a.calls_connected, meet: a.meetings_booked };
+                return { name: b.name, color: b.color, rate: a[rateKey],
+                         num: def.num(a), den: def.den(a) };
             }).sort((x, y) => (y.rate ?? -1) - (x.rate ?? -1));
 
             return {
                 title: label,
-                meta: 'Taux de rendez-vous, recalculé depuis les volumes',
+                meta: def.meta,
                 sections: [{
                     accent: 'a', head: `Classement sur ce ${granWord(gran)}`,
                     rows: vals.map((x, k) => ({
                         color: x.color,
                         label: `${k + 1}. ${x.name}`,
-                        sub: `${fmtInt(x.meet)} RDV sur ${fmtInt(x.conn)} aboutis`,
+                        sub: `${fmtInt(x.num)} ${def.numLabel} sur ${fmtInt(x.den)} ${def.denLabel}`,
                         value: x.rate == null ? '–' : `${fmtDec(x.rate)} %`,
                         em: k === 0 && x.rate != null,
                         muted: x.rate == null
                     }))
                 }],
-                foot: vals.some(x => x.conn > 0 && x.conn < 10)
+                foot: vals.some(x => x.den > 0 && x.den < 10)
                     ? 'Certains volumes sont <b>trop faibles</b> pour que le taux soit significatif.'
                     : 'Un taux ne se compare qu\'à volumes comparables.'
             };
@@ -1417,7 +1471,7 @@ function exportCsv() {
     // n'aurait que le second referait le classement mêlé qu'on vient d'écarter.
     const head = ['Rang metier', 'Rang global', 'Personne', 'E-mail', 'Metier', 'Admin', 'Demo', 'Actif',
         'Jours saisis', 'Jours periode',
-        ...cols.map(m => m.short), 'Taux aboutis %', 'Taux RDV %', 'Score'];
+        ...cols.map(m => m.short), 'Taux reponse %', 'Taux argumentes %', 'Taux RDV %', 'Score'];
     const lines = people.map(p => [
         p.jobRank, p.rank, nameOf(p), p.profile.email || '', jobLabel(p.profile),
         p.profile.is_admin ? 'oui' : 'non',
@@ -1425,6 +1479,7 @@ function exportCsv() {
         p.a.activeDays, p.a.days,
         ...cols.map(m => p.a[m.key]),
         p.a.connect_rate == null ? '' : p.a.connect_rate.toFixed(1),
+        p.a.argued_rate == null ? '' : p.a.argued_rate.toFixed(1),
         p.a.meeting_rate == null ? '' : p.a.meeting_rate.toFixed(1),
         p.a.productivity_score
     ]);

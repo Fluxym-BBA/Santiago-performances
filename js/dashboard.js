@@ -545,6 +545,7 @@ function rateRows(a) {
     const pc = v => (v == null ? '–' : `${fmtDec(v)} %`);
     const base = [
         { label: 'Taux de réponse', sub: 'réponses / appels', value: pc(a.connect_rate), muted: true },
+        { label: 'Taux d\'appels argumentés', sub: 'échanges / appels', value: pc(a.argued_rate), muted: true },
         { label: 'Taux de RDV', sub: 'RDV / aboutis', value: pc(a.meeting_rate), muted: true }
     ];
     /* Les deux taux d'échange n'apparaissent que si la période est mesurée de
@@ -555,8 +556,9 @@ function rateRows(a) {
     if (!a.fullyMeasured) return base;
     return [
         base[0],
-        { label: 'Taux d\'échange', sub: 'échanges / aboutis', value: pc(a.engage_rate), muted: true },
         base[1],
+        { label: 'Taux d\'échange', sub: 'échanges / aboutis', value: pc(a.engage_rate), muted: true },
+        base[2],
         { label: 'RDV après échange', sub: 'RDV / échanges', value: pc(a.meeting_rate_engaged), muted: true }
     ];
 }
@@ -868,7 +870,8 @@ const CHARTS = [
         title: 'Taux de conversion comparés',
         sub: ctx => `Taux recalculés sur chaque ${granWord(ctx.gran)}, avec le niveau de la référence en repère.`,
         legend: ctx => [
-            { color: A_SHADES[0], shape: 'line', label: 'Appels aboutis / appels passés (%)' },
+            { color: A_SHADES[0], shape: 'line', label: 'Taux de réponse : aboutis / appels passés (%)' },
+            { color: A_RAMP[2], shape: 'line', label: 'Taux d\'appels argumentés : échanges / appels passés (%)' },
             { color: A_SHADES[2], shape: 'line', label: 'RDV / appels aboutis (%)' },
             { color: A_RAMP[1], shape: 'line', label: 'RDV / appels avec échange (%)' },
             { color: B_MAIN, shape: 'dash', label: `Niveaux de la référence · ${pLab(ctx.bP)}` }
@@ -876,6 +879,11 @@ const CHARTS = [
         note: () => `Les taux sont <b>recalculés à partir des volumes</b> de chaque ${granWord()} ` +
             `(somme des aboutis ÷ somme des appels), et non obtenus en moyennant des taux quotidiens : ` +
             `sinon un jour à 2 appels pèserait autant qu'un jour à 50.<br><br>` +
+            `Le <b>taux de réponse</b> compte tout appel où quelqu'un a décroché (sans échange, échange avec un ` +
+            `nouveau contact, échange avec un contact connu). Le <b>taux d'appels argumentés</b> ne garde que les ` +
+            `deux issues avec échange, sur les mêmes appels passés : l'écart entre les deux courbes dit combien de ` +
+            `décrochés s'arrêtent avant toute conversation. La courbe des argumentés est interrompue là où l'échange ` +
+            `n'est pas compté.<br><br>` +
             `Les <b>traits violets horizontaux</b> donnent les taux de la période de référence. ` +
             `Lecture utile : un volume d'appels en hausse avec des taux qui passent sous les traits violets ` +
             `signale un problème de ciblage ou de discours, pas un manque d'effort.<br><br>` +
@@ -895,6 +903,9 @@ const CHARTS = [
             if (aB.connect_rate != null) refs.push({
                 value: aB.connect_rate, color: B_SHADES[0], short: `${Math.round(aB.connect_rate)}%`,
                 label: `Taux de réponse de la référence : ${fmtDec(aB.connect_rate)} %` });
+            if (aB.argued_rate != null) refs.push({
+                value: aB.argued_rate, color: B_RAMP[2], short: `${Math.round(aB.argued_rate)}%`,
+                label: `Taux d'appels argumentés de la référence : ${fmtDec(aB.argued_rate)} %` });
             if (aB.meeting_rate != null) refs.push({
                 value: aB.meeting_rate, color: B_SHADES[2], short: `${Math.round(aB.meeting_rate)}%`,
                 label: `Taux de RDV de la référence : ${fmtDec(aB.meeting_rate)} %` });
@@ -915,6 +926,7 @@ const CHARTS = [
                 labels: buckets.map(b => b.label),
                 series: [
                     { name: 'Réponse %', color: A_SHADES[0], values: aggs.map(a => a.connect_rate), fmt: v => `${fmtDec(v)} %` },
+                    { name: 'Argumentés %', color: A_RAMP[2], values: aggs.map(a => a.argued_rate), fmt: v => `${fmtDec(v)} %` },
                     { name: 'RDV %', color: A_SHADES[2], values: aggs.map(a => a.meeting_rate), fmt: v => `${fmtDec(v)} %` },
                     ...(anyEngaged ? [{ name: 'RDV / échange %', color: A_RAMP[1],
                         values: engagedSeries, fmt: v => `${fmtDec(v)} %` }] : [])
@@ -935,6 +947,8 @@ const CHARTS = [
                             secA([
                                 { color: A_SHADES[0], label: 'Taux de réponse', sub: 'sur appels passés',
                                   value: pc(a.connect_rate), em: true },
+                                { color: A_RAMP[2], label: 'Appels argumentés', sub: 'sur appels passés',
+                                  value: pc(a.argued_rate), em: true },
                                 { color: A_SHADES[2], label: 'Rendez-vous', sub: 'sur appels aboutis',
                                   value: pc(a.meeting_rate), em: true },
                                 ...(a.fullyMeasured ? [{ color: A_RAMP[1], label: 'RDV après échange',
@@ -957,6 +971,7 @@ const CHARTS = [
                             },
                             secB([
                                 { color: B_SHADES[0], shape: 'dash', label: 'Taux de réponse', value: pc(aB.connect_rate) },
+                                { color: B_RAMP[2], shape: 'dash', label: 'Appels argumentés', value: pc(aB.argued_rate) },
                                 { color: B_SHADES[2], shape: 'dash', label: 'Rendez-vous', value: pc(aB.meeting_rate) },
                                 ...(aB.fullyMeasured ? [{ color: B_RAMP[1], shape: 'dash',
                                     label: 'RDV après échange', value: pc(aB.meeting_rate_engaged) }] : [])
@@ -964,6 +979,7 @@ const CHARTS = [
                         ],
                         deltas: [
                             { label: 'Réponse vs réf.', html: ppl(a.connect_rate, aB.connect_rate) },
+                            { label: 'Argumentés vs réf.', html: ppl(a.argued_rate, aB.argued_rate) },
                             { label: 'RDV vs réf.', html: ppl(a.meeting_rate, aB.meeting_rate) },
                             ...(a.fullyMeasured && aB.fullyMeasured
                                 ? [{ label: 'RDV / échange vs réf.',
@@ -1679,7 +1695,7 @@ function renderTable(aRows) {
 
     if (!act.length) {
         $('#history-body').innerHTML =
-            `<tr><td colspan="12" class="td-muted" style="text-align:center;padding:32px">
+            `<tr><td colspan="13" class="td-muted" style="text-align:center;padding:32px">
              Aucune saisie sur la période analysée.</td></tr>`;
         return;
     }
@@ -1707,12 +1723,18 @@ function renderTable(aRows) {
             <td data-th="Entreprises">${fmtInt(num(r, 'companies_created'))}</td>
             <td data-th="Contacts">${fmtInt(num(r, 'contacts_created'))}</td>
             <td data-th="Taux de réponse" class="${r.connect_rate == null ? 'td-muted' : ''}">${r.connect_rate == null ? '–' : fmtDec(r.connect_rate) + ' %'}</td>
+            <td data-th="Taux argumentés" class="${argueJour(r) == null ? 'td-muted' : ''}">${argueJour(r) == null ? '–' : fmtDec(argueJour(r)) + ' %'}</td>
             <td data-th="Taux RDV" class="${r.meeting_rate == null ? 'td-muted' : ''}">${r.meeting_rate == null ? '–' : fmtDec(r.meeting_rate) + ' %'}</td>
             <td data-th="Score" class="td-score"><b>${fmtInt(score(r))}</b></td>
             <td data-th="" class="td-action">${editLink(r.activity_date)}</td>
         </tr>`;
     }).join('');
 }
+
+/** Taux d'appels argumentés d'UNE journée : échanges / appels passés. Vide quand
+    l'échange n'était pas compté ce jour-là ou qu'aucun appel n'a été passé. */
+const argueJour = r => (!isMeasured(r) || num(r, 'calls_made') <= 0)
+    ? null : (num(r, MEASURED_KEY) / num(r, 'calls_made')) * 100;
 
 function exportCsv() {
     const rows = rowsFor(state.a).filter(isActive);
@@ -1724,7 +1746,7 @@ function exportCsv() {
        la tirer vers le bas. */
     const head = ['Date', 'Appels', 'Appels aboutis', 'Appels avec échange',
         'Appels sans échange', 'RDV', 'E-mails', 'Entreprises', 'Contacts',
-        'Taux aboutis %', 'Taux échange %', 'Taux RDV %', 'Taux RDV après échange %',
+        'Taux réponse %', 'Taux argumentés %', 'Taux échange %', 'Taux RDV %', 'Taux RDV après échange %',
         'Score', 'Note'];
     const body = rows.map(r => [
         r.activity_date, num(r, 'calls_made'), num(r, 'calls_connected'),
@@ -1733,6 +1755,7 @@ function exportCsv() {
         num(r, 'meetings_booked'), num(r, 'emails_sent'),
         num(r, 'companies_created'), num(r, 'contacts_created'),
         r.connect_rate == null ? '' : fmtDec(r.connect_rate),
+        argueJour(r) == null ? '' : fmtDec(argueJour(r)),
         !isMeasured(r) || r.engage_rate == null ? '' : fmtDec(r.engage_rate),
         r.meeting_rate == null ? '' : fmtDec(r.meeting_rate),
         !isMeasured(r) || r.meeting_rate_engaged == null ? '' : fmtDec(r.meeting_rate_engaged),
