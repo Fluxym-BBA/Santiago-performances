@@ -29,7 +29,7 @@ import {
     requireAuth, METRICS, EMPTY_DAY, METRIC_BY_KEY, todayISO,
     addDaysISO, formatLong, relativeLabel, diffDays, minISO, maxISO, fetchDay,
     saveDay, bump, setMetric, loadTargets, targetFor, targetsLoaded, humanError,
-    SCORE_WEIGHTS, scoreOf, isViewingOther, viewedProfile, metricsFor,
+    SCORE_WEIGHTS, weightsFor, scoreOf, isViewingOther, viewedProfile, metricsFor,
     SALES_EVENT_KINDS, isEventMetric, cleanAccountName, accountKey,
     loadAccounts, searchAccounts, ensureAccount, accountByName, similarAccounts,
     fetchDayEvents, addSalesEvent, deleteSalesEvent,
@@ -1579,6 +1579,13 @@ function paintDerived() {
               + num('webinar_registrations') + num('first_meetings');
 
     $('#kpi-connect').textContent = calls > 0 ? `${fmtDec((conn / calls) * 100)} %` : '–';
+    // Même dénominateur que le taux de réponse : tous les appels passés. « Non
+    // mesuré » quand l'échange n'a jamais été renseigné ce jour-là.
+    const arg = $('#kpi-argued');
+    if (arg) {
+        arg.textContent = !mesureEch ? 'non mesuré'
+            : calls > 0 ? `${fmtDec((eched / calls) * 100)} %` : '–';
+    }
     // Non mesuré et zéro ne s'affichent pas pareil : le premier est une absence
     // de donnée, le second un résultat.
     const eng = $('#kpi-engage');
@@ -1943,7 +1950,7 @@ function buildScoreExplain() {
                 se notent pas. Perdre une affaire ne peut pas faire monter un score.
             </p>` : ''}
             <div class="weights" style="margin:14px 0 0">
-                ${SCORE_WEIGHTS.filter(w => mine.has(w.key)).map(w => `
+                ${weightsFor(viewedProfile(), { zeros: true }).filter(w => mine.has(w.key)).map(w => `
                     <div class="weight" style="background:var(--gray-100);border-color:var(--gray-200)">
                         <span style="font-size:15px">${w.icon}</span>
                         <span class="weight-label" style="color:var(--gray-600)">${w.label}</span>

@@ -76,7 +76,7 @@ export const isActive = r => num(r, 'total_actions') > 0;
 export const zeroDay = iso => ({
     ...EMPTY_DAY, activity_date: iso, productivity_score: 0, total_actions: 0,
     [MEASURED_KEY]: 0,
-    connect_rate: null, engage_rate: null, meeting_rate: null,
+    connect_rate: null, engage_rate: null, argued_rate: null, meeting_rate: null,
     meeting_rate_engaged: null, calls_per_meeting: null, notes: null
 });
 
@@ -144,6 +144,16 @@ export function agg(rows) {
     // qu'aucune journée n'est mesurée : la soustraction n'aurait aucun sens.
     a.calls_unengaged = mActive > 0 ? Math.max(0, mConn - a.calls_engaged) : null;
     a.engage_rate = mConn > 0 ? (a.calls_engaged / mConn) * 100 : null;
+
+    /* Taux d'appels argumentés : les deux issues d'échange (nouveau contact et
+       contact connu) rapportées à TOUS les appels passés, comme le taux de
+       réponse, pour que les deux se lisent sur la même base. Calculé sur les
+       seules journées où l'échange est compté : sur une période à cheval sur le
+       début de la mesure, le numérateur ne porte pas sur les mêmes journées que
+       le dénominateur sinon. NULL tant qu'aucune journée n'est mesurée.
+       Le taux de réponse, lui, est connect_rate : les trois issues (sans
+       échange, nouveau, connu) sont exactement le total calls_connected. */
+    a.argued_rate = mCalls > 0 && mActive > 0 ? (mEng / mCalls) * 100 : null;
     a.meeting_rate_engaged = a.calls_engaged > 0 ? (mMeet / a.calls_engaged) * 100 : null;
 
     /* Mesure complète = toutes les journées saisies de la période sont

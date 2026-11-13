@@ -1,0 +1,15 @@
+# Ce qui n'est PAS servi par le Worker. Syntaxe de .gitignore.
+# Le dépôt contient le site et son outillage : seul le site est publié.
+.git
+.github
+.claude
+.assetsignore
+wrangler.jsonc
+node_modules
+
+# Scripts SQL, Edge Function Supabase, documentation de projet : jamais publics.
+sql
+supabase
+Info IA
+README.md
+CLAUDE.md

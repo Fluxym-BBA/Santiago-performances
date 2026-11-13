@@ -19,14 +19,18 @@ import {
     startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter,
     periodLabel, periodLabelShort, humanError, METRICS, SCORE_WEIGHTS,
     isContributor, metricsForAny, jobLabel, jobsOf,
-    loadScoreWeights, scoreWeightsMeta
+    loadScoreWeights, scoreWeightsMeta, previousPeriod,
+    loadSettings, loadTargets, loadVisibility
 } from './api.js';
+import {
+    REF_SCALES, motDe, ouvres, videCacheOuvres, attenduEquipe
+} from './rythme.js';
 import {
     num, score, isActive, agg, valOf, bucketize, autoGran, granWord, rowsForRange
 } from './analytics.js';
 import { renderNav } from './nav.js';
 import {
-    escapeHtml, fmtInt, fmtDec, toast, hideVeil,
+    escapeHtml, fmtInt, fmtDec, toast, hideVeil, delta,
     lineChart, barChart, compareChart, legendHtml, onResize
 } from './ui.js';
 
@@ -150,7 +154,9 @@ const datesOpen = new Set();  // cartes dont le panneau de dates est déplié
 
 /** La fenêtre de dates qu'il faut avoir chargée pour pouvoir tout dessiner. */
 function neededWindow() {
-    let from = state.from, to = state.to;
+    // La période précédente de même durée est la référence des indicateurs de
+    // tête : sans elle, aucun écart ne peut être calculé.
+    let from = previousPeriod(state.from, state.to).from, to = state.to;
     scopes.forEach(s => { from = minISO(from, s.from); to = maxISO(to, s.to); });
     return { from, to };
 }
@@ -301,6 +307,7 @@ async function load() {
     // Les agrégats par période sont refaits à chaque chargement : garder ceux du
     // rendu précédent afficherait les chiffres d'avant le changement.
     statsCache = new Map();
+    videCacheOuvres();
 }
 
 const nameOfProfile = pr => pr.display_name || pr.email || 'Sans nom';
@@ -346,14 +353,122 @@ const subOf = (c, ctx) => c.sub(ctx)
    Indicateurs de tête
    -------------------------------------------------------------------------- */
 
+/* --------------------------------------------------------------------------
+   Rythme : l'objectif de référence, carte par carte
+
+   Même mécanique que la page Performances (rythme.js), appliquée à l'ÉQUIPE :
+   l'attendu d'une carte est la somme des attendus de chacun, et chacun n'y
+   entre que si son métier tient ce compteur. Même défaut que la page
+   Performances : l'exercice, avec les lettres J S M A pour en changer, soit pour
+   toute la zone, soit pour une seule carte. Rien n'est mémorisé.
+   -------------------------------------------------------------------------- */
+
+let refDefaut = 'year';
+const refExceptions = new Map();   // carte → maille forcée
+const refDe = key => refExceptions.get(key) || refDefaut;
+
+/** Comme en v20 : revenir sur le défaut EFFACE l'exception au lieu de la recopier. */
+function poserRef(key, v) {
+    if (v === refDefaut) refExceptions.delete(key);
+    else refExceptions.set(key, v);
+}
+
+/* Les cartes dont on a un objectif, et les compteurs qui le portent. Les fiches
+   CRM sont la somme de deux compteurs, le cycle de vente aussi. */
+const KPI_GOAL = {
+    meetings_booked: 'meetings_booked',
+    calls_made: 'calls_made',
+    calls_connected: 'calls_connected',
+    crm: ['companies_created', 'contacts_created'],
+    first_meetings: 'first_meetings',
+    cycle: ['first_meetings', 'proposals_sent']
+};
+
+/** Le segment J S M A d'une carte. */
+function refSegHtml(key) {
+    const cur = refDe(key);
+    return `<span class="ref-seg" role="group" aria-label="Objectif de référence">${
+        REF_SCALES.map(sc => `<button type="button" class="ref-btn${sc.v === cur ? ' is-on' : ''}"
+            data-ref="${sc.v}" data-ref-key="${escapeHtml(key)}"
+            title="Objectif ${sc.mot}">${sc.l}</button>`).join('')}</span>`;
+}
+
+/**
+ * La ligne « attendu / avance / retard » d'une carte, pour l'équipe.
+ *
+ * Le réalisé comparé est celui des seules personnes qui ont un objectif sur ce
+ * compteur : un attendu partiel face au réalisé de toute l'équipe afficherait
+ * une avance qui n'existe pas. Quand certaines n'ont pas d'objectif, la ligne le
+ * dit, au lieu de laisser croire que l'équipe est entière.
+ *
+ * En moyenne, l'attendu devient une cadence par jour ouvré ET par personne, ce
+ * qui est la contrepartie du réalisé par jour actif et par personne.
+ */
+function goalHtml(cardKey, mode) {
+    const goal = KPI_GOAL[cardKey];
+    if (!goal) return '';
+    const sc = refDe(cardKey);
+    if (sc === 'off') return '';
+
+    const r = attenduEquipe(people.map(p => p.profile), goal, state.from, state.to, sc);
+    let txt, cls = '';
+    if (r.value == null) {
+        txt = r.total ? `aucun objectif ${motDe(sc)}` : 'sans objet pour cette équipe';
+        cls = ' kpi-goal--none';
+    } else {
+        // Réalisé de ceux qui ont un objectif, sur la période globale.
+        const ids = new Set(r.profils.map(pr => pr.user_id));
+        const tous = agg(people.filter(p => ids.has(p.profile.user_id)).flatMap(p => p.rows));
+        const jo = ouvres(state.from, state.to);
+        const att = mode === 'avg' ? (jo ? r.value / (jo * r.covered) : null) : r.value;
+        // valOf divise, en moyenne, par les jours actifs de l'ensemble (jours-
+        // personne) : c'est une cadence par personne et par jour, la même unité
+        // que att. Les cartes à plusieurs compteurs en additionnent les valeurs.
+        const cles = Array.isArray(goal) ? goal : [goal];
+        const reel = cles.reduce((t, k) => t + valOf(tous, k, mode), 0);
+        const montre = v => mode === 'avg' ? fmtDec(v) : fmtInt(Math.round(v));
+        if (att == null) {
+            txt = `aucun objectif ${motDe(sc)}`;
+            cls = ' kpi-goal--none';
+        } else {
+            const ecart = reel - att;
+            const rond = mode === 'avg' ? Math.round(ecart * 10) / 10 : Math.round(ecart);
+            if (rond === 0) txt = `attendu ${montre(att)} · au rythme`;
+            else if (rond > 0) { txt = `attendu ${montre(att)} · avance de ${montre(Math.abs(ecart))}`; cls = ' kpi-goal--ahead'; }
+            else { txt = `attendu ${montre(att)} · retard de ${montre(Math.abs(ecart))}`; cls = ' kpi-goal--late'; }
+            if (r.covered < r.total) txt += ` · objectifs de ${r.covered} sur ${r.total}`;
+        }
+    }
+    return `<div class="kpi-goal"><span class="kpi-goal-txt${cls}">${escapeHtml(txt)}</span>${refSegHtml(cardKey)}</div>`;
+}
+
+/* --------------------------------------------------------------------------
+   Indicateurs de tête
+
+   MÊMES INDICATEURS QUE SUR LA PAGE D'UN BDR, consolidés sur l'équipe : même
+   calcul (analytics.js), même présentation, même référence (la période
+   précédente de même durée), même objectif lisible à quatre mailles. Un
+   administrateur lit donc l'équipe comme un BDR lit sa propre page, et un chiffre
+   d'équipe se rapproche d'un chiffre individuel sans traduction.
+
+   Une carte n'apparaît que si l'équipe a un métier qui la tient : sans commercial,
+   pas de cycle de vente ; sans BDR, pas de RDV obtenus.
+   -------------------------------------------------------------------------- */
+
 function renderKpis() {
     const host = document.getElementById('kpi-grid');
+    const mode = state.mode;
+    const unit = mode === 'avg' ? '/ jour actif' : '';
+    const show = v => mode === 'avg' ? fmtDec(v) : fmtInt(v);
+
+    const prev = previousPeriod(state.from, state.to);
     const team = agg(people.flatMap(p => p.rows));
+    const ref = agg(people.flatMap(p => rowsForRange(p.byDate, prev.from, prev.to)));
     const activePeople = people.filter(p => p.a.activeDays > 0);
     const best = people[0];
 
-    /* Compter les métiers présents, pour ne montrer une tuile de cycle de vente
-       qu'à une équipe qui en a une. Une tuile à zéro n'informe pas, elle
+    /* Compter les métiers présents, pour ne montrer une carte de cycle de vente
+       qu'à une équipe qui en a un. Une carte à zéro n'informe pas, elle
        encombre. */
     const hasJob = j => people.some(p => jobsOf(p.profile).includes(j));
     const anySales = hasJob('sales');
@@ -367,40 +482,99 @@ function renderKpis() {
              people.filter(p => jobsOf(p.profile).includes('sales')).length} commerciaux`
         : `${people.length} personne${people.length > 1 ? 's' : ''}`;
 
-    const tiles = [
-        {
-            hero: true, label: 'Score total de l\'équipe',
-            value: fmtInt(team.productivity_score),
-            sub: `${activePeople.length} ayant saisi sur ${mix} · ${pLabel()}`
-        },
-        { label: 'Appels passés', value: fmtInt(team.calls_made),
-          sub: `${fmtInt(team.calls_connected)} aboutis · ${team.connect_rate == null ? '–' : fmtDec(team.connect_rate) + ' %'}` },
+    const measured = team.measured_calls_made > 0;
+    const items = [
+        { label: '⚡ Score total de l\'équipe', key: 'productivity_score', hero: true,
+          extra: `${activePeople.length} ayant saisi sur ${mix}` },
         // Les deux rendez-vous ne sont jamais additionnés : le RDV obtenu est
         // décroché par un BDR, le RDV1 est tenu par un commercial. La même
         // rencontre peut porter les deux, une somme la compterait deux fois.
-        anySales && !anyBdr
-            ? { label: 'RDV1 tenus', value: fmtInt(team.first_meetings),
-                sub: `${fmtInt(team.proposals_sent)} proposition(s) envoyée(s)` }
-            : { label: 'Rendez-vous obtenus', value: fmtInt(team.meetings_booked),
-                sub: team.calls_per_meeting == null ? 'aucun RDV' : `${fmtDec(team.calls_per_meeting)} appels par RDV` },
-        anySales
-            ? { label: 'Cycle de vente', value: fmtInt(team.first_meetings + team.proposals_sent),
-                sub: `${fmtInt(team.first_meetings)} RDV1 · ${fmtInt(team.proposals_sent)} propositions · ${
-                    fmtInt(team.no_go + team.deals_dropped + team.deals_lost)} sortie(s)` }
-            : { label: 'E-mails envoyés', value: fmtInt(team.emails_sent),
-                sub: `${fmtInt(team.crm)} fiches CRM créées` },
-        { label: 'Meilleur score', value: best ? fmtInt(best.a.productivity_score) : '–',
-          sub: best ? `${nameOf(best)}${jobLabel(best.profile) ? ' · ' + jobLabel(best.profile) : ''}` : 'aucune donnée' },
-        { label: 'Jours saisis', value: fmtInt(team.activeDays),
-          sub: `sur ${fmtInt(people.length * periodLength(state.from, state.to))} jours-personne possibles` }
+        ...(anyBdr || !anySales ? [{ label: '🤝 Rendez-vous', key: 'meetings_booked' }] : []),
+        ...(anySales ? [{ label: '🎯 RDV1 tenus', key: 'first_meetings' }] : []),
+        { label: '📞 Appels', key: 'calls_made' },
+        { label: '✅ Appels aboutis', key: 'calls_connected',
+          extra: !measured ? 'échanges pas encore comptés'
+              : `dont ${fmtInt(team.calls_engaged)} avec échange${
+                  team.engage_rate == null ? '' : ` (${fmtDec(team.engage_rate)} %)`}` },
+        ...(anyBdr || !anySales ? [{ label: '🗂️ Fiches CRM', key: 'crm' }] : [])
     ];
 
-    host.innerHTML = tiles.map(it => `
+    let html = items.map(it => {
+        const v = valOf(team, it.key, mode), r = valOf(ref, it.key, mode);
+        return `
         <div class="kpi-tile${it.hero ? ' kpi-tile--hero' : ''}">
             <div class="kpi-label">${escapeHtml(it.label)}</div>
-            <div class="kpi-value">${it.value}</div>
-            <div class="kpi-sub">${escapeHtml(it.sub)}</div>
-        </div>`).join('');
+            <div class="kpi-value">${show(v)}${unit ? ` <small>${unit}</small>` : ''}</div>
+            ${delta(Math.round(v * 10) / 10, Math.round(r * 10) / 10).html}
+            <div class="kpi-sub">${it.extra ? `${escapeHtml(it.extra)}<br>` : ''}Référence : ${show(r)} ${unit}</div>
+            ${goalHtml(it.key, mode)}
+        </div>`;
+    }).join('');
+
+    const rate = (label, key, sub) => {
+        const v = team[key], r = ref[key];
+        return `
+        <div class="kpi-tile">
+            <div class="kpi-label">${label}</div>
+            <div class="kpi-value">${v == null ? '–' : fmtDec(v)} <small>%</small></div>
+            ${(v != null && r != null) ? delta(Math.round(v), Math.round(r), { suffix: ' pts' }).html : ''}
+            <div class="kpi-sub">${escapeHtml(sub)} · référence : ${r == null ? '–' : fmtDec(r) + ' %'}</div>
+        </div>`;
+    };
+
+    /* Taux de réponse : quelqu'un a décroché, quelle que soit la suite. Taux
+       d'appels argumentés : seules les deux issues avec échange comptent. */
+    html += rate('📲 Taux de réponse', 'connect_rate',
+        `${fmtInt(team.calls_connected)} réponses sur ${fmtInt(team.calls_made)} appels`);
+    if (team.argued_rate != null || ref.argued_rate != null) {
+        html += rate('🗣️ Taux d\'appels argumentés', 'argued_rate',
+            `${fmtInt(team.calls_engaged)} échanges sur ${fmtInt(team.measured_calls_made)} appels`);
+    }
+    if (anyBdr || !anySales) {
+        html += rate('🏁 Taux de RDV', 'meeting_rate', `sur ${fmtInt(team.calls_connected)} aboutis`);
+        if (team.fullyMeasured) {
+            html += rate('💬 RDV après échange', 'meeting_rate_engaged',
+                `sur ${fmtInt(team.calls_engaged)} échange(s)`);
+        }
+        html += `
+        <div class="kpi-tile">
+            <div class="kpi-label">💪 Effort par rendez-vous</div>
+            <div class="kpi-value">${team.calls_per_meeting == null ? '–' : fmtDec(team.calls_per_meeting)} <small>appels</small></div>
+            ${(team.calls_per_meeting != null && ref.calls_per_meeting != null)
+                ? delta(Math.round(team.calls_per_meeting * 10) / 10, Math.round(ref.calls_per_meeting * 10) / 10,
+                        { higherIsBetter: false }).html : ''}
+            <div class="kpi-sub">appels nécessaires pour 1 RDV · référence : ${
+                ref.calls_per_meeting == null ? '–' : fmtDec(ref.calls_per_meeting)}</div>
+        </div>`;
+    }
+
+    if (anySales) {
+        const cyc = team.first_meetings + team.proposals_sent;
+        const cycRef = ref.first_meetings + ref.proposals_sent;
+        html += `
+        <div class="kpi-tile">
+            <div class="kpi-label">🔄 Cycle de vente</div>
+            <div class="kpi-value">${fmtInt(cyc)}</div>
+            ${delta(cyc, cycRef).html}
+            <div class="kpi-sub">${fmtInt(team.first_meetings)} RDV1 · ${fmtInt(team.proposals_sent)} propositions · ${
+                fmtInt(team.no_go + team.deals_dropped + team.deals_lost)} sortie(s) · référence : ${fmtInt(cycRef)}</div>
+            ${goalHtml('cycle', 'total')}
+        </div>`;
+    }
+
+    html += `
+        <div class="kpi-tile">
+            <div class="kpi-label">🏆 Meilleur score</div>
+            <div class="kpi-value">${best ? fmtInt(best.a.productivity_score) : '–'}</div>
+            <div class="kpi-sub">${best ? escapeHtml(nameOf(best) + (jobLabel(best.profile) ? ' · ' + jobLabel(best.profile) : '')) : 'aucune donnée'}</div>
+        </div>
+        <div class="kpi-tile">
+            <div class="kpi-label">📅 Jours saisis</div>
+            <div class="kpi-value">${fmtInt(team.activeDays)}</div>
+            <div class="kpi-sub">sur ${fmtInt(people.length * periodLength(state.from, state.to))} jours-personne possibles · ${pLabel()}</div>
+        </div>`;
+
+    host.innerHTML = html;
 }
 
 /* --------------------------------------------------------------------------
@@ -422,7 +596,7 @@ const rankMetrics = () => metricsForAny(people.map(p => p.profile));
 function rankRates(ms) {
     const has = k => ms.some(m => m.key === k);
     const out = [];
-    if (has('calls_made')) out.push({ th: 'Abouti %', get: a => a.connect_rate });
+    if (has('calls_made')) out.push({ th: 'Réponse %', get: a => a.connect_rate });
     if (has('meetings_booked')) out.push({ th: 'RDV %', get: a => a.meeting_rate });
     return out;
 }
@@ -1187,6 +1361,7 @@ function renderSummary() {
         Un point de graphique représente <b>un ${granWord(gran)}</b>${
             scopes.size > 0 ? ', sur les graphiques qui suivent cette période' : ''}.
         Total de l'équipe : <b>${fmtInt(team.productivity_score)} points</b>.
+        Les indicateurs de tête sont comparés à <b>${periodLabel(previousPeriod(state.from, state.to).from, previousPeriod(state.from, state.to).to)}</b>.
         ${byFilters > 0 ? `${byFilters} compte${byFilters > 1 ? 's' : ''} exclu${byFilters > 1 ? 's' : ''} par les filtres.` : ''}
     </p>
     ${byHand > 0 ? `
@@ -1290,6 +1465,16 @@ async function refresh() {
     }
 }
 
+/** Surligne le réglage global de l'objectif et dit ce qu'il fait. */
+function syncRefControls() {
+    document.querySelectorAll('#seg-ref [data-ref-all]').forEach(b =>
+        b.classList.toggle('is-on', b.dataset.refAll === refDefaut));
+    const ex = document.getElementById('explain-ref');
+    if (ex) ex.textContent = refDefaut === 'off'
+        ? 'Aucun objectif affiché : les cartes ne comparent que deux périodes.'
+        : `L'attendu de l'équipe est la somme des objectifs ${motDe(refDefaut)}s de chacun, étalés sur les jours ouvrés. Une carte peut avoir sa propre lettre.`;
+}
+
 /* --------------------------------------------------------------------------
    Qui compte, nom par nom
 
@@ -1363,6 +1548,7 @@ function renderPeoplePick() {
 }
 
 function syncControls() {
+    syncRefControls();
     document.getElementById('a-from').value = state.from;
     document.getElementById('a-to').value = state.to;
     document.getElementById('hint-a').textContent =
@@ -1430,6 +1616,22 @@ function wire() {
         b.addEventListener('click', () => { state.demo = b.dataset.demo === '1'; refresh(); }));
     document.querySelectorAll('#seg-inactive button').forEach(b =>
         b.addEventListener('click', () => { state.inactive = b.dataset.inactive === '1'; refresh(); }));
+
+    /* Le sélecteur de rythme. data-ref-all pilote toute la zone, data-ref-key une
+       seule carte. Changer le défaut EFFACE les exceptions, sinon le forçage
+       d'hier resterait collé à une carte sans que personne ne sache pourquoi. */
+    document.addEventListener('click', ev => {
+        const b = ev.target.closest('[data-ref-all], [data-ref-key]');
+        if (!b) return;
+        if (b.dataset.refAll) {
+            refDefaut = b.dataset.refAll;
+            refExceptions.clear();
+        } else {
+            poserRef(b.dataset.refKey, b.dataset.ref);
+        }
+        syncRefControls();
+        renderKpis();
+    });
 
     document.getElementById('btn-export').addEventListener('click', exportCsv);
 
@@ -1501,6 +1703,14 @@ function wire() {
         // chargeait pas et citait donc les valeurs par défaut du fichier, qui
         // deviennent fausses dès le premier réglage depuis l'écran Barème.
         await loadScoreWeights();
+        // Les objectifs servent à l'attendu des cartes de tête. Un échec réseau ne
+        // doit pas empêcher la page de s'afficher : sans eux, les cartes disent
+        // « aucun objectif » et le reste vit normalement.
+        try {
+            await Promise.all([loadSettings(), loadTargets(), loadVisibility()]);
+        } catch (e) {
+            console.warn('Objectifs indisponibles : la vue d\'équipe s\'affiche sans attendu.', e);
+        }
         wire();
         // Les graphiques se redessinent à la largeur disponible : la fenêtre
         // agrandie aussi, sinon son contenu resterait à l'ancienne taille.

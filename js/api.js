@@ -1036,6 +1036,32 @@ export function metricsForAny(list) {
 }
 
 /**
+ * Poids du score qui concernent ces profils, et eux seuls.
+ *
+ * Le barème est AVEUGLE au métier (voir METRICS) : il dit combien vaut chaque
+ * action pour quiconque la saisit. Mais l'EXPLICATION du score ne doit parler
+ * que de ce que la personne regardée peut réellement saisir : un BDR n'a rien à
+ * faire du RDV1 ni du NO GO, un commercial rien des entreprises créées. Cette
+ * fonction est l'unique filtre, pour que la page de saisie, le tableau de bord
+ * et l'équipe expliquent le même score avec les mêmes lignes.
+ *
+ * Les totaux hérités (« aboutis », « avec échange », « rendez-vous ») sont à zéro
+ * depuis la v30 : ils n'apportent aucun point, ils ne sont donc jamais listés
+ * tant qu'ils valent zéro. Les vrais compteurs à zéro (NO GO…) restent listés
+ * quand `zeros` est vrai : ils se comptent, ils ne se notent pas, et l'écran
+ * doit pouvoir le dire.
+ *
+ * @param {object|object[]} profils  un profil, ou la liste d'une équipe
+ * @param {{zeros?: boolean}} opts
+ */
+export function weightsFor(profils, { zeros = false } = {}) {
+    const liste = (Array.isArray(profils) ? profils : [profils]).filter(Boolean);
+    const cles = new Set(metricsForAny(liste).map(m => m.key));
+    return SCORE_WEIGHTS.filter(w => cles.has(w.key)
+        && (w.w > 0 || (zeros && !METRIC_BY_KEY[w.key]?.derived)));
+}
+
+/**
  * Charge mon profil, puis résout le contexte demandé par l'URL.
  *
  * Le paramètre `?u=<identifiant>` désigne l'utilisateur consulté. Faire porter

@@ -50,6 +50,12 @@ Deux exceptions assumées, déjà en place :
 Politique d'indexation : `robots.txt` interdit l'exploration et les trois pages
 portent `<meta name="robots" content="noindex, nofollow">`.
 
+**Hébergement cible (préparé le 13/11/2026)** : Worker Cloudflare `cockpit-bdr`
+(`https://cockpit-bdr.fluxym.workers.dev`), assets statiques, configuré par
+`wrangler.jsonc`. `.assetsignore` exclut `sql/`, `supabase/`, `Info IA/` et le
+README : ce qui est servi est le site, pas son outillage. Tant que le Worker n'est
+pas validé, GitHub Pages reste l'hébergement actif.
+
 ⚠️ Ne pas ajouter de fichier `CNAME` avant que l'enregistrement DNS
 correspondant existe et résolve. Sur `rfe.fluxym.com`, l'ordre inverse a mis le
 site hors ligne.

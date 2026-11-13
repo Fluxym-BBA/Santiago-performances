@@ -27,7 +27,7 @@
 import {
     signOut, isAdmin, myProfile, viewedProfile, isViewingOther, roleLabel,
     levelLabel, canReadAll, canManageAccounts, canWriteAny, canWriteViewed,
-    isContributor, amContributor, jobLabel, linkFor
+    isContributor, amContributor, jobLabel, linkFor, listProfiles, homePageFor
 } from './api.js';
 
 /* --------------------------------------------------------------------------
@@ -233,7 +233,14 @@ export function renderNav() {
     const nom = s => (autre && s.labelOther ? s.labelOther : s.label);
 
     const sections = SECTIONS.filter(s => s.when(profilNav));
-    const menu = MENU.filter(m => m.when(m.miroir ? profilNav : me));
+    /* « Voir comme » : quand on consulte quelqu'un, le menu décrit AUSSI ce que
+       cette personne a le droit d'ouvrir. Sans cela, le propriétaire verrait
+       « Barème du score » et « Gérer les comptes » dans la peau d'un simple
+       administrateur, alors que l'administrateur ne les a pas : ce ne serait pas
+       voir ce qu'il voit. Seule « Mon compte » reste celle du lecteur, puisqu'elle
+       ouvre SON mot de passe. */
+    const menu = MENU.filter(m => m.when(
+        (m.miroir || (autre && m.href !== './compte.html')) ? profilNav : me));
 
     /* Quatre onglets ou plus : les libellés passeront en version courte entre
        1024 et 1180 px. Le seuil est dans css/nav.css, la décision est ici,
@@ -290,6 +297,13 @@ export function renderNav() {
                            href="${m.miroir ? lien(m.href) : m.href}" role="menuitem">
                             <span aria-hidden="true">${m.icon}</span>${m.miroir ? nom(m) : m.label}
                         </a>`).join('')}
+                </div>` : ''}
+
+                ${canWriteAny(me) ? `<div class="menu-group menu-viewas">
+                    <label class="menu-viewas-label" for="viewas-select">👁️ Voir comme…</label>
+                    <select id="viewas-select" class="menu-viewas-select">
+                        <option value="">${autre ? 'Revenir à mon compte' : 'Choisir un compte'}</option>
+                    </select>
                 </div>` : ''}
 
                 <div class="menu-group">
@@ -360,6 +374,7 @@ function wireMenu() {
     btn.addEventListener('click', toggle);
     if (more) more.addEventListener('click', toggle);
 
+    wireViewAs(btn);
     document.getElementById('menu-logout')?.addEventListener('click', () => signOut());
     document.getElementById('menu-help')?.addEventListener('click', () => {
         close();
@@ -375,6 +390,70 @@ function wireMenu() {
         }
     });
 }
+
+/* --------------------------------------------------------------------------
+   Voir comme
+
+   Réservé au propriétaire. La liste des comptes est lue au PREMIER dépliage du
+   menu et non au chargement de chaque page : neuf pages sur dix n'ouvrent jamais
+   ce menu, et lire la table des profils à chacune serait payer le réseau pour
+   rien.
+
+   La destination est la page d'accueil naturelle de la personne choisie
+   (homePageFor) : pour un administrateur pur, c'est la vue d'équipe, qui est
+   précisément ce qu'il voit en se connectant. Le contexte voyage dans l'URL
+   (?u=), comme pour toute consultation : rien n'est caché, la page est
+   rechargeable et il suffit de revenir sans paramètre pour être chez soi.
+   -------------------------------------------------------------------------- */
+
+function wireViewAs(btn) {
+    const sel = document.getElementById('viewas-select');
+    if (!sel || !btn) return;
+    let loaded = false;
+
+    const fill = async () => {
+        if (loaded) return;
+        loaded = true;
+        try {
+            const me = myProfile();
+            const vu = viewedProfile();
+            const list = (await listProfiles())
+                .filter(p => p.is_active && p.user_id !== me.user_id)
+                // Les plus hauts niveaux d'abord : le cas d'usage est de se
+                // mettre à la place d'un administrateur, pas d'un membre.
+                .sort((a, b) => (levelRankOf(b) - levelRankOf(a))
+                    || String(a.display_name || a.email).localeCompare(String(b.display_name || b.email), 'fr'));
+            list.forEach(p => {
+                const o = document.createElement('option');
+                o.value = p.user_id;
+                const job = jobLabel(p);
+                o.textContent = `${p.display_name || p.email} · ${levelLabel(p)}${job ? ' · ' + job : ''}`;
+                o.dataset.page = homePageFor(p);
+                if (vu && p.user_id === vu.user_id && vu.user_id !== me.user_id) o.selected = true;
+                sel.appendChild(o);
+            });
+        } catch (e) {
+            loaded = false;
+            console.warn('Liste des comptes indisponible pour « Voir comme » :', e);
+        }
+    };
+
+    btn.addEventListener('click', fill);
+    document.getElementById('tabbar-more')?.addEventListener('click', fill);
+
+    sel.addEventListener('change', () => {
+        const id = sel.value;
+        if (!id) {
+            // Retour à son propre compte : même page d'accueil que la mienne.
+            location.href = homePageFor(myProfile());
+            return;
+        }
+        const page = sel.selectedOptions[0]?.dataset.page || './team.html';
+        location.href = linkFor(page, id);
+    });
+}
+
+const levelRankOf = p => ({ owner: 4, admin: 3, manager: 2, member: 1 }[p.access_level] || 1);
 
 /* --------------------------------------------------------------------------
    Barre de contexte
@@ -399,17 +478,27 @@ export function renderContextBar() {
        écrit chez les autres. */
     const ecrit = canWriteViewed();
 
+    /* Un compte qui ne prospecte pas (un administrateur pur, un responsable) n'a
+       pas de journée à corriger : « voir son écran » veut dire voir l'outil tel
+       qu'il le voit, onglets, droits et indicateurs. Le message le dit, et le
+       bouton quitte ce mode au lieu de renvoyer à une équipe qu'on regarde déjà. */
+    const commeObservateur = !isContributor(v);
+
     const el = document.createElement('div');
     el.id = 'context-bar';
-    el.className = `ctxbar${ecrit ? ' ctxbar--write' : ''}`;
+    el.className = `ctxbar${ecrit && !commeObservateur ? ' ctxbar--write' : ''}`;
     el.innerHTML = `
-        <span class="ctxbar-icon" aria-hidden="true">${ecrit ? '✏️' : '👁️'}</span>
+        <span class="ctxbar-icon" aria-hidden="true">${commeObservateur ? '👁️' : ecrit ? '✏️' : '👁️'}</span>
         <span class="ctxbar-text">
-            ${ecrit
+            ${commeObservateur
+                ? `Vous voyez l'application <b>comme ${name}</b> (${esc(roleLabel(v))}) : ses onglets, ses droits, ses indicateurs. Lecture seule.`
+                : ecrit
                 ? `Vous êtes dans le compte de <b>${name}</b> et vous voyez son écran. Tout ce que vous enregistrerez ici partira sur son compte, signalé comme une correction.`
                 : `Vous voyez l'écran de <b>${name}</b>, en lecture seule.`}
         </span>
-        <a class="ctxbar-btn" href="./team.html">Retour à l'équipe</a>`;
+        ${commeObservateur
+            ? `<a class="ctxbar-btn" href="${homePageFor(myProfile())}">Quitter ce mode</a>`
+            : `<a class="ctxbar-btn" href="./team.html">Retour à l'équipe</a>`}`;
 
     const nav = document.getElementById('main-nav');
     if (nav) nav.insertAdjacentElement('afterend', el);

@@ -1,0 +1,16 @@
+{
+  // Cockpit BDR servi par un Worker Cloudflare en « assets statiques ».
+  // Aucun code de Worker : le site reste du HTML/CSS/JS servi tel quel, comme
+  // sur GitHub Pages. URL : https://cockpit-bdr.fluxym.workers.dev
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cockpit-bdr",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "assets": {
+    // La racine du dépôt EST le site (comme avec GitHub Pages). Ce qui ne doit
+    // pas être publié est exclu par .assetsignore.
+    "directory": "./",
+    "not_found_handling": "none",
+    "html_handling": "auto-trailing-slash"
+  }
+}
