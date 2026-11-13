@@ -1,0 +1,29 @@
+# Déploie le Worker cockpit-bdr à chaque merge dans main.
+# Secret requis (Settings > Secrets and variables > Actions) : CLOUDFLARE_API_TOKEN,
+# jeton limité à « Workers Scripts : Edit » sur le compte Fluxym.
+name: Déploiement Worker
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Déployer
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 49ed3defbcc2fba7e80dd4221257a750
