@@ -150,3 +150,10 @@ vérifiée : ne pas promettre de retour arrière après une migration.
 
 Non vérifié à l'écran : le rendu navigateur (cartes d'équipe, menu « Voir comme »). Calculs testés
 hors navigateur : taux, poids par profil, attendu individuel et d'équipe.
+
+## 10. Lot du 13/11/2026 (suite) — taux de réponse et d'appels argumentés partout
+
+| Élément | État | Détail |
+| --- | --- | --- |
+| Page Performances | 📦 PR ouverte | Graphique « Taux de conversion » : courbe, repère de référence, info-bulle et écart vs référence pour les argumentés ; tableau des jours et export CSV avec colonne « Argum. % » |
+| Vue d'équipe | 📦 PR ouverte | Classement : colonne « Argum. % » ; deux nouveaux graphiques « Taux de réponse » et « Taux d'appels argumentés » (une courbe par personne, volumes dans l'info-bulle) ; export CSV |
