@@ -885,7 +885,7 @@ import { METRICS, METRIC_BY_KEY, SCORE_WEIGHTS, scoreOf, fetchRange, addDaysISO 
     if(!corps || corps.dataset.uxRange) return;
     corps.dataset.uxRange = '1';
 
-    const taux = ['#kpi-connect', '#kpi-engage', '#kpi-meeting', '#kpi-effort', '#kpi-prev']
+    const taux = ['#kpi-connect', '#kpi-argued', '#kpi-engage', '#kpi-meeting', '#kpi-effort', '#kpi-prev']
       .map(sel => { const el = $(sel, corps); return el ? el.closest('.metric') : null; })
       .filter(Boolean);
     if(taux.length){

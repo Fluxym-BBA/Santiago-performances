@@ -134,3 +134,19 @@ vérifiée : ne pas promettre de retour arrière après une migration.
 | Échelle par compteur (v20) | 📦 Déposé, publication en échec | Quatre lettres J S M A dans la légende de chaque jauge ; le bandeau du haut reste le défaut et efface les exceptions au changement | 27/08 |
 | `profiles.metric_scales` | ✅ En base | jsonb, défaut `{}` ; `grant update` posé colonne par colonne, comme `display_name` et `gauge_scale`, faute de quoi chaque clic partait en « permission denied » silencieux | 27/08 |
 | Publication Pages du 27/08 | ⚠️ Incident GitHub | Run 65 expiré après dix minutes sur `updating_pages`, puis bloqué en file sans possibilité d'annulation. Contenu du dépôt vérifié correct : rien à recorriger, seulement à republier | 27/08 |
+
+
+## 9. Lot du 13/11/2026 — à déployer (branche `feat/worker-cloudflare-kpi-roles`)
+
+| Élément | État | Détail |
+| --- | --- | --- |
+| Hébergement Worker Cloudflare | 📦 Prêt, non déployé | `wrangler.jsonc` + `.assetsignore` ; nom `cockpit-bdr` → `cockpit-bdr.fluxym.workers.dev`. GitHub Pages reste en ligne tant que le Worker n'est pas validé |
+| KPI e-mails | ✅ Retiré des indicateurs de tête | Page Performances et vue d'équipe. La saisie, le score, les graphiques et l'export gardent les e-mails (inchangé) |
+| Taux de réponse | ✅ Renommage de « taux d'appels aboutis » | Même formule : sans échange + échange nouveau + échange connu, sur appels passés |
+| Taux d'appels argumentés | ✅ Nouveau | Échange nouveau + échange connu, sur les appels des journées où l'échange est compté |
+| Score par profil | ✅ | L'explication du score ne liste que les compteurs du métier de la personne regardée (`weightsFor`, `js/api.js`) ; les totaux hérités à zéro ne sont plus listés |
+| Vue d'équipe = KPI de la page BDR | ✅ | Mêmes cartes, consolidées, écart vs période précédente, objectif J/S/M/A par carte et global (`js/rythme.js`, partagé avec la page Performances) |
+| « Voir comme » | ✅ | Propriétaire uniquement : menu du compte et bouton dans l'écran Comptes. Ouvre l'application telle qu'un compte la voit, y compris un administrateur sans métier (barre, menu, droits). Aucune migration : les niveaux propriétaire / administrateur / responsable / membre existaient |
+
+Non vérifié à l'écran : le rendu navigateur (cartes d'équipe, menu « Voir comme »). Calculs testés
+hors navigateur : taux, poids par profil, attendu individuel et d'équipe.

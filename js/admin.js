@@ -24,7 +24,7 @@ import {
     adminWipeActivity, fetchTeamRange, humanError, todayISO, addDaysISO, formatLong,
     adminFnStatus, adminAuthInfo, adminCreateAccount, adminSetPassword,
     adminDeleteAccount, adminDeletePreview, linkFor,
-    LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank, isContributor
+    LEVELS, rankOfLevel, levelLabel, canManageAccounts, myRank, isContributor, homePageFor
 } from './api.js';
 import { renderNav } from './nav.js';
 import { escapeHtml, fmtInt, toast, hideVeil } from './ui.js';
@@ -238,6 +238,8 @@ function render() {
                 <div class="act-row">
                     ${isContributor(p) ? `<a class="chip chip--sm" href="${linkFor('./dashboard.html', p.user_id)}"
                             title="Voir la fiche de ${who}, telle qu'elle la voit">Fiche</a>` : ''}
+                    ${myRank() >= 4 && !isMe ? `<a class="chip chip--sm" href="${linkFor(homePageFor(p), p.user_id)}"
+                            title="Voir l'application comme ${who} la voit : ses onglets, ses droits, ses indicateurs">Voir comme</a>` : ''}
                     ${fn.ok ? `<button class="chip chip--sm" type="button"
                             data-pass="${p.user_id}"${lockAttr}>Mot de passe</button>` : ''}
                     ${s2.days ? `<button class="chip chip--sm chip--warn" type="button"

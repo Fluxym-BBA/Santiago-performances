@@ -11,8 +11,8 @@ import {
     formatLong, isWeekend, startOfWeek, endOfWeek, startOfMonth,
     endOfMonth, addMonthsISO, startOfQuarter, endOfQuarter, periodLength,
     previousPeriod, samePeriodLastYear, periodLabel, periodLabelShort, minISO,
-    maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS,
-    isViewingOther, viewedProfile, canWriteViewed, linkFor, scoreWeightsMeta, metricsFor,
+    maxISO, fetchRange, fetchBestDay, humanError, SCORE_WEIGHTS, weightsFor,
+    isViewingOther, viewedProfile, canWriteViewed, linkFor, scoreWeightsMeta, metricsFor, jobsOf,
     loadSettings, loadTargets, loadVisibility, targetFor, targetVisible,
     joursOuvres, fiscalBounds, fetchProfilesRange, profileText, PROFILE_BY_KIND
 } from './api.js';
@@ -26,6 +26,10 @@ import {
     funnel, legendHtml, onResize
 } from './ui.js';
 import { renderNav } from './nav.js';
+import {
+    REF_SCALES, motDe, mailleDe, ouvres, videCacheOuvres,
+    cibleDe as cibleDeP, attenduUn as attenduUnP, attendu as attenduP
+} from './rythme.js';
 
 /* --------------------------------------------------------------------------
    État
@@ -137,13 +141,6 @@ function effMode() {
    pointillés : c'est la couleur, et elle seule, qui distingue les deux traits. */
 const REF_MAIN = '#0B2046';
 
-const REF_SCALES = [
-    { v: 'day',   l: 'J', mot: 'journalier' },
-    { v: 'week',  l: 'S', mot: 'hebdomadaire' },
-    { v: 'month', l: 'M', mot: 'mensuel' },
-    { v: 'year',  l: 'A', mot: "de l'exercice" }
-];
-
 /* 'off' masque tous les traits. Le défaut est l'exercice. Rien n'est mémorisé :
    la page ne persiste ni ses dates, ni sa granularité, ni son mode, et ajouter
    une colonne en base pour ce seul réglage aurait été incohérent. */
@@ -151,7 +148,6 @@ let refDefaut = 'year';
 const refExceptions = new Map();   // compteur → maille forcée
 
 const refDe = key => refExceptions.get(key) || refDefaut;
-const motDe = v => (REF_SCALES.find(s => s.v === v) || {}).mot || '';
 
 /**
  * Pose la maille d'un compteur. Comme en v20 : revenir sur le défaut de la page
@@ -163,80 +159,12 @@ function poserRef(key, val) {
     else refExceptions.set(key, val);
 }
 
-/** Bornes de la maille qui contient ce jour. L'année est l'exercice, pas l'an civil. */
-function mailleDe(scale, iso) {
-    if (scale === 'week')  return { from: startOfWeek(iso), to: endOfWeek(iso) };
-    if (scale === 'month') return { from: startOfMonth(iso), to: endOfMonth(iso) };
-    if (scale === 'year')  return fiscalBounds(iso);
-    return { from: iso, to: iso };
-}
-
-/* joursOuvres() reboucle sur chaque jour. Sur un exercice, l'appeler pour
-   chaque compteur de chaque carte ferait plusieurs milliers de tours pour
-   toujours retomber sur les mêmes bornes. Le cache est vidé à chaque
-   rafraîchissement, les fériés d'une année ne changeant pas en cours de page. */
-let _ouvres = new Map();
-function ouvres(de, a) {
-    const k = de + '|' + a;
-    if (!_ouvres.has(k)) _ouvres.set(k, joursOuvres(de, a));
-    return _ouvres.get(k);
-}
-const videCacheOuvres = () => { _ouvres = new Map(); };
-
-/**
- * Attendu d'UN compteur sur une période, ou null s'il n'y a pas d'objectif.
- *
- * null n'est pas zéro. Un compteur sans objectif ne doit afficher aucun trait,
- * surtout pas un trait à zéro qui ferait croire à un objectif atteint. C'est la
- * distinction tenue depuis la v12.
- */
-function cibleDe(key, scale) {
-    const prof = viewedProfile();
-    if (!prof || scale === 'off') return null;
-    if (!targetVisible(prof, key)) return null;
-    const v = targetFor(prof, key, scale).value;
-    return v == null ? null : v;
-}
-
-function attenduUn(key, de, a, scale) {
-    const cible = cibleDe(key, scale);
-    if (cible == null) return null;
-
-    // La maille du jour se passe de découpage : chaque jour ouvré pèse la cible.
-    if (scale === 'day') return cible * ouvres(de, a);
-
-    let total = 0, cur = de, garde = 0;
-    while (cur <= a && garde++ < 3000) {
-        const m = mailleDe(scale, cur);
-        const jm = ouvres(m.from, m.to);
-        if (jm > 0) {
-            const from = m.from > de ? m.from : de;
-            const to   = m.to   < a  ? m.to   : a;
-            total += (cible * ouvres(from, to)) / jm;
-        }
-        cur = addDaysISO(m.to, 1);
-    }
-    return total;
-}
-
-/**
- * Attendu d'une carte, qui peut porter plusieurs compteurs (les fiches CRM sont
- * la somme des entreprises et des contacts).
- *
- * Si UN SEUL des compteurs n'a pas d'objectif, on renvoie null. Une somme
- * partielle serait pire que pas de chiffre du tout : elle afficherait un objectif
- * anormalement bas et donnerait l'illusion d'une avance.
- */
-function attendu(keys, de, a, scale) {
-    const liste = Array.isArray(keys) ? keys : [keys];
-    let total = 0;
-    for (const k of liste) {
-        const v = attenduUn(k, de, a, scale);
-        if (v == null) return null;
-        total += v;
-    }
-    return total;
-}
+/* La mécanique de l'attendu (mailleDe, ouvres, cibleDe, attenduUn, attendu)
+   vit dans rythme.js, partagée avec la vue d'équipe. Ici, seuls restent les
+   raccourcis qui fixent la personne : celle dont on regarde la page. */
+const cibleDe = (key, scale) => cibleDeP(viewedProfile(), key, scale);
+const attenduUn = (key, de, a, scale) => attenduUnP(viewedProfile(), key, de, a, scale);
+const attendu = (keys, de, a, scale) => attenduP(viewedProfile(), keys, de, a, scale);
 
 /* Les cartes ne portent pas toutes une clé de compteur : le score n'a pas
    d'objectif, et les fiches CRM sont la somme de deux compteurs. */
@@ -244,7 +172,6 @@ const KPI_GOAL = {
     meetings_booked: 'meetings_booked',
     calls_made: 'calls_made',
     calls_connected: 'calls_connected',
-    emails_sent: 'emails_sent',
     crm: ['companies_created', 'contacts_created']
 };
 
@@ -604,7 +531,8 @@ const secB = (rows, ctx, head = null) => ({
  * le passage à 25 : un texte d'explication faux est pire que pas de texte.
  */
 function weightPhrase() {
-    const pick = k => SCORE_WEIGHTS.find(x => x.key === k);
+    const mine = new Set(weightsFor(viewedProfile(), { zeros: true }).map(x => x.key));
+    const pick = k => (mine.has(k) ? SCORE_WEIGHTS.find(x => x.key === k) : null);
     const [rdv, eng, call] = ['meetings_booked', 'calls_engaged', 'calls_made'].map(pick);
     const bits = [];
     if (rdv) bits.push(`un rendez-vous vaut ${rdv.w} points`);
@@ -616,7 +544,7 @@ function weightPhrase() {
 function rateRows(a) {
     const pc = v => (v == null ? '–' : `${fmtDec(v)} %`);
     const base = [
-        { label: 'Taux d\'aboutis', sub: 'aboutis / appels', value: pc(a.connect_rate), muted: true },
+        { label: 'Taux de réponse', sub: 'réponses / appels', value: pc(a.connect_rate), muted: true },
         { label: 'Taux de RDV', sub: 'RDV / aboutis', value: pc(a.meeting_rate), muted: true }
     ];
     /* Les deux taux d'échange n'apparaissent que si la période est mesurée de
@@ -856,7 +784,7 @@ const CHARTS = [
                 tip: i => {
                     const bk = buckets[i];
                     const a = agg(bk.rows);
-                    const parts = SCORE_WEIGHTS
+                    const parts = weightsFor(viewedProfile())
                         .map(w => ({ w, n: a[w.key], pts: a[w.key] * w.w }))
                         .filter(x => x.n > 0)
                         .sort((x, y) => y.pts - x.pts);
@@ -966,7 +894,7 @@ const CHARTS = [
             const refs = [];
             if (aB.connect_rate != null) refs.push({
                 value: aB.connect_rate, color: B_SHADES[0], short: `${Math.round(aB.connect_rate)}%`,
-                label: `Taux d'appels aboutis de la référence : ${fmtDec(aB.connect_rate)} %` });
+                label: `Taux de réponse de la référence : ${fmtDec(aB.connect_rate)} %` });
             if (aB.meeting_rate != null) refs.push({
                 value: aB.meeting_rate, color: B_SHADES[2], short: `${Math.round(aB.meeting_rate)}%`,
                 label: `Taux de RDV de la référence : ${fmtDec(aB.meeting_rate)} %` });
@@ -986,7 +914,7 @@ const CHARTS = [
             lineChart(host, {
                 labels: buckets.map(b => b.label),
                 series: [
-                    { name: 'Aboutis %', color: A_SHADES[0], values: aggs.map(a => a.connect_rate), fmt: v => `${fmtDec(v)} %` },
+                    { name: 'Réponse %', color: A_SHADES[0], values: aggs.map(a => a.connect_rate), fmt: v => `${fmtDec(v)} %` },
                     { name: 'RDV %', color: A_SHADES[2], values: aggs.map(a => a.meeting_rate), fmt: v => `${fmtDec(v)} %` },
                     ...(anyEngaged ? [{ name: 'RDV / échange %', color: A_RAMP[1],
                         values: engagedSeries, fmt: v => `${fmtDec(v)} %` }] : [])
@@ -1005,7 +933,7 @@ const CHARTS = [
                         meta: 'Taux recalculés à partir des volumes',
                         sections: [
                             secA([
-                                { color: A_SHADES[0], label: 'Appels aboutis', sub: 'sur appels passés',
+                                { color: A_SHADES[0], label: 'Taux de réponse', sub: 'sur appels passés',
                                   value: pc(a.connect_rate), em: true },
                                 { color: A_SHADES[2], label: 'Rendez-vous', sub: 'sur appels aboutis',
                                   value: pc(a.meeting_rate), em: true },
@@ -1028,14 +956,14 @@ const CHARTS = [
                                 ]
                             },
                             secB([
-                                { color: B_SHADES[0], shape: 'dash', label: 'Appels aboutis', value: pc(aB.connect_rate) },
+                                { color: B_SHADES[0], shape: 'dash', label: 'Taux de réponse', value: pc(aB.connect_rate) },
                                 { color: B_SHADES[2], shape: 'dash', label: 'Rendez-vous', value: pc(aB.meeting_rate) },
                                 ...(aB.fullyMeasured ? [{ color: B_RAMP[1], shape: 'dash',
                                     label: 'RDV après échange', value: pc(aB.meeting_rate_engaged) }] : [])
                             ], ctx)
                         ],
                         deltas: [
-                            { label: 'Aboutis vs réf.', html: ppl(a.connect_rate, aB.connect_rate) },
+                            { label: 'Réponse vs réf.', html: ppl(a.connect_rate, aB.connect_rate) },
                             { label: 'RDV vs réf.', html: ppl(a.meeting_rate, aB.meeting_rate) },
                             ...(a.fullyMeasured && aB.fullyMeasured
                                 ? [{ label: 'RDV / échange vs réf.',
@@ -1446,7 +1374,6 @@ function renderKpis(aA, aB) {
               : `dont ${fmtInt(aA.calls_engaged)} avec échange${
                   aA.engage_rate == null ? '' : ` (${fmtDec(aA.engage_rate)} %)`}${
                   aA.fullyMeasured ? '' : `, sur ${aA.measuredActiveDays} j comptée(s)`}` },
-        { label: '✉️ E-mails', key: 'emails_sent' },
         { label: '🗂️ Fiches CRM', key: 'crm' }
     ];
 
@@ -1473,7 +1400,16 @@ function renderKpis(aA, aB) {
         </div>`;
     };
 
-    html += rate('🎯 Taux d\'appels aboutis', 'connect_rate', `sur ${fmtInt(aA.calls_made)} appels`);
+    /* Taux de réponse : quelqu'un a décroché, quelle que soit la suite (sans
+       échange, échange nouveau contact, échange contact connu). Taux d'appels
+       argumentés : seules les deux issues avec échange comptent. Même
+       dénominateur, tous les appels passés. */
+    html += rate('📲 Taux de réponse', 'connect_rate',
+        `${fmtInt(aA.calls_connected)} réponses sur ${fmtInt(aA.calls_made)} appels`);
+    if (aA.argued_rate != null || aB.argued_rate != null) {
+        html += rate('🗣️ Taux d\'appels argumentés', 'argued_rate',
+            `${fmtInt(aA.calls_engaged)} échanges sur ${fmtInt(aA.measured_calls_made)} appels`);
+    }
     html += rate('🏁 Taux de RDV', 'meeting_rate', `sur ${fmtInt(aA.calls_connected)} aboutis`);
 
     /* Le taux que réclame le terrain : à partir du moment où le prospect parle,
@@ -1500,9 +1436,28 @@ function renderKpis(aA, aB) {
     $('#kpi-grid').innerHTML = html;
 }
 
+/** La règle de fond du barème, dite pour le métier de la personne regardée. */
+function scoreRule(p) {
+    const j = jobsOf(p);
+    if (j.includes('bdr') && j.includes('sales'))
+        return 'Les poids traduisent une règle simple : on est jugé sur les rendez-vous, obtenus ou tenus, '
+             + 'et sur les propositions, pas sur le volume d\'activité.';
+    if (j.includes('sales'))
+        return 'Les poids traduisent une règle simple : un commercial est jugé sur les rendez-vous qu\'il tient '
+             + 'et les propositions qu\'il envoie, pas sur son volume d\'activité.';
+    if (j.includes('bdr'))
+        return 'Les poids traduisent une règle simple : un BDR est payé pour des rendez-vous, '
+             + 'pas pour du volume d\'appels.';
+    return 'Les poids traduisent une règle simple : un rendez-vous pèse beaucoup plus lourd qu\'un appel.';
+}
+
 /** Encadré très visible : la formule du score, décomposée sur la période analysée. */
 function renderScorePanel(aA) {
-    const parts = SCORE_WEIGHTS.map(w => ({ ...w, n: aA[w.key] || 0, pts: (aA[w.key] || 0) * w.w }));
+    /* Seuls les poids du profil regardé : un BDR ne lit que ses critères, un
+       commercial que les siens. Le barème reste unique, c'est l'explication qui
+       est filtrée (voir weightsFor). */
+    const pw = weightsFor(viewedProfile(), { zeros: true });
+    const parts = pw.map(w => ({ ...w, n: aA[w.key] || 0, pts: (aA[w.key] || 0) * w.w }));
     const total = parts.reduce((t, p) => t + p.pts, 0);
     const top = parts.slice().sort((x, y) => y.pts - x.pts)[0];
     const gap = measureGap(aA);
@@ -1521,11 +1476,10 @@ function renderScorePanel(aA) {
     $('#score-panel').innerHTML = `
         <h2>⚡ Comment se calcule le score de productivité</h2>
         <p>Le score résume une journée en un seul nombre comparable. Chaque action est multipliée par un poids,
-           puis tout est additionné. Les poids traduisent une règle simple : un BDR est payé pour des
-           rendez-vous, pas pour du volume d'appels.</p>
+           puis tout est additionné. ${escapeHtml(scoreRule(viewedProfile()))}</p>
 
         <div class="weights">
-            ${SCORE_WEIGHTS.map(w => `
+            ${pw.map(w => `
                 <div class="weight">
                     <span style="font-size:17px">${w.icon}</span>
                     <span class="weight-label">${w.label}</span>
@@ -1752,7 +1706,7 @@ function renderTable(aRows) {
             <td data-th="E-mails">${fmtInt(num(r, 'emails_sent'))}</td>
             <td data-th="Entreprises">${fmtInt(num(r, 'companies_created'))}</td>
             <td data-th="Contacts">${fmtInt(num(r, 'contacts_created'))}</td>
-            <td data-th="Taux aboutis" class="${r.connect_rate == null ? 'td-muted' : ''}">${r.connect_rate == null ? '–' : fmtDec(r.connect_rate) + ' %'}</td>
+            <td data-th="Taux de réponse" class="${r.connect_rate == null ? 'td-muted' : ''}">${r.connect_rate == null ? '–' : fmtDec(r.connect_rate) + ' %'}</td>
             <td data-th="Taux RDV" class="${r.meeting_rate == null ? 'td-muted' : ''}">${r.meeting_rate == null ? '–' : fmtDec(r.meeting_rate) + ' %'}</td>
             <td data-th="Score" class="td-score"><b>${fmtInt(score(r))}</b></td>
             <td data-th="" class="td-action">${editLink(r.activity_date)}</td>
